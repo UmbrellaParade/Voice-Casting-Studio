@@ -2,7 +2,7 @@
 import LZString from "lz-string";
 import { postToGasEndpoint, getFromGasEndpoint, loadAppConfig } from "./gas.js";
 
-export const STORAGE_KEY = "voice-casting-studio:v1";
+export const STORAGE_KEY = "voice-casting-studio:v2";
 export const STORAGE_COMPRESSED_PREFIX = "lz16:";
 export const THUMBNAIL_IMAGE_DB_NAME = "voice-casting-studio-thumbnails";
 export const THUMBNAIL_IMAGE_STORE = "generated";
