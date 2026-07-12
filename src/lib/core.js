@@ -584,33 +584,48 @@ export const CODEX_THUMBNAIL_PRESETS = THUMBNAIL_PRESETS.filter((preset) => pres
 export const IMPORT_PREVIEW_FIELDS = [
   {
     key: "ownerName",
-    label: "名前/応募者",
+    label: "応募者名",
     canonical: {
       guest: "ゲスト名",
       listener: "応募者名",
       personality: "パーソナリティ名"
     }
   },
-  { key: "aiArtist", label: "AIアーティスト", canonical: "AIアーティスト名" },
-  { key: "trackTitle", label: "曲名", canonical: "曲名" },
-  { key: "trackUrl", label: "楽曲URL", canonical: "楽曲URL" },
-  { key: "audioFile", label: "音源", canonical: "音源ファイル" },
-  { key: "articlePoint", label: "曲への想い", canonical: "曲に込めた想い" },
+  {
+    key: "trackTitle",
+    label: "録音タイトル",
+    canonical: {
+      guest: "録音タイトル",
+      listener: "録音タイトル",
+      personality: "録音タイトル"
+    }
+  },
+  {
+    key: "audioFile",
+    label: "録音ファイル/URL",
+    canonical: {
+      guest: "録音ファイル",
+      listener: "録音ファイル",
+      personality: "録音ファイル"
+    }
+  },
+  { key: "trackUrl", label: "参考URL", canonical: "参考URL" },
+  { key: "articlePoint", label: "確認メモ", canonical: "審査・確認メモ" },
   {
     key: "iconUrl",
-    label: "アイコン",
+    label: "プロフィール画像",
     canonical: {
       guest: "ゲストアイコン画像",
       listener: "応募者アイコン画像",
       personality: "アイコン画像"
     }
   },
-  { key: "constraints", label: "NG事項", canonical: "表記注意" }
+  { key: "constraints", label: "NG/表記", canonical: "表記注意" }
 ];
 
 export const IMPORT_KIND_LABELS = {
   guest: "ゲストアンケート",
-  listener: "リスナー応募曲",
+  listener: "応募録音",
   personality: "パーソナリティ曲"
 };
 
@@ -1370,19 +1385,19 @@ export const pickOverride = (overrides, key, fallback) => (hasOwn(overrides, key
 
 export const TRACK_COLUMN_PATTERNS = {
   aiArtist: [/AI\s*(アーティスト|名義|名前|活動名)|AI artist/i],
-  url: [/(楽曲|曲|Suno|YouTube|Youtube|ユーチューブ).*(URL|リンク)|(URL|リンク).*(楽曲|曲|Suno|YouTube|Youtube|ユーチューブ)/i],
-  audioFile: [/音源|楽曲.*アップロード|曲.*アップロード|mp3|wav|Drive|ドライブ/i],
-  articlePoint: [/想い|思い|曲紹介|楽曲紹介|こだわり|おすすめ|ポイント|メッセージ|コメント|制作意図|記事で触れて/],
-  title: [/曲名|楽曲名|楽曲.*タイトル|曲.*タイトル|紹介曲|タイトル/]
+  url: [/(参考|サンプル|公開|YouTube|Youtube|ユーチューブ|Suno|楽曲|曲).*(URL|リンク)|(URL|リンク).*(参考|サンプル|公開|YouTube|Youtube|ユーチューブ|Suno|楽曲|曲)/i],
+  audioFile: [/(録音|音声|ボイス|サンプル|音源|楽曲|曲).*(アップロード|ファイル|データ|URL|リンク|Drive|ドライブ|mp3|wav)|(アップロード|ファイル|データ|URL|リンク|Drive|ドライブ|mp3|wav).*(録音|音声|ボイス|サンプル|音源|楽曲|曲)|mp3|wav|Drive|ドライブ/i],
+  articlePoint: [/希望役|役名|応募理由|自己PR|自己ＰＲ|台本|セリフ|台詞|確認|メモ|補足|想い|思い|曲紹介|楽曲紹介|こだわり|おすすめ|ポイント|メッセージ|コメント|制作意図|記事で触れて/],
+  title: [/録音.*(タイトル|題名|名前)|音声.*(タイトル|題名|名前)|ボイス.*(タイトル|題名|名前)|サンプル名|曲名|楽曲名|楽曲.*タイトル|曲.*タイトル|紹介曲|タイトル/]
 };
 
 export const getTrackColumnField = (label = "") => {
   if (/アイコン|画像|プロフィール|サムネ/i.test(label)) return "";
   if (TRACK_COLUMN_PATTERNS.aiArtist.some((pattern) => pattern.test(label))) return "aiArtist";
-  if (TRACK_COLUMN_PATTERNS.url.some((pattern) => pattern.test(label))) return "url";
-  if (TRACK_COLUMN_PATTERNS.audioFile.some((pattern) => pattern.test(label))) return "audioFile";
-  if (TRACK_COLUMN_PATTERNS.articlePoint.some((pattern) => pattern.test(label))) return "articlePoint";
   if (TRACK_COLUMN_PATTERNS.title.some((pattern) => pattern.test(label))) return "title";
+  if (TRACK_COLUMN_PATTERNS.audioFile.some((pattern) => pattern.test(label))) return "audioFile";
+  if (TRACK_COLUMN_PATTERNS.url.some((pattern) => pattern.test(label))) return "url";
+  if (TRACK_COLUMN_PATTERNS.articlePoint.some((pattern) => pattern.test(label))) return "articlePoint";
   return "";
 };
 
@@ -1489,19 +1504,28 @@ export const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", p
   const title = pickOverride(
     overrides,
     "title",
-    pickImportValue(row, ["曲名", "楽曲名", "楽曲のタイトル", "楽曲のタイトル オススメの一曲", "紹介曲", "タイトル"], TRACK_COLUMN_PATTERNS.title)
+    pickImportValue(
+      row,
+      ["録音タイトル", "録音データのタイトル", "録音物タイトル", "音声タイトル", "ボイスサンプル名", "サンプル名", "曲名", "楽曲名", "楽曲のタイトル", "楽曲のタイトル オススメの一曲", "紹介曲", "タイトル"],
+      TRACK_COLUMN_PATTERNS.title
+    )
   );
   const url = pickOverride(
     overrides,
     "url",
-    pickImportValue(row, ["楽曲URL", "楽曲のURL", "曲URL", "曲のURL", "URL", "Suno URL", "YouTube URL"], TRACK_COLUMN_PATTERNS.url)
+    pickImportValue(
+      row,
+      ["参考URL", "参考リンク", "公開URL", "サンプルURL", "録音参考URL", "楽曲URL", "楽曲のURL", "曲URL", "曲のURL", "URL", "Suno URL", "YouTube URL"],
+      TRACK_COLUMN_PATTERNS.url,
+      [/(録音|音声|ボイス).*(ファイル|アップロード|データ)|音源|mp3|wav|Drive|ドライブ/i]
+    )
   );
   const audioFile = pickOverride(
     overrides,
     "audioFile",
     pickImportValue(
       row,
-      ["音源ファイル", "音源ファイルURL", "楽曲のアップロード", "楽曲のアップロード オススメの一曲", "WAV", "mp3", "音源URL", "Drive URL"],
+      ["録音アップロード", "録音データ", "録音ファイル", "録音ファイルURL", "音声ファイル", "音声データ", "ボイスサンプル", "ボイスサンプルURL", "音源ファイル", "音源ファイルURL", "楽曲のアップロード", "楽曲のアップロード オススメの一曲", "WAV", "mp3", "音源URL", "Drive URL"],
       TRACK_COLUMN_PATTERNS.audioFile,
       [/アイコン|画像|プロフィール|サムネ/i]
     )
@@ -1533,7 +1557,7 @@ export const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", p
   const articlePoint = pickOverride(
     overrides,
     "articlePoint",
-    pickImportValue(row, ["曲に込めた想い", "曲紹介", "こだわりポイント", "おすすめポイント", "記事で触れてほしいポイント", "紹介文", "メッセージ"], TRACK_COLUMN_PATTERNS.articlePoint)
+    pickImportValue(row, ["希望役", "役名", "応募理由", "自己PR", "録音メモ", "確認メモ", "曲に込めた想い", "曲紹介", "こだわりポイント", "おすすめポイント", "記事で触れてほしいポイント", "紹介文", "メッセージ"], TRACK_COLUMN_PATTERNS.articlePoint)
   );
   const honorific = pickOverride(
     overrides,
@@ -1551,7 +1575,7 @@ export const buildTrackFromRow = (row, episodeId, source, fallbackArtist = "", p
     source,
     artist,
     aiArtist,
-    title: title || `${artist || aiArtist || source} 紹介曲`,
+    title: title || `${artist || aiArtist || source} 録音データ`,
     urlType: detectUrlType(url),
     url,
     audioFile,
@@ -1594,6 +1618,71 @@ export const buildTracksFromRow = (row, episodeId, source, fallbackArtist = "", 
     .filter(Boolean);
 };
 
+const getFileNameFromUrl = (url = "") => {
+  const text = String(url || "").trim();
+  if (!text) return "";
+  if (getGoogleDriveFileId(text)) return "";
+  try {
+    const parsed = new URL(text);
+    const name = decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() || "");
+    if (/^(view|edit|preview|download)$/i.test(name)) return "";
+    return sanitizeDownloadName(name);
+  } catch {
+    const name = text.split(/[/?#]/).filter(Boolean).pop() || "";
+    if (/^(view|edit|preview|download)$/i.test(name)) return "";
+    return sanitizeDownloadName(name);
+  }
+};
+
+export const buildRecordingFromTrack = (track = {}, respondent = "") => {
+  const audio = track.audio || {};
+  const sourceUrl = audio.sourceUrl || audio.driveUrl || track.audioFile || "";
+  const trackUrl = track.url || "";
+  const dataUrl = audio.dataUrl || "";
+  if (!sourceUrl && !dataUrl && !trackUrl) return null;
+  const fileName =
+    audio.fileName ||
+    getFileNameFromUrl(sourceUrl) ||
+    (dataUrl ? `${sanitizeDownloadName(track.title || respondent || "recording")}.mp3` : "");
+  return {
+    id: newId("rec"),
+    questionId: "csv_recording",
+    questionLabel: "フォーム回答取り込み",
+    title: track.title || "録音データ",
+    applicantName: track.artist || respondent || "",
+    trackUrl,
+    fileName,
+    mimeType: audio.mimeType || "",
+    size: audio.size || 0,
+    dataUrl,
+    driveUrl: audio.driveUrl || "",
+    driveFileId: audio.driveFileId || getGoogleDriveFileId(sourceUrl),
+    sourceUrl,
+    audioFile: sourceUrl
+  };
+};
+
+export const buildResponseFromImportedRecordingRow = (row, episodeId, formId, fallbackRespondent = "", tracks = [], periodId = "") => {
+  const respondent = pickPreviewOwnerName(row, "listener", fallbackRespondent);
+  const response = buildResponseFromRow(row, episodeId, formId, respondent || fallbackRespondent);
+  const recordings = tracks.map((track) => buildRecordingFromTrack(track, response.respondent || respondent)).filter(Boolean);
+  const submittedAt = pickImportValue(row, ["タイムスタンプ", "Timestamp", "送信日時", "回答日時", "受信日時"], [/タイムスタンプ|timestamp|送信日時|回答日時|受信日時/i]);
+  const recordingKey = recordings
+    .map((recording) => normalizeTrackUrlKey(recording.sourceUrl || recording.driveUrl || recording.trackUrl) || normalizeKey(recording.title))
+    .join("~");
+  const importKey = [episodeId, periodId, formId, submittedAt, normalizeKey(response.respondent || respondent), recordingKey].join("|");
+
+  return {
+    ...response,
+    submittedAt,
+    periodId,
+    formId,
+    respondent: response.respondent || respondent,
+    recordings,
+    importKey
+  };
+};
+
 export const getPreviewTrackSource = (kind = "") =>
   kind === "listener" ? "リスナー応募曲" : kind === "personality" ? "パーソナリティ曲" : "ゲスト曲";
 
@@ -1632,10 +1721,10 @@ export const buildImportPreviewRows = (rows = [], kind = "", mapping = {}) => {
       rowNo: previewTracks.length > 1 ? `${index + 1}-${trackIndex + 1}` : index + 1,
       ownerName: response?.respondent || track?.artist || pickPreviewOwnerName(row, kind),
       aiArtist: track?.aiArtist || pickImportValue(row, ["AIアーティスト名", "AIアーティスト"], TRACK_COLUMN_PATTERNS.aiArtist),
-      trackTitle: track?.title || pickImportValue(row, ["曲名", "楽曲名", "紹介曲"], TRACK_COLUMN_PATTERNS.title),
-      trackUrl: track?.url || pickImportValue(row, ["楽曲URL", "曲URL", "URL", "Suno URL", "YouTube URL"], TRACK_COLUMN_PATTERNS.url),
-      audioFile: track?.audioFile || pickImportValue(row, ["音源ファイル", "音源URL", "Drive URL"], TRACK_COLUMN_PATTERNS.audioFile),
-      articlePoint: track?.articlePoint || pickImportValue(row, ["曲に込めた想い", "楽曲への想い", "曲紹介", "記事で触れてほしいポイント"], TRACK_COLUMN_PATTERNS.articlePoint),
+      trackTitle: track?.title || pickImportValue(row, ["録音タイトル", "録音データのタイトル", "ボイスサンプル名", "曲名", "楽曲名", "紹介曲"], TRACK_COLUMN_PATTERNS.title),
+      trackUrl: track?.url || pickImportValue(row, ["参考URL", "参考リンク", "公開URL", "サンプルURL", "楽曲URL", "曲URL", "URL", "Suno URL", "YouTube URL"], TRACK_COLUMN_PATTERNS.url),
+      audioFile: track?.audioFile || pickImportValue(row, ["録音ファイル", "録音ファイルURL", "録音アップロード", "音声ファイル", "ボイスサンプル", "音源ファイル", "音源URL", "Drive URL"], TRACK_COLUMN_PATTERNS.audioFile),
+      articlePoint: track?.articlePoint || pickImportValue(row, ["希望役", "役名", "応募理由", "自己PR", "録音メモ", "確認メモ", "曲に込めた想い", "楽曲への想い", "曲紹介", "記事で触れてほしいポイント"], TRACK_COLUMN_PATTERNS.articlePoint),
       iconUrl: track?.ownerIconUrl || iconFromResponse,
       constraints: response?.constraints || pickImportValue(row, ["触れないでほしいこと", "NG質問", "表記注意", "注意事項"], [/触れない|NG|表記注意|注意事項|伏せたい|非公開|禁止|避けて|表記ルール/])
     }));
@@ -1655,6 +1744,17 @@ export const importRowsIntoData = (current, selectedEpisode, rows, kind, periodI
   let trackCreateCount = 0;
   let trackUpdateCount = 0;
   const importedGuestNames = [];
+  const upsertImportedResponse = (response) => {
+    const importKey = response.importKey || [response.episodeId, response.periodId, response.formId, normalizeKey(response.respondent)].join("|");
+    nextResponses = [
+      response,
+      ...nextResponses.filter((item) => {
+        const itemKey = item.importKey || [item.episodeId, item.periodId, item.formId, normalizeKey(item.respondent)].join("|");
+        return itemKey !== importKey;
+      })
+    ];
+    responseCount += 1;
+  };
   const reflectTrack = (track) => {
     track.slotNo = nextSlotNo(nextTracks, selectedEpisode.id);
     const result = upsertImportedTrack(nextTracks, track);
@@ -1689,6 +1789,18 @@ export const importRowsIntoData = (current, selectedEpisode, rows, kind, periodI
 
     if (kind === "listener") {
       const tracks = buildTracksFromRow(row, selectedEpisode.id, "リスナー応募曲", "", periodId);
+      const response = buildResponseFromImportedRecordingRow(row, selectedEpisode.id, "form_imported_recordings", "", tracks, periodId);
+      if (
+        response.respondent ||
+        response.publicInfo ||
+        response.articleUse ||
+        response.internalOnly ||
+        response.constraints ||
+        response.attachments?.length ||
+        response.recordings?.length
+      ) {
+        upsertImportedResponse(response);
+      }
       tracks.forEach((track) => {
         reflectTrack(track);
       });

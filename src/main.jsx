@@ -267,6 +267,7 @@ const MAIN_NAV_ITEMS = [
   ["dashboard", "概要", Radio],
   ["episodes", "募集企画", CalendarDays],
   ["forms", "応募フォーム", Send],
+  ["imports", "回答取り込み", Upload],
   ["responses", "応募一覧", ClipboardCopy],
   ["settings", "設定", Settings]
 ];
@@ -981,14 +982,14 @@ function App() {
       const currentEpisode = current.episodes.find((episode) => episode.id === targetEpisodeId) ?? selectedEpisode;
       if (!currentEpisode) return appendImportLogToData(current, `${label}: 対象の放送回が見つかりませんでした。`);
       const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, kind, periodId);
-      const trackBreakdown = result.tracks > 0 ? `（新規${result.trackCreates ?? 0}件 / 更新${result.trackUpdates ?? 0}件）` : "";
+      const recordingBreakdown = result.tracks > 0 ? `（新規${result.trackCreates ?? 0}件 / 更新${result.trackUpdates ?? 0}件）` : "";
       const emptyResultNote =
         result.responses === 0 && result.tracks === 0
           ? ` 列名が合っていない可能性があります。Googleフォームの質問名を確認してください。${summarizeImportColumns(rows)}`
           : "";
       return appendImportLogToData(
         next,
-        `${label}: ${rows.length}行を読み込み、回答${result.responses}件・楽曲${result.tracks}件${trackBreakdown}を反映しました。${emptyResultNote}`
+        `${label}: ${rows.length}行を読み込み、回答${result.responses}件・録音${result.tracks}件${recordingBreakdown}を反映しました。${emptyResultNote}`
       );
     });
   };
@@ -1100,14 +1101,14 @@ function App() {
     setData((current) => {
       const currentEpisode = current.episodes.find((episode) => episode.id === period.episodeId) ?? selectedEpisode;
       const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, "listener", period.id);
-      const trackBreakdown = result.tracks > 0 ? `（新規${result.trackCreates ?? 0}件 / 更新${result.trackUpdates ?? 0}件）` : "";
+      const recordingBreakdown = result.tracks > 0 ? `（新規${result.trackCreates ?? 0}件 / 更新${result.trackUpdates ?? 0}件）` : "";
       const nextWithPeriod = {
         ...next,
         applicationPeriods: next.applicationPeriods.map((item) =>
           item.id === period.id ? { ...item, status: rows.length ? "取り込み済み" : item.status } : item
         )
       };
-      return appendImportLogToData(nextWithPeriod, `${label}: ${rows.length}行を応募期間「${period.title || period.id}」として読み込み、楽曲${result.tracks}件${trackBreakdown}を反映しました。`);
+      return appendImportLogToData(nextWithPeriod, `${label}: ${rows.length}行を応募期間「${period.title || period.id}」として読み込み、回答${result.responses}件・録音${result.tracks}件${recordingBreakdown}を反映しました。`);
     });
   };
 
@@ -1134,14 +1135,14 @@ function App() {
       setData((current) => {
         const currentEpisode = current.episodes.find((episode) => episode.id === period.episodeId) ?? selectedEpisode;
         const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, "listener", period.id);
-        const trackBreakdown = result.tracks > 0 ? `（新規${result.trackCreates ?? 0}件 / 更新${result.trackUpdates ?? 0}件）` : "";
+        const recordingBreakdown = result.tracks > 0 ? `（新規${result.trackCreates ?? 0}件 / 更新${result.trackUpdates ?? 0}件）` : "";
         const nextWithPeriod = {
           ...next,
           applicationPeriods: next.applicationPeriods.map((item) =>
             item.id === period.id ? { ...item, status: "取り込み済み" } : item
           )
         };
-        return appendImportLogToData(nextWithPeriod, `応募期間「${period.title || period.id}」: ${rows.length}行を読み込み、楽曲${result.tracks}件${trackBreakdown}を反映しました。`);
+        return appendImportLogToData(nextWithPeriod, `応募期間「${period.title || period.id}」: ${rows.length}行を読み込み、回答${result.responses}件・録音${result.tracks}件${recordingBreakdown}を反映しました。`);
       });
     } catch (error) {
       appendImportLog(makeImportFailureMessage(`応募期間「${period.title || period.id}」`, error));
@@ -1910,12 +1911,14 @@ function Dashboard({ data, selectedEpisode, episodeTracks, setActive }) {
   const stats = [
     ["募集企画", data.episodes.length, CalendarDays],
     ["応募フォーム", data.forms.length, Send],
+    ["回答取り込み", data.imports?.lastLog?.length ? "履歴あり" : "未実行", Upload],
     ["応募一覧", data.responses.length, ClipboardCopy],
     ["Drive保存先", data.settings.responseDriveFolderUrl ? "設定済" : "未設定", FolderOpen]
   ];
   const statTargets = {
     募集企画: "episodes",
     応募フォーム: "forms",
+    回答取り込み: "imports",
     応募一覧: "responses",
     Drive保存先: "settings"
   };
@@ -1939,7 +1942,8 @@ function Dashboard({ data, selectedEpisode, episodeTracks, setActive }) {
           <button className="secondary" onClick={() => setActive("forms")}>1. フォーム作成</button>
           <button className="secondary" onClick={() => setActive("forms")}>2. 受付期間設定</button>
           <button className="secondary" onClick={() => setActive("settings")}>3. Drive保存先設定</button>
-          <button className="primary" onClick={() => setActive("responses")}>4. 応募確認</button>
+          <button className="secondary" onClick={() => setActive("imports")}>4. 回答取り込み</button>
+          <button className="primary" onClick={() => setActive("responses")}>5. 応募確認</button>
         </div>
       </article>
 
@@ -1991,41 +1995,27 @@ function ImportsPanel({
   return (
     <div className="view-stack">
       <SectionTitle
-        title="自動取り込み"
-        subtitle="URL入力 → 読み込み → プレビュー → 反映 の順で、アンケートや応募曲シートを取り込みます。"
+        title="回答取り込み"
+        subtitle="Googleフォーム回答先のスプレッドシートやCSVを、プレビュー確認してから応募一覧へ反映します。"
       />
 
       <article className="panel import-target-panel">
-        <p className="eyebrow slim">この放送回に取り込みます</p>
-        <h2>{selectedEpisode?.title || "放送回未選択"}</h2>
+        <p className="eyebrow slim">この募集企画に取り込みます</p>
+        <h2>{selectedEpisode?.title || "募集企画未選択"}</h2>
         <dl className="detail-list">
-          <div><dt>放送日</dt><dd>{selectedEpisode?.date || "-"}</dd></div>
-          <div><dt>ゲスト</dt><dd>{selectedEpisode?.guestName || "-"}</dd></div>
+          <div><dt>基準日</dt><dd>{selectedEpisode?.date || "-"}</dd></div>
+          <div><dt>作品/役メモ</dt><dd>{selectedEpisode?.guestName || "-"}</dd></div>
         </dl>
       </article>
 
       <div className="import-grid">
         <SourceImportCard
-          title="ゲストアンケート"
-          description="ゲスト情報、紹介曲、NG事項、アイコンURLなどを取り込みます。"
-          value={imports.guestCsvUrl}
-          onChange={(value) => updateImports({ guestCsvUrl: value })}
-          onImportUrl={() => importCsvUrl("guest", imports.guestCsvUrl, "ゲストアンケート")}
-          onImportFile={(event) => importCsvFile(event, "guest", "ゲストアンケート")}
-          preview={importPreviews[getImportPreviewKey("guest")]}
-          onMappingChange={(patch) => updateImportPreviewMapping("guest", patch)}
-          onApplyPreview={() => applyImportPreview("guest")}
-          onClearPreview={() => clearImportPreview("guest")}
-          loading={importingSource === "guest"}
-          kind="guest"
-        />
-        <SourceImportCard
-          title="リスナー応募曲"
-          description="応募者名、AIアーティスト名、曲名、楽曲URL、音源ファイル、表記注意を取り込みます。"
+          title="応募フォーム回答"
+          description="応募者名、録音タイトル、録音ファイル/Drive URL、参考URL、確認メモ、NG/表記ルールを取り込みます。"
           value={imports.listenerCsvUrl}
           onChange={(value) => updateImports({ listenerCsvUrl: value })}
-          onImportUrl={() => importCsvUrl("listener", imports.listenerCsvUrl, "リスナー応募曲")}
-          onImportFile={(event) => importCsvFile(event, "listener", "リスナー応募曲")}
+          onImportUrl={() => importCsvUrl("listener", imports.listenerCsvUrl, "応募フォーム回答")}
+          onImportFile={(event) => importCsvFile(event, "listener", "応募フォーム回答")}
           preview={importPreviews[getImportPreviewKey("listener")]}
           onMappingChange={(patch) => updateImportPreviewMapping("listener", patch)}
           onApplyPreview={() => applyImportPreview("listener")}
@@ -2033,32 +2023,7 @@ function ImportsPanel({
           loading={importingSource === "listener"}
           kind="listener"
         />
-        <SourceImportCard
-          title="パーソナリティ曲シート"
-          description="かなめ🦐/べるぼ☂の紹介曲、AIアーティスト名、曲への想いを取り込みます。"
-          value={imports.personalityCsvUrl}
-          onChange={(value) => updateImports({ personalityCsvUrl: value })}
-          onImportUrl={() => importCsvUrl("personality", imports.personalityCsvUrl, "パーソナリティ曲")}
-          onImportFile={(event) => importCsvFile(event, "personality", "パーソナリティ曲")}
-          preview={importPreviews[getImportPreviewKey("personality")]}
-          onMappingChange={(patch) => updateImportPreviewMapping("personality", patch)}
-          onApplyPreview={() => applyImportPreview("personality")}
-          onClearPreview={() => clearImportPreview("personality")}
-          loading={importingSource === "personality"}
-          kind="personality"
-        />
       </div>
-
-      <article className="panel focus-panel">
-        <div>
-          <h2>べるぼ☂の今回の曲</h2>
-          <p className="muted">ここだけ手入力。URLを入れると、今回の放送回のパーソナリティ曲として反映します。</p>
-        </div>
-        <div className="bellbo-url-row">
-          <Field label="べるぼ☂ 曲URL（Suno / YouTube）" value={imports.bellboTrackUrl} onChange={(value) => updateImports({ bellboTrackUrl: value })} />
-          <button className="primary" onClick={applyBellboTrackUrl}><Save size={16} />曲URLを反映</button>
-        </div>
-      </article>
 
       <article className="panel">
         <h2>取り込みログ</h2>
@@ -2074,7 +2039,7 @@ function ImportsPanel({
       <article className="panel">
         <h2>対応しやすい列名</h2>
         <p className="muted">
-          ゲスト名、活動紹介文、今回話したいこと、触れないでほしいこと、曲名、アーティスト名、AIアーティスト名、楽曲URL、音源ファイル、記事で触れてほしいポイント、表記注意。
+          応募者名、お名前、活動名義、録音タイトル、録音ファイル、録音アップロード、音声ファイル、ボイスサンプル、参考URL、希望役、応募理由、自己PR、確認メモ、NG事項、表記注意。
         </p>
       </article>
     </div>
@@ -2131,7 +2096,7 @@ function SourceImportCard({
           <div className="record-head">
             <div>
               <strong>プレビュー</strong>
-              <p className="muted">{preview.rows.length}行 / {allPreviewRows.length}件の楽曲候補を読み込み済み。内容を確認してから反映してください。</p>
+              <p className="muted">{preview.rows.length}行 / {allPreviewRows.length}件の録音候補を読み込み済み。内容を確認してから反映してください。</p>
             </div>
             <div className="button-row compact">
               <button className="primary" onClick={onApplyPreview}><Save size={16} />反映</button>
@@ -2271,12 +2236,16 @@ function downloadAttachment(attachment) {
     return;
   }
   // GAS同期で取り込んだ回答は音源本体をDriveに置くため、Drive側からダウンロードする。
-  if (attachment?.driveUrl) window.open(attachment.driveUrl, "_blank", "noopener");
+  const sourceUrl = attachment?.driveUrl || attachment?.sourceUrl || attachment?.audioFile || "";
+  const downloadUrl = makeDirectAudioDownloadUrl(sourceUrl) || sourceUrl;
+  if (downloadUrl) window.open(downloadUrl, "_blank", "noopener");
 }
 
 async function saveAttachmentWithPicker(attachment) {
   if (!attachment?.dataUrl) {
-    if (attachment?.driveUrl) window.open(attachment.driveUrl, "_blank", "noopener");
+    const sourceUrl = attachment?.driveUrl || attachment?.sourceUrl || attachment?.audioFile || "";
+    const downloadUrl = makeDirectAudioDownloadUrl(sourceUrl) || sourceUrl;
+    if (downloadUrl) window.open(downloadUrl, "_blank", "noopener");
     return;
   }
   try {
@@ -2294,6 +2263,7 @@ function RecordingList({ response }) {
       <div className="subhead">応募録音</div>
       {recordings.map((recording, index) => {
         const audioSrc = getRecordingPlaybackUrl(recording);
+        const sourceUrl = recording.driveUrl || recording.sourceUrl || recording.audioFile || "";
         return (
           <div className="recording-item" key={recording.id || `${recording.fileName}-${index}`}>
             <div className="recording-meta">
@@ -2312,6 +2282,11 @@ function RecordingList({ response }) {
               {recording.driveUrl && (
                 <a className="secondary file-button" href={recording.driveUrl} target="_blank" rel="noreferrer noopener">
                   <Link size={16} />Driveで開く
+                </a>
+              )}
+              {sourceUrl && !recording.driveUrl && (
+                <a className="secondary file-button" href={makeDirectAudioDownloadUrl(sourceUrl) || sourceUrl} target="_blank" rel="noreferrer noopener">
+                  <Link size={16} />音声URL
                 </a>
               )}
               {recording.trackUrl && (
@@ -3440,6 +3415,7 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
         </div>
         <div className="advanced-actions">
           <button className="secondary" onClick={() => setActive("forms")}><FileText size={16} />フォーム管理</button>
+          <button className="secondary" onClick={() => setActive("imports")}><Upload size={16} />回答取り込み</button>
           <button className="secondary" onClick={() => setActive("responses")}><ClipboardCopy size={16} />回答管理</button>
         </div>
       </article>
