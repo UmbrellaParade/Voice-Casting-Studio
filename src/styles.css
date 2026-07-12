@@ -1428,6 +1428,45 @@ textarea {
   border-top: 1px solid #eadfce;
 }
 
+.recording-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fffaf2;
+}
+
+.recording-item {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d6ccbd;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.recording-meta {
+  display: grid;
+  gap: 3px;
+}
+
+.recording-meta strong {
+  color: #244f56;
+  font-size: 15px;
+}
+
+.recording-meta span {
+  color: #3f3849;
+  font-weight: 900;
+}
+
+.recording-meta small {
+  color: #7a7182;
+  font-weight: 800;
+}
+
 .attachment-item {
   display: grid;
   grid-template-columns: 1fr auto auto;

@@ -619,6 +619,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
   };
 
   const buildResponsePayload = () => {
+    const respondent = inferRespondent();
     const fileAttachments = form.questions
       .filter((question) => question.kind === "file" && answers[question.id]?.dataUrl)
       .map((question) => ({
@@ -653,6 +654,18 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
         dataUrl: answers[question.id].audio.dataUrl
       }));
     const attachments = [...fileAttachments, ...imageAttachments, ...trackAttachments];
+    const recordings = trackAttachments.map((attachment) => ({
+      id: `${attachment.questionId}:${attachment.fileName}`,
+      questionId: attachment.questionId,
+      questionLabel: attachment.questionLabel.replace(/:\s*音源ファイル$/, ""),
+      title: attachment.trackTitle || attachment.questionLabel.replace(/:\s*音源ファイル$/, ""),
+      applicantName: attachment.trackArtist || respondent,
+      trackUrl: attachment.trackUrl || "",
+      fileName: attachment.fileName,
+      mimeType: attachment.mimeType,
+      size: attachment.size,
+      dataUrl: attachment.dataUrl
+    }));
 
     return {
       version: 1,
@@ -691,13 +704,14 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
         episodeId: episode?.id || period?.episodeId || "",
         periodId: period?.id || "",
         formId: form.id,
-        respondent: inferRespondent(),
+        respondent,
         status: "未確認",
         publicInfo: formatAnswers(["public"]),
         articleUse: formatAnswers(["article", "sns", "manga"]),
         internalOnly: formatAnswers(["internal"]),
         constraints: formatAnswers(["constraint"]),
-        attachments
+        attachments,
+        recordings
       },
       rawAnswers: form.questions.map((question) => ({
         id: question.id,
@@ -785,7 +799,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
           <label key={field.type}>
             <span>{field.label}</span>
             <input
-              required={Boolean(question.required)}
+              required={Boolean(field.required)}
               placeholder={field.placeholder || ""}
               value={answers[question.id]?.title ?? ""}
               onChange={(event) => updateTrackAnswer(question.id, { title: event.target.value })}
@@ -799,7 +813,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
           <label key={field.type}>
             <span>{field.label}</span>
             <input
-              required={Boolean(question.required)}
+              required={Boolean(field.required)}
               placeholder={field.placeholder || ""}
               value={answers[question.id]?.artist ?? ""}
               onChange={(event) => updateTrackAnswer(question.id, { artist: event.target.value })}
@@ -814,7 +828,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
             <span>{field.label}</span>
             <input
               type="url"
-              required={Boolean(question.required)}
+              required={Boolean(field.required)}
               pattern={TRACK_URL_PATTERN}
               title={TRACK_URL_ERROR_MESSAGE}
               placeholder={field.placeholder || ""}
@@ -838,7 +852,7 @@ export function PublicSubmissionForm({ logoSrc, payload, operatorSettings = {} }
               <span>{audioField.label}</span>
               <input
                 type="file"
-                required={Boolean(question.required)}
+                required={Boolean(audioField.required ?? question.required)}
                 accept={AUDIO_FILE_ACCEPT}
                 onChange={(event) => updateTrackFileAnswer(question.id, event)}
               />
@@ -1075,7 +1089,7 @@ export function TrackPreview({ track }) {
       {playableEmbedUrl && (
         <iframe
           className="track-preview-frame"
-          title="楽曲URLプレビュー"
+          title="参考URLプレビュー"
           src={playableEmbedUrl}
           allow="autoplay; clipboard-write; encrypted-media; picture-in-picture"
           loading="lazy"

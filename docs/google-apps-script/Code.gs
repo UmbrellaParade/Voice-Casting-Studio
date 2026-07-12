@@ -232,6 +232,9 @@ function handleSubmitResponse(payload) {
   if (Array.isArray(response.attachments)) {
     response.attachments = response.attachments.map(processAttachment);
   }
+  if (Array.isArray(response.recordings)) {
+    response.recordings = response.recordings.map(processAttachment);
+  }
   if (Array.isArray(payload.rawAnswers)) {
     payload.rawAnswers = payload.rawAnswers.map(function (answer) {
       if (!answer) return answer;

@@ -912,7 +912,8 @@ function App() {
         articleUse: "",
         internalOnly: "",
         constraints: "",
-        attachments: []
+        attachments: [],
+        recordings: []
       }
     ]);
     setActive("responses");
@@ -1495,8 +1496,10 @@ ${socialRows || "-"}
       articleUse: response.articleUse || "",
       internalOnly: response.internalOnly || "",
       constraints: response.constraints || "",
-      attachments
+      attachments,
+      recordings: []
     };
+    normalized.recordings = collectResponseRecordings(parsed, attachments, normalized.respondent);
     const guestIconAttachment = findGuestIconAttachment(attachments);
     const guestIcon = makeGuestIconFromAttachment(guestIconAttachment, `${normalized.respondent || "guest"}-icon`);
     const importedTracks = buildTracksFromRawAnswers(
@@ -2182,6 +2185,86 @@ function SourceImportCard({
   );
 }
 
+function getFileSizeLabel(size) {
+  const mb = Math.round((Number(size || 0) / 1024 / 1024) * 10) / 10;
+  return Number.isFinite(mb) && mb > 0 ? `${mb}MB` : "-";
+}
+
+function getRecordingPlaybackUrl(recording = {}) {
+  if (recording.dataUrl) return recording.dataUrl;
+  return makeDirectAudioDownloadUrl(recording.driveUrl || recording.sourceUrl || recording.audioFile || "");
+}
+
+function isRecordingAttachment(attachment = {}) {
+  return (
+    isAudioAttachment(attachment) ||
+    Boolean(attachment.trackTitle || attachment.trackArtist || attachment.trackUrl) ||
+    /録音|音源|voice|audio|sample/i.test(`${attachment.questionLabel || ""} ${attachment.fileName || ""}`)
+  );
+}
+
+function collectResponseRecordings(parsed = {}, attachments = [], respondent = "") {
+  const recordings = [];
+  const seen = new Set();
+  const addRecording = (recording = {}) => {
+    const fileName = recording.fileName || "";
+    const driveFileId = recording.driveFileId || "";
+    const key = [recording.questionId || "", driveFileId, fileName, recording.size || "", recording.trackUrl || "", recording.dataUrl ? recording.dataUrl.slice(0, 40) : ""].join("|");
+    if (seen.has(key)) return;
+    if (!fileName && !recording.dataUrl && !recording.driveUrl && !recording.sourceUrl && !recording.trackUrl) return;
+    seen.add(key);
+    recordings.push({
+      id: recording.id || key || newId("rec"),
+      questionId: recording.questionId || "",
+      questionLabel: recording.questionLabel || "",
+      title: recording.title || recording.trackTitle || recording.questionLabel || fileName || "録音データ",
+      applicantName: recording.applicantName || recording.trackArtist || respondent || "",
+      trackUrl: recording.trackUrl || recording.url || "",
+      fileName,
+      mimeType: recording.mimeType || "",
+      size: recording.size || 0,
+      dataUrl: recording.dataUrl || "",
+      driveUrl: recording.driveUrl || "",
+      driveFileId,
+      sourceUrl: recording.sourceUrl || ""
+    });
+  };
+
+  const responseRecordings = parsed.response?.recordings || parsed.recordings || [];
+  responseRecordings.forEach(addRecording);
+
+  (parsed.rawAnswers || [])
+    .filter((answer) => answer?.kind === "track" && answer.track)
+    .forEach((answer) => {
+      const track = answer.track || {};
+      const audio = track.audio || answer.attachment || {};
+      addRecording({
+        ...audio,
+        questionId: answer.id,
+        questionLabel: answer.label,
+        title: track.title || answer.label,
+        applicantName: track.artist || respondent,
+        trackUrl: track.url || ""
+      });
+    });
+
+  attachments.filter(isRecordingAttachment).forEach((attachment) => {
+    addRecording({
+      ...attachment,
+      title: attachment.trackTitle || attachment.questionLabel || attachment.fileName,
+      applicantName: attachment.trackArtist || respondent,
+      trackUrl: attachment.trackUrl || ""
+    });
+  });
+
+  return recordings;
+}
+
+function getResponseRecordings(response = {}) {
+  if (Array.isArray(response.recordings) && response.recordings.length) return response.recordings;
+  return collectResponseRecordings({ response }, response.attachments || [], response.respondent || "");
+}
+
 function downloadAttachment(attachment) {
   if (attachment?.dataUrl) {
     downloadDataUrlFile(attachment.dataUrl, attachment.fileName || "audio-file");
@@ -2201,6 +2284,47 @@ async function saveAttachmentWithPicker(attachment) {
   } catch {
     // User cancelled the picker. No UI state is needed here.
   }
+}
+
+function RecordingList({ response }) {
+  const recordings = getResponseRecordings(response);
+  if (!recordings.length) return null;
+  return (
+    <div className="recording-list">
+      <div className="subhead">応募録音</div>
+      {recordings.map((recording, index) => {
+        const audioSrc = getRecordingPlaybackUrl(recording);
+        return (
+          <div className="recording-item" key={recording.id || `${recording.fileName}-${index}`}>
+            <div className="recording-meta">
+              <strong>{recording.applicantName || response.respondent || "応募者未入力"}</strong>
+              <span>{recording.title || recording.questionLabel || "録音データ"}</span>
+              <small>{recording.fileName || "ファイル名未取得"} / {getFileSizeLabel(recording.size)}</small>
+            </div>
+            {audioSrc ? (
+              <audio className="attachment-audio" controls preload="metadata" src={audioSrc} />
+            ) : (
+              <p className="hint-text">ブラウザ内で再生できる音源URLがありません。Driveリンクから確認してください。</p>
+            )}
+            <div className="inline-actions">
+              <button className="secondary" onClick={() => downloadAttachment(recording)}><Download size={16} />ダウンロード</button>
+              <button className="secondary" onClick={() => saveAttachmentWithPicker(recording)}><FolderOpen size={16} />保存先を選ぶ</button>
+              {recording.driveUrl && (
+                <a className="secondary file-button" href={recording.driveUrl} target="_blank" rel="noreferrer noopener">
+                  <Link size={16} />Driveで開く
+                </a>
+              )}
+              {recording.trackUrl && (
+                <a className="secondary file-button" href={recording.trackUrl} target="_blank" rel="noreferrer noopener">
+                  <Link size={16} />参考URL
+                </a>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function Episodes({ episodes, selectedEpisodeId, setSelectedEpisodeId, patchItem, removeItem, addEpisode, wordpressSite }) {
@@ -2762,7 +2886,7 @@ function Forms({
               <PersistentDetails {...detailsProps(`form:${form.id}:questions`, true)} className="collapsible-section">
                 <summary><strong>質問項目</strong><span>{form.questions.length}項目</span></summary>
                 <div className="question-list">
-                  <p className="hint-text">入力形式: 楽曲を選ぶと「音源アップロード・楽曲名・アーティスト名・楽曲URL」のまとまりが表示されます。質問と楽曲内項目は上下ボタンで並び替えできます。</p>
+                  <p className="hint-text">入力形式: 録音データ一式を選ぶと「録音アップロード・録音タイトル・提出者名・参考URL」のまとまりが表示されます。質問と録音内項目は上下ボタンで並び替えできます。</p>
                   {form.questions.map((question, questionIndex) => {
                     const trackFields = question.kind === "track" ? normalizeTrackFields(question.trackFields) : [];
                     return (
@@ -2806,12 +2930,12 @@ function Forms({
                         {question.kind === "track" && (
                           <PersistentDetails {...detailsProps(`form:${form.id}:question:${question.id}:track-fields`)} className="track-field-editor collapsible-share">
                             <summary>
-                              <strong>楽曲内の項目</strong>
+                              <strong>録音内の項目</strong>
                               <span>開いて編集</span>
                             </summary>
                             <div className="track-field-editor-head">
                               <div>
-                                <span>回答フォームではこの順番で表示され、音源プレビューは音源アップロードの直下に出ます。</span>
+                                <span>回答フォームではこの順番で表示され、録音プレビューはアップロード欄の直下に出ます。</span>
                               </div>
                               <div className="track-field-editor-actions">
                                 <button className="secondary" onClick={() => saveTrackDefault(form.id, question.id)}>
@@ -2844,9 +2968,9 @@ function Forms({
                                 ) : (
                                   <span className="track-field-spacer" />
                                 )}
-                                <div className="move-buttons" aria-label={`${field.label || "楽曲内項目"}の並び替え`}>
-                                  <button className="icon-secondary" onClick={() => moveTrackField(form.id, question.id, field.type, -1)} disabled={fieldIndex === 0} aria-label="楽曲内項目を上へ" title="上へ"><ArrowUp size={16} /></button>
-                                  <button className="icon-secondary" onClick={() => moveTrackField(form.id, question.id, field.type, 1)} disabled={fieldIndex === trackFields.length - 1} aria-label="楽曲内項目を下へ" title="下へ"><ArrowDown size={16} /></button>
+                                <div className="move-buttons" aria-label={`${field.label || "録音内項目"}の並び替え`}>
+                                  <button className="icon-secondary" onClick={() => moveTrackField(form.id, question.id, field.type, -1)} disabled={fieldIndex === 0} aria-label="録音内項目を上へ" title="上へ"><ArrowUp size={16} /></button>
+                                  <button className="icon-secondary" onClick={() => moveTrackField(form.id, question.id, field.type, 1)} disabled={fieldIndex === trackFields.length - 1} aria-label="録音内項目を下へ" title="下へ"><ArrowDown size={16} /></button>
                                 </div>
                               </div>
                             ))}
@@ -2899,6 +3023,7 @@ function Responses({ forms, responses, patchItem, removeItem, addResponse, impor
               <strong>{response.respondent || "回答者未入力"}</strong>
               <button className="icon-danger" onClick={() => removeItem("responses", response.id)}><Trash2 size={16} /></button>
             </div>
+            <RecordingList response={response} />
             <div className="form-grid">
               <Field label="回答者" value={response.respondent} onChange={(value) => patchItem("responses", response.id, { respondent: value })} />
               <SelectField label="フォーム" value={response.formId} options={forms.map((form) => form.id)} labels={Object.fromEntries(forms.map((form) => [form.id, form.name]))} onChange={(value) => patchItem("responses", response.id, { formId: value })} />

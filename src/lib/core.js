@@ -114,7 +114,7 @@ export const QUESTION_KIND_OPTIONS = [
   ["short", "短文"],
   ["long", "長文"],
   ["url", "URL"],
-  ["track", "楽曲"],
+  ["track", "録音データ一式"],
   ["image", "画像"],
   ["x_contact", "X連絡ブロック"],
   ["choice", "選択式"],
@@ -123,9 +123,9 @@ export const QUESTION_KIND_OPTIONS = [
 
 export const TRACK_FIELD_TYPE_OPTIONS = [
   ["audio", "音源アップロード"],
-  ["title", "楽曲名"],
-  ["artist", "アーティスト名"],
-  ["url", "楽曲URL"]
+  ["title", "録音タイトル"],
+  ["artist", "提出者名"],
+  ["url", "参考URL"]
 ];
 
 export const DEFAULT_TRACK_FIELDS = [
@@ -160,6 +160,45 @@ export const DEFAULT_TRACK_FIELDS = [
     help: "参考音源がある場合はYouTubeまたはSunoの共有URLを入力してください。",
     note: "",
     placeholder: "https://youtu.be/... または https://suno.com/..."
+  }
+];
+
+export const DEFAULT_VOICE_RECORDING_FIELDS = [
+  {
+    id: "audio",
+    type: "audio",
+    label: "録音データをWAVかMP3でアップロード",
+    help: "指定台本・自己紹介・ボイスサンプルなどの録音データをアップロードしてください。",
+    note: "選んだ録音は送信前にこの画面で再生確認できます。",
+    placeholder: "",
+    required: true
+  },
+  {
+    id: "title",
+    type: "title",
+    label: "録音タイトル / 希望役メモ",
+    help: "例: 自己紹介、主人公役セリフ、ナレーションなど。任意です。",
+    note: "",
+    placeholder: "例: 自己紹介 / 主人公役セリフ",
+    required: false
+  },
+  {
+    id: "artist",
+    type: "artist",
+    label: "録音内の名義",
+    help: "お名前欄と違う名義で録音している場合だけ入力してください。",
+    note: "",
+    placeholder: "",
+    required: false
+  },
+  {
+    id: "url",
+    type: "url",
+    label: "参考URL（任意）",
+    help: "参考になる公開音源がある場合だけ入力してください。",
+    note: "",
+    placeholder: "https://youtu.be/... または https://suno.com/...",
+    required: false
   }
 ];
 
@@ -218,7 +257,7 @@ export const normalizeAttachmentLimitMb = (value, fallback = DEFAULT_ATTACHMENT_
     : DEFAULT_ATTACHMENT_LIMIT_MB;
 };
 
-export const TRACK_URL_ERROR_MESSAGE = "楽曲URLはYouTubeまたはSunoのURLを入力してください。";
+export const TRACK_URL_ERROR_MESSAGE = "参考URLはYouTubeまたはSunoのURLを入力してください。";
 export const TRACK_URL_PATTERN = "https?://([A-Za-z0-9-]+\\.)?(youtube\\.com|suno\\.com)(/.*)?|https?://youtu\\.be(/.*)?";
 
 export const detectUrlType = (url = "") => {
@@ -482,9 +521,9 @@ export const formatAnswerValue = (value) => {
   if (typeof value === "object" && value.fileName) return `${value.fileName} (${Math.round((value.size || 0) / 1024 / 1024 * 10) / 10}MB)`;
   if (typeof value === "object" && ("title" in value || "url" in value || "audio" in value)) {
     return compactLines([
-      `楽曲名: ${value.title || "-"}`,
-      `アーティスト名: ${value.artist || "-"}`,
-      `楽曲URL: ${value.url || "-"}`,
+      `録音タイトル: ${value.title || "-"}`,
+      `提出者名: ${value.artist || "-"}`,
+      `参考URL: ${value.url || "-"}`,
       `音源ファイル: ${formatAnswerValue(value.audio)}`
     ]);
   }
@@ -1674,7 +1713,13 @@ export const importRowsIntoData = (current, selectedEpisode, rows, kind, periodI
 
 export const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formId = "", respondent = "", periodId = "") => {
   const source =
-    formId === "form_listener" ? "リスナー応募曲" : formId === "form_personality" ? "パーソナリティ曲" : "ゲスト曲";
+    formId === "form_voice_casting" || formId === "form_voice_material"
+      ? "応募録音"
+      : formId === "form_listener"
+        ? "リスナー応募曲"
+        : formId === "form_personality"
+          ? "パーソナリティ曲"
+          : "ゲスト曲";
   const artistAnswer =
     rawAnswers.find((answer) => /AIアーティスト|AI artist|AI名義/.test(answer.label))?.answer ?? "";
   const ownerAnswer =
@@ -1698,7 +1743,7 @@ export const buildTracksFromRawAnswers = (rawAnswers = [], episodeId = "", formI
         source,
         artist: trackArtist,
         aiArtist,
-        title: track.title || `${trackArtist || aiArtist || source} 紹介曲`,
+        title: track.title || `${trackArtist || aiArtist || source} 録音データ`,
         urlType: detectUrlType(track.url),
         url: track.url || "",
         audioFile: track.audio?.fileName || "",
@@ -2038,7 +2083,7 @@ export const sampleData = {
     thumbnailDriveEndpointUrl: DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL,
     thumbnailDriveFolderUrl: DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL,
     audioSaveMemo: DEFAULT_AUDIO_SAVE_MEMO,
-    trackFieldDefaults: DEFAULT_TRACK_FIELDS,
+    trackFieldDefaults: DEFAULT_VOICE_RECORDING_FIELDS,
     responseSyncToken: "",
     lastResponseSyncAt: ""
   },
@@ -2080,7 +2125,15 @@ export const sampleData = {
         { id: "q_email", label: "メールアドレス（予備連絡先）", kind: "short", required: false, use: "internal", help: "" },
         { id: "q_role", label: "希望する役・応募区分", kind: "short", required: true, use: "article", help: "" },
         { id: "q_profile", label: "活動プロフィール / 自己紹介", kind: "long", required: false, use: "public", help: "" },
-        { id: "q_voice_sample", label: "録音サンプル（WAV/MP3）", kind: "file", required: true, use: "article", help: "指定台本や自己紹介など、確認用の録音データを添付してください。" },
+        {
+          id: "q_voice_sample",
+          label: "録音データ（WAV/MP3）",
+          kind: "track",
+          required: true,
+          use: "article",
+          help: "指定台本や自己紹介など、確認用の録音データを添付してください。",
+          trackFields: DEFAULT_VOICE_RECORDING_FIELDS
+        },
         { id: "q_availability", label: "収録可能な曜日・時間帯", kind: "long", required: false, use: "internal", help: "" },
         { id: "q_ng", label: "NG内容・表記注意・連絡時の補足", kind: "long", required: false, use: "constraint", help: "" }
       ]
@@ -2099,7 +2152,15 @@ export const sampleData = {
       questions: [
         { id: "q_name", label: "お名前 / 活動名", kind: "short", required: true, use: "public", help: "" },
         { id: "q_contact_x", label: "連絡用Xアカウント", kind: "x_contact", required: true, use: "public", help: "" },
-        { id: "q_material", label: "提出する録音物（WAV/MP3）", kind: "file", required: true, use: "article", help: "" },
+        {
+          id: "q_material",
+          label: "提出する録音物（WAV/MP3）",
+          kind: "track",
+          required: true,
+          use: "article",
+          help: "",
+          trackFields: DEFAULT_VOICE_RECORDING_FIELDS
+        },
         { id: "q_note", label: "補足メモ", kind: "long", required: false, use: "internal", help: "" }
       ]
     }
@@ -2150,6 +2211,26 @@ export function migrateData(input) {
     const isGuestForm = form.id === "form_guest" || formName.includes("ゲスト");
     const isListenerForm = form.id === "form_listener" || formName.includes("リスナー");
     const isPersonalityForm = form.id === "form_personality" || formName.includes("パーソナリティ");
+    const isVoiceCastingForm =
+      form.id === "form_voice_casting" ||
+      form.id === "form_voice_material" ||
+      formName.includes("声優") ||
+      formName.includes("録音") ||
+      formName.includes("素材提出");
+
+    if (isVoiceCastingForm) {
+      questions = questions.map((question) =>
+        (question.id === "q_voice_sample" || question.id === "q_material" || /録音サンプル|録音物/.test(question.label ?? "")) &&
+        question.kind !== "track"
+          ? {
+              ...question,
+              label: question.id === "q_voice_sample" ? "録音データ（WAV/MP3）" : question.label,
+              kind: "track",
+              trackFields: DEFAULT_VOICE_RECORDING_FIELDS
+            }
+          : question
+      );
+    }
 
     if ((isGuestForm || isListenerForm) && !questions.some((question) => question.kind === "x_contact" || question.id === "q_contact_x")) {
       const insertAfterId = isGuestForm ? "q_guest_x" : "q_artist";
@@ -2287,7 +2368,13 @@ export function migrateData(input) {
   if (!("thumbnailDriveEndpointUrl" in settings)) settings.thumbnailDriveEndpointUrl = DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL;
   if (!("thumbnailDriveFolderUrl" in settings)) settings.thumbnailDriveFolderUrl = DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL;
   if (!settings.audioSaveMemo) settings.audioSaveMemo = DEFAULT_AUDIO_SAVE_MEMO;
-  settings.trackFieldDefaults = normalizeTrackFields(settings.trackFieldDefaults);
+  const normalizedTrackFieldDefaults = normalizeTrackFields(settings.trackFieldDefaults);
+  const hasRadioTrackDefaults = normalizedTrackFieldDefaults.some((field) =>
+    /楽曲|曲名|アーティスト|YouTube|Suno/.test(`${field.label || ""} ${field.help || ""} ${field.placeholder || ""}`)
+  );
+  settings.trackFieldDefaults = hasRadioTrackDefaults
+    ? normalizeTrackFields(DEFAULT_VOICE_RECORDING_FIELDS)
+    : normalizedTrackFieldDefaults;
   if (!("responseSyncToken" in settings)) settings.responseSyncToken = "";
   if (!("lastResponseSyncAt" in settings)) settings.lastResponseSyncAt = "";
   if (!settings.responseDriveFolderUrl) settings.responseDriveFolderUrl = DEFAULT_RESPONSE_DRIVE_FOLDER_URL;
@@ -2392,6 +2479,7 @@ export function migrateData(input) {
     })),
     responses: (input.responses ?? sampleData.responses).map((response) => ({
       attachments: [],
+      recordings: [],
       periodId: "",
       ...response
     })),

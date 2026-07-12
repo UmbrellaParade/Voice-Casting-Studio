@@ -26,7 +26,52 @@
       { "id": "q_email", "label": "メールアドレス（予備連絡先）", "kind": "short", "required": false, "use": "internal", "help": "" },
       { "id": "q_role", "label": "希望する役・応募区分", "kind": "short", "required": true, "use": "article", "help": "" },
       { "id": "q_profile", "label": "活動プロフィール / 自己紹介", "kind": "long", "required": false, "use": "public", "help": "" },
-      { "id": "q_voice_sample", "label": "録音サンプル（WAV/MP3）", "kind": "file", "required": true, "use": "article", "help": "指定台本や自己紹介など、確認用の録音データを添付してください。" },
+      {
+        "id": "q_voice_sample",
+        "label": "録音データ（WAV/MP3）",
+        "kind": "track",
+        "required": true,
+        "use": "article",
+        "help": "指定台本や自己紹介など、確認用の録音データを添付してください。",
+        "trackFields": [
+          {
+            "id": "audio",
+            "type": "audio",
+            "label": "録音データをWAVかMP3でアップロード",
+            "help": "指定台本・自己紹介・ボイスサンプルなどの録音データをアップロードしてください。",
+            "note": "選んだ録音は送信前にこの画面で再生確認できます。",
+            "placeholder": "",
+            "required": true
+          },
+          {
+            "id": "title",
+            "type": "title",
+            "label": "録音タイトル / 希望役メモ",
+            "help": "例: 自己紹介、主人公役セリフ、ナレーションなど。任意です。",
+            "note": "",
+            "placeholder": "例: 自己紹介 / 主人公役セリフ",
+            "required": false
+          },
+          {
+            "id": "artist",
+            "type": "artist",
+            "label": "録音内の名義",
+            "help": "お名前欄と違う名義で録音している場合だけ入力してください。",
+            "note": "",
+            "placeholder": "",
+            "required": false
+          },
+          {
+            "id": "url",
+            "type": "url",
+            "label": "参考URL（任意）",
+            "help": "参考になる公開音源がある場合だけ入力してください。",
+            "note": "",
+            "placeholder": "https://youtu.be/... または https://suno.com/...",
+            "required": false
+          }
+        ]
+      },
       { "id": "q_availability", "label": "収録可能な曜日・時間帯", "kind": "long", "required": false, "use": "internal", "help": "" },
       { "id": "q_ng", "label": "NG内容・表記注意・連絡時の補足", "kind": "long", "required": false, "use": "constraint", "help": "" }
     ]
