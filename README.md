@@ -1,53 +1,39 @@
 # Umbrella Parade Voice Casting Studio
 
-Voice Casting Studio is a browser-based tool for creating voice actor audition forms and receiving submitted recordings through Google Drive.
+Voice Casting Studio is a voice drama audition management tool based on Radio Article Studio.
 
-## Features
+It keeps the original Umbrella Parade header style and local-first workflow, then narrows the visible screens to the audition workflow:
 
-- Build audition forms.
-- Add recording upload questions for voice samples.
-- Set application periods.
-- Choose a Google Drive folder for form responses and recordings.
-- Configure Bellbo's X follow guidance for post-application contact.
-- Share portable compressed form URLs.
-- Publish short form URLs through Google Apps Script.
-- Sync received responses back into the management screen.
+- create and publish audition forms
+- set form reception dates and submission limits inside each form
+- receive WAV/MP3 audition recordings
+- save response JSON and attachments to a configured Google Drive folder
+- sync submitted responses back into the management screen
+- export/import local backups
 
-## Development
+## Local Development
 
 ```bash
 npm install
 npm run dev
 ```
 
-## GitHub Pages
+## Build
 
-The app is built with Vite and configured for:
-
-```text
-https://umbrellaparade.github.io/Voice-Casting-Studio/
+```bash
+npm run build
 ```
 
-The workflow in `.github/workflows/deploy-pages.yml` builds and deploys the app on pushes to `main`.
+The production build is configured for GitHub Pages at `/Voice-Casting-Studio/`.
 
-## Google Apps Script
+## Google Drive Response Endpoint
 
-Use:
+1. Create a Google Apps Script project.
+2. Copy `docs/google-apps-script/Code.gs` into the project.
+3. Set `SECRET_TOKEN` in the script.
+4. Deploy it as a Web app available to anyone with the link.
+5. Paste the Web app URL into the tool's Settings as `回答保存Webhook URL`.
+6. Paste the same token into `回答同期トークン`.
+7. Paste the target Drive folder URL into `回答保存先Google DriveフォルダーURL`.
 
-```text
-docs/google-apps-script/Code.gs
-```
-
-Setup notes:
-
-```text
-docs/google-drive-response-endpoint.md
-```
-
-For short published URLs (`#/r/...`), put the deployed GAS Web App URL into:
-
-```text
-public/app-config.json
-```
-
-Portable compressed URLs (`#/s/...`) work without editing `app-config.json` because the form payload carries the submission endpoint.
+After changing webhook or Drive settings, publish/update the form short URL again so respondents receive the latest save destination.

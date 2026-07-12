@@ -1,13 +1,13 @@
 {
   "name": "Umbrella Parade Voice Casting Studio",
   "short_name": "Voice Casting",
-  "description": "Voice actor casting form management for receiving audition recordings.",
+  "description": "Voice drama audition form management for submissions, recordings, and Google Drive storage.",
   "start_url": "/Voice-Casting-Studio/",
   "scope": "/Voice-Casting-Studio/",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone", "browser"],
-  "background_color": "#f8fafc",
-  "theme_color": "#1f2937",
+  "background_color": "#f7f2e9",
+  "theme_color": "#241f2f",
   "orientation": "any",
   "icons": [
     {
@@ -15,6 +15,14 @@
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "応募フォーム",
+      "short_name": "応募フォーム",
+      "url": "/Voice-Casting-Studio/#/f/form_voice_casting",
+      "description": "Open the default voice casting form."
     }
   ]
 }

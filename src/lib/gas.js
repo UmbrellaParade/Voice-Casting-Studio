@@ -1,10 +1,14 @@
+// Google Apps Script Webアプリとの通信ヘルパー。
+// GASはtext/plainのPOSTなら preflight が発生しないシンプルリクエストとして扱えるため、
+// mode: "no-cors" を使わずに応答本文（保存成功/失敗）をそのまま読める。
+
 const parseGasResult = async (response) => {
   const text = await response.text();
   let result = null;
   try {
     result = JSON.parse(text);
   } catch {
-    throw new Error("受信口の応答を読み取れませんでした。Apps Scriptのデプロイ設定を確認してください。");
+    throw new Error("受信口の応答を読み取れませんでした。Apps Scriptのデプロイ設定（全員がアクセス可）を確認してください。");
   }
   if (!response.ok || !result || result.ok !== true) {
     throw new Error(result?.error || `受信口がエラーを返しました（HTTP ${response.status}）。`);
@@ -31,6 +35,8 @@ export const getFromGasEndpoint = async (endpointUrl, params = {}) => {
   return parseGasResult(response);
 };
 
+// GitHub Pagesに置く公開設定ファイル。公開フォームページ（運営のlocalStorageを持たない端末）が
+// フォーム定義の取得先となるGAS URLを知るために使う。
 export const loadAppConfig = async (baseUrl = "/") => {
   try {
     const response = await fetch(`${baseUrl}app-config.json`, { cache: "no-store" });

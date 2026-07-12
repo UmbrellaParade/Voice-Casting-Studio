@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "type": "voice-casting-studio-form",
+  "contactAccounts": {
+    "bellbo": "bellbo13",
+    "additional": []
+  },
+  "xContactMessage": "Xでご連絡するため、べるぼのアカウントをフォローお願いします。フォローいただいていない場合、こちらからDMをお送りできないことがあります。",
+  "submission": {
+    "endpointUrl": "",
+    "driveFolderUrl": "",
+    "audioSaveMemo": "Drive: 回答保存先フォルダー内の応募フォーム/募集企画別フォルダー"
+  },
+  "form": {
+    "id": "form_voice_casting",
+    "name": "ボイスドラマ声優応募フォーム",
+    "type": "声優募集",
+    "description": "お名前、連絡用X、希望役、プロフィール、録音サンプルを受け取る応募フォームです。",
+    "receptionStartDate": "2026-07-12",
+    "receptionEndDate": "",
+    "submissionLimit": 0,
+    "attachmentLimitMb": 200,
+    "questions": [
+      { "id": "q_name", "label": "お名前 / 活動名", "kind": "short", "required": true, "use": "public", "help": "" },
+      { "id": "q_contact_x", "label": "連絡用Xアカウント", "kind": "x_contact", "required": true, "use": "public", "help": "" },
+      { "id": "q_email", "label": "メールアドレス（予備連絡先）", "kind": "short", "required": false, "use": "internal", "help": "" },
+      { "id": "q_role", "label": "希望する役・応募区分", "kind": "short", "required": true, "use": "article", "help": "" },
+      { "id": "q_profile", "label": "活動プロフィール / 自己紹介", "kind": "long", "required": false, "use": "public", "help": "" },
+      { "id": "q_voice_sample", "label": "録音サンプル（WAV/MP3）", "kind": "file", "required": true, "use": "article", "help": "指定台本や自己紹介など、確認用の録音データを添付してください。" },
+      { "id": "q_availability", "label": "収録可能な曜日・時間帯", "kind": "long", "required": false, "use": "internal", "help": "" },
+      { "id": "q_ng", "label": "NG内容・表記注意・連絡時の補足", "kind": "long", "required": false, "use": "constraint", "help": "" }
+    ]
+  }
+}

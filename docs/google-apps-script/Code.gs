@@ -1,25 +1,31 @@
 // Voice Casting Studio 受信口（Google Apps Script）
 //
 // この1本のWebアプリで以下を担当します。
-//   1. 公開フォームからの応募受信（doPost action=submitResponse）
-//      - 応募JSONを _responses/ に保存
-//      - 録音物/画像を募集フォルダーに実ファイルとして保存
-//      - スプレッドシート「応募ログ」に1行追記
-//   2. ツールの「新着応募を同期」への応募一覧配信（doGet action=listResponses）
+//   1. 共有フォームからの回答受信（doPost action=submitResponse）
+//      - 回答JSONを _responses/ に保存
+//      - 音源/画像の添付を募集企画またはフォーム別フォルダーに実ファイルとして保存
+//      - スプレッドシート「回答ログ」に1行追記
+//   2. ツールの「新着回答を同期」への回答一覧配信（doGet action=listResponses）
 //   3. 短いURLフォーム定義の公開/配信（doPost action=publishForm / doGet action=getForm）
-//   4. 公開フォーム側の応募数確認（doGet action=submissionStatus）
+//   4. サムネPNGのDrive保存（doPost action=saveThumbnails）
+//
+// セットアップ手順は docs/google-drive-response-endpoint.md を参照。
 
-// 既定の回答保存先Google DriveフォルダーID。
-// ツール側でDriveフォルダーURLを指定した場合は、そちらが優先されます。
-const FOLDER_ID = "ここに既定のGoogle DriveフォルダーIDを入れる";
+// 回答保存先のGoogle DriveフォルダーID（既定値）。
+// ツールの設定「回答保存先Google DriveフォルダーURL」を入れると、そちらが優先される。
+const FOLDER_ID = "";
 
-// ツールの設定画面「回答同期トークン」と同じ文字列にします。
+// ツールの設定画面「回答同期トークン」と同じ文字列にする（好きな合言葉でOK）
 const SECRET_TOKEN = "ここを好きな合言葉に変更";
 
+// このサイズ以下の画像（ゲストアイコンなど）は、Drive保存に加えて回答JSONにも残す。
+// サムネ合成でそのまま使えるようにするため。音源はDrive保存のみ。
 const INLINE_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+
 const RESPONSES_DIR = "_responses";
 const FORMS_DIR = "_forms";
-const LOG_SHEET_NAME = "応募ログ";
+const THUMBNAILS_DIR = "サムネ";
+const LOG_SHEET_NAME = "回答ログ";
 
 function jsonOutput(body) {
   return ContentService.createTextOutput(JSON.stringify(body)).setMimeType(ContentService.MimeType.JSON);
@@ -28,11 +34,15 @@ function jsonOutput(body) {
 function doPost(e) {
   try {
     const payload = JSON.parse(e.postData.contents);
-    const action = payload.action || (payload.response ? "submitResponse" : "");
+    const action = payload.action || (payload.response ? "submitResponse" : payload.type === "thumbnail_bundle" ? "saveThumbnails" : "");
     if (action === "submitResponse") return handleSubmitResponse(payload);
     if (action === "publishForm") {
       requireToken(payload.token);
       return handlePublishForm(payload);
+    }
+    if (action === "saveThumbnails") {
+      requireToken(payload.token);
+      return handleSaveThumbnails(payload);
     }
     return jsonOutput({ ok: false, error: "未対応のactionです: " + action });
   } catch (error) {
@@ -73,6 +83,7 @@ function requireToken(token) {
 function getRootFolder(folderRef) {
   const raw = String(folderRef || "").trim();
   if (raw) {
+    // DriveフォルダーURL（.../folders/{ID}）でも生のIDでも受け付ける
     const idMatch = raw.match(/[-\w]{25,}/);
     if (idMatch) {
       try {
@@ -82,8 +93,8 @@ function getRootFolder(folderRef) {
       }
     }
   }
-  if (!FOLDER_ID || FOLDER_ID.indexOf("ここに") === 0) {
-    throw new Error("Apps Script側のFOLDER_IDが未設定です。既定のDriveフォルダーIDを入れてください。");
+  if (!FOLDER_ID) {
+    throw new Error("保存先Driveフォルダーが未設定です。ツール設定のDriveフォルダーURL、またはCode.gsのFOLDER_IDを設定してください。");
   }
   return DriveApp.getFolderById(FOLDER_ID);
 }
@@ -137,7 +148,7 @@ function countSubmittedResponses(root, formId, periodId) {
       if (targetPeriodId && String(response.periodId || "") !== targetPeriodId) continue;
       count += 1;
     } catch (error) {
-      // 壊れたJSONは件数確認から除外します。
+      // 壊れたJSONは件数確認から除外
     }
   }
   return count;
@@ -147,9 +158,6 @@ function enforceSubmissionAvailability(root, payload) {
   const form = payload.form || {};
   const period = payload.period || {};
   const response = payload.response || {};
-  if (form.status && form.status !== "受付中") throw new Error("フォームは現在受付中ではありません。");
-  if (period.status && period.status !== "受付中") throw new Error("応募期間は現在受付中ではありません。");
-
   const today = todayDateString();
   const dateRules = [
     { label: "フォーム受付期間", startDate: form.receptionStartDate || "", endDate: form.receptionEndDate || "" },
@@ -157,29 +165,43 @@ function enforceSubmissionAvailability(root, payload) {
   ];
   for (let i = 0; i < dateRules.length; i += 1) {
     const rule = dateRules[i];
-    if (rule.startDate && today < rule.startDate) throw new Error(rule.label + "の開始前です。");
-    if (rule.endDate && today > rule.endDate) throw new Error(rule.label + "は終了しています。");
+    if (rule.startDate && today < rule.startDate) {
+      throw new Error(rule.label + "の開始前です。");
+    }
+    if (rule.endDate && today > rule.endDate) {
+      throw new Error(rule.label + "は終了しています。");
+    }
   }
 
   const limit = normalizeSubmissionLimit(form.submissionLimit);
   if (!limit) return;
-  const count = countSubmittedResponses(root, response.formId || form.id || "", response.periodId || period.id || "");
-  if (count >= limit) throw new Error("応募数の上限に達しています。");
+  const formId = response.formId || form.id || "";
+  const periodId = response.periodId || period.id || "";
+  const count = countSubmittedResponses(root, formId, periodId);
+  if (count >= limit) {
+    throw new Error("応募数の上限に達しています。");
+  }
 }
+
+// ---- 回答受信 ----
 
 function handleSubmitResponse(payload) {
   const root = getRootFolder(payload.driveFolderUrl || (payload.submission && payload.submission.driveFolderUrl));
-  enforceSubmissionAvailability(root, payload);
-
   const response = payload.response || {};
-  const period = payload.period || {};
-  const form = payload.form || {};
+  enforceSubmissionAvailability(root, payload);
   const stamp = nowStamp();
-  const respondent = sanitizeName(response.respondent, "応募者");
-  const folderLabel = sanitizeName(period.title || form.name || "未分類", "未分類");
-  const attachmentsFolder = getOrCreateFolder(root, folderLabel);
+  const respondent = sanitizeName(response.respondent, "回答者");
+  const projectLabel = sanitizeName(
+    (payload.episode && (payload.episode.title || payload.episode.date)) ||
+      (payload.form && payload.form.name) ||
+      response.episodeId ||
+      response.formId ||
+      "未分類",
+    "未分類"
+  );
+  const attachmentsFolder = getOrCreateFolder(root, projectLabel);
   const savedFiles = [];
-  const savedCache = {};
+  const savedCache = {}; // 同じ添付がresponse.attachmentsとrawAnswersの両方に入っているため二重保存を防ぐ
 
   const processAttachment = function (attachment) {
     if (!attachment || !attachment.dataUrl) return attachment;
@@ -202,6 +224,7 @@ function handleSubmitResponse(payload) {
     for (const key in attachment) next[key] = attachment[key];
     next.driveUrl = saved.driveUrl;
     next.driveFileId = saved.driveFileId;
+    // 音源などの大きいデータはDrive本体を正とし、JSONからbase64を外して軽くする
     if (!isSmallImage) delete next.dataUrl;
     return next;
   };
@@ -213,6 +236,7 @@ function handleSubmitResponse(payload) {
     payload.rawAnswers = payload.rawAnswers.map(function (answer) {
       if (!answer) return answer;
       if (answer.attachment) answer.attachment = processAttachment(answer.attachment);
+      if (answer.track && answer.track.audio) answer.track.audio = processAttachment(answer.track.audio);
       return answer;
     });
   }
@@ -224,8 +248,9 @@ function handleSubmitResponse(payload) {
   appendLogRow(root, [
     new Date(),
     response.respondent || "",
-    form.name || response.formId || "",
-    period.title || response.periodId || "",
+    response.formId || "",
+    response.episodeId || "",
+    response.periodId || "",
     savedFiles.length,
     jsonName
   ]);
@@ -242,11 +267,11 @@ function appendLogRow(root, row) {
     } else {
       spreadsheet = SpreadsheetApp.create(LOG_SHEET_NAME);
       DriveApp.getFileById(spreadsheet.getId()).moveTo(root);
-      spreadsheet.getActiveSheet().appendRow(["受信日時", "応募者", "フォーム", "応募期間", "添付数", "JSONファイル"]);
+      spreadsheet.getActiveSheet().appendRow(["受信日時", "回答者", "フォームID", "募集企画ID", "受付設定ID", "添付数", "JSONファイル"]);
     }
     spreadsheet.getActiveSheet().appendRow(row);
   } catch (error) {
-    // ログ追記の失敗で応募受信全体を失敗にしません。
+    // ログ追記の失敗で回答受信全体を失敗にしない
   }
 }
 
@@ -262,6 +287,8 @@ function handleSubmissionStatus(params) {
   });
 }
 
+// ---- 回答一覧配信（ツールの「新着回答を同期」） ----
+
 function handleListResponses(params) {
   const root = getRootFolder(params.folder);
   const responsesFolder = getOrCreateFolder(root, RESPONSES_DIR);
@@ -275,7 +302,7 @@ function handleListResponses(params) {
     try {
       items.push({ name: file.getName(), created: file.getDateCreated(), payload: JSON.parse(file.getBlob().getDataAsString("UTF-8")) });
     } catch (error) {
-      // 壊れたJSONはスキップします。
+      // 壊れたJSONはスキップ
     }
   }
   items.sort(function (a, b) {
@@ -289,6 +316,8 @@ function handleListResponses(params) {
     })
   });
 }
+
+// ---- フォーム定義の公開/配信（短いURL） ----
 
 function handlePublishForm(payload) {
   const slug = sanitizeName(payload.slug, "");
@@ -316,4 +345,24 @@ function handleGetForm(params) {
   if (!files.hasNext()) throw new Error("このslugのフォームは公開されていません: " + slug);
   const payload = JSON.parse(files.next().getBlob().getDataAsString("UTF-8"));
   return jsonOutput({ ok: true, payload: payload });
+}
+
+// ---- サムネPNG保存 ----
+
+function handleSaveThumbnails(payload) {
+  const root = getRootFolder(payload.driveFolderUrl);
+  const folder = getOrCreateFolder(root, THUMBNAILS_DIR);
+  const stamp = nowStamp();
+  const prefix = sanitizeName(payload.episodeDate || "", "") || stamp;
+  const savedFiles = [];
+  (payload.images || []).forEach(function (image, index) {
+    const blob = decodeDataUrl(image.dataUrl);
+    if (!blob) return;
+    const fileName = prefix + "_" + sanitizeName(image.fileName, "thumbnail-" + (index + 1) + ".png");
+    blob.setName(fileName);
+    const file = folder.createFile(blob);
+    savedFiles.push({ fileName: fileName, url: file.getUrl() });
+  });
+  if (!savedFiles.length) throw new Error("保存できる画像がありませんでした。");
+  return jsonOutput({ ok: true, savedFiles: savedFiles, now: new Date().toISOString() });
 }

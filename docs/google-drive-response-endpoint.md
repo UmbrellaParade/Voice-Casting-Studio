@@ -1,35 +1,42 @@
-# 回答受信口（Google Apps Script）セットアップ
+# Google Drive Response Endpoint
 
-Voice Casting Studio は GitHub Pages 上の静的アプリなので、録音物の受信と Google Drive 保存は Google Apps Script の Web アプリが担当します。
+Voice Casting Studio is a static GitHub Pages app, so form submissions are received by Google Apps Script.
 
-## セットアップ
+The Apps Script endpoint handles:
 
-1. Google Drive に回答保存先フォルダーを作ります。
-2. `docs/google-apps-script/Code.gs` を Apps Script に貼り付けます。
-3. 先頭の `FOLDER_ID` を既定の Drive フォルダー ID に変更します。
-4. `SECRET_TOKEN` を好きな合言葉に変更します。
-5. 「デプロイ」から Web アプリとして公開します。
-   - 実行ユーザー: 自分
-   - アクセスできるユーザー: 全員
-6. 表示された Web アプリ URL をツールの設定画面に入力します。
-7. 短いURL `#/r/...` を使う場合は `public/app-config.json` の `formEndpointUrl` にも同じ URL を入れてコミットします。
+- public form submission
+- response JSON storage
+- WAV/MP3 and image attachment storage in Google Drive
+- response list sync back to the management screen
+- short URL form payload publishing
 
-## 保存されるもの
+## Folder Layout
+
+The configured Drive folder will contain files like this:
 
 ```text
-回答保存先フォルダー/
-├─ _responses/          応募JSON
-├─ _forms/              公開フォーム定義JSON
-├─ 応募ログ             スプレッドシート
-└─ 募集名/              録音物・画像
+Voice Casting Responses/
+├─ _forms/
+├─ _responses/
+├─ ボイスドラマ声優応募フォーム/
+│  ├─ 20260712-120000_applicant_sample.wav
+│  └─ ...
+└─ 回答ログ
 ```
 
-フォームまたは応募期間に Drive フォルダーURLを指定した場合、応募JSONと録音物はそのフォルダーへ保存されます。
+If a submission is tied to a募集企画, the attachment folder uses that企画名. Otherwise it falls back to the form name.
 
-## 動作確認
+## Setup
 
-1. Web アプリ URL をブラウザで開き、`{"ok":true,...}` が出ることを確認します。
-2. ツールの設定に Web アプリ URL、回答同期トークン、既定の Drive フォルダーURLを入れます。
-3. 応募期間付きの圧縮URLを開き、テスト応募を送信します。
-4. Drive に `_responses/` の JSON と録音物が保存されていることを確認します。
-5. ツールの「新着応募を同期」で応募一覧へ取り込みます。
+1. Open Google Apps Script and create a new project.
+2. Copy `docs/google-apps-script/Code.gs` into the editor.
+3. Set `SECRET_TOKEN` to any private passphrase.
+4. Deploy as a Web app.
+5. Set access to anyone with the link.
+6. Copy the Web app URL.
+7. In Voice Casting Studio Settings, paste it into `回答保存Webhook URL`.
+8. Paste the same passphrase into `回答同期トークン`.
+9. Paste the target Drive folder URL into `回答保存先Google DriveフォルダーURL`.
+10. Publish/update the form short URL.
+
+`FOLDER_ID` in `Code.gs` is only a fallback. The tool setting `回答保存先Google DriveフォルダーURL` takes priority.
