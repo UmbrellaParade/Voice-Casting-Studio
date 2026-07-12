@@ -1,4 +1,4 @@
-const CACHE_VERSION = "voice-casting-studio-v1";
+const CACHE_VERSION = "voice-casting-studio-v3";
 const BASE_PATH = new URL(self.registration.scope).pathname;
 const APP_SHELL = [
   BASE_PATH,
@@ -57,6 +57,21 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => caches.match(`${BASE_PATH}index.html`))
+    );
+    return;
+  }
+
+  if (["script", "style", "worker"].includes(request.destination)) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(request))
     );
     return;
   }

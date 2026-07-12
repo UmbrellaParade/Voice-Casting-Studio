@@ -25,10 +25,20 @@ export const publicAsset = (path) => `${import.meta.env.BASE_URL}${path.replace(
 export const GUEST_BADGE_ASSET_URL = publicAsset("thumbnail-overlays/guest-in-badge.png");
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  let refreshingForServiceWorkerUpdate = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (refreshingForServiceWorkerUpdate) return;
+    refreshingForServiceWorkerUpdate = true;
+    window.location.reload();
+  });
+
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register(publicAsset("sw.js"), { scope: import.meta.env.BASE_URL }).catch(() => {
-      console.warn("Voice Casting Studio: service worker registration failed.");
-    });
+    navigator.serviceWorker
+      .register(publicAsset("sw.js"), { scope: import.meta.env.BASE_URL })
+      .then((registration) => registration.update())
+      .catch(() => {
+        console.warn("Voice Casting Studio: service worker registration failed.");
+      });
   });
 }
 
@@ -2188,6 +2198,20 @@ export const sampleData = {
 };
 
 export function migrateData(input) {
+  const hasRadioTrackFields = (fields = []) =>
+    normalizeTrackFields(fields).some((field) =>
+      /楽曲|曲名|アーティスト|YouTube|Suno/.test(`${field.label || ""} ${field.help || ""} ${field.placeholder || ""}`)
+    );
+
+  const isVoiceRecordingQuestion = (question = {}) => {
+    const text = `${question.id || ""} ${question.label || ""} ${question.help || ""}`;
+    return (
+      question.id === "q_voice_sample" ||
+      question.id === "q_material" ||
+      /録音|ボイスサンプル|音声ファイル|音源ファイル|WAV|MP3|wav|mp3/.test(text)
+    );
+  };
+
   const isLegacyTrackQuestion = (question) => {
     const label = question.label ?? "";
     return (
@@ -2219,17 +2243,24 @@ export function migrateData(input) {
       formName.includes("素材提出");
 
     if (isVoiceCastingForm) {
-      questions = questions.map((question) =>
-        (question.id === "q_voice_sample" || question.id === "q_material" || /録音サンプル|録音物/.test(question.label ?? "")) &&
-        question.kind !== "track"
-          ? {
-              ...question,
-              label: question.id === "q_voice_sample" ? "録音データ（WAV/MP3）" : question.label,
-              kind: "track",
-              trackFields: DEFAULT_VOICE_RECORDING_FIELDS
-            }
-          : question
-      );
+      questions = questions.map((question) => {
+        if (!isVoiceRecordingQuestion(question)) return question;
+        const shouldUseVoiceFields =
+          question.kind !== "track" ||
+          !Array.isArray(question.trackFields) ||
+          question.trackFields.length === 0 ||
+          hasRadioTrackFields(question.trackFields);
+        return {
+          ...question,
+          label: question.id === "q_voice_sample" || /録音サンプル|録音データ|ボイスサンプル/.test(question.label ?? "")
+            ? "録音データ（WAV/MP3）"
+            : question.label,
+          kind: "track",
+          trackFields: shouldUseVoiceFields
+            ? DEFAULT_VOICE_RECORDING_FIELDS
+            : normalizeTrackFields(question.trackFields)
+        };
+      });
     }
 
     if ((isGuestForm || isListenerForm) && !questions.some((question) => question.kind === "x_contact" || question.id === "q_contact_x")) {
@@ -2369,9 +2400,7 @@ export function migrateData(input) {
   if (!("thumbnailDriveFolderUrl" in settings)) settings.thumbnailDriveFolderUrl = DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL;
   if (!settings.audioSaveMemo) settings.audioSaveMemo = DEFAULT_AUDIO_SAVE_MEMO;
   const normalizedTrackFieldDefaults = normalizeTrackFields(settings.trackFieldDefaults);
-  const hasRadioTrackDefaults = normalizedTrackFieldDefaults.some((field) =>
-    /楽曲|曲名|アーティスト|YouTube|Suno/.test(`${field.label || ""} ${field.help || ""} ${field.placeholder || ""}`)
-  );
+  const hasRadioTrackDefaults = hasRadioTrackFields(normalizedTrackFieldDefaults);
   settings.trackFieldDefaults = hasRadioTrackDefaults
     ? normalizeTrackFields(DEFAULT_VOICE_RECORDING_FIELDS)
     : normalizedTrackFieldDefaults;
