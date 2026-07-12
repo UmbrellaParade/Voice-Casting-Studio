@@ -29,6 +29,9 @@ const APP_NAME = "Voice Casting Studio";
 const STORAGE_KEY = "voice-casting-studio:v1";
 const STORAGE_COMPRESSED_PREFIX = "lz16:";
 const DEFAULT_ATTACHMENT_LIMIT_MB = 200;
+const DEFAULT_BELLBO_X_HANDLE = "bellbo13";
+const DEFAULT_X_CONTACT_MESSAGE =
+  "Xでご連絡するため、べるぼのアカウントをフォローお願いします。フォローいただいていない場合、こちらからDMをお送りできないことがあります。";
 const AUDIO_FILE_ACCEPT = "audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/m4a,.mp3,.wav,.m4a,.aac";
 const IMAGE_FILE_ACCEPT = "image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp";
 
@@ -76,6 +79,24 @@ const normalizeSlug = (value = "") =>
     .replace(/[^\w-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
+
+const normalizeXHandle = (value = "") =>
+  String(value)
+    .trim()
+    .replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//i, "")
+    .replace(/^@/, "")
+    .split(/[/?#]/)[0]
+    .replace(/[^A-Za-z0-9_]/g, "");
+
+const makeXUrl = (value = "") => {
+  const handle = normalizeXHandle(value);
+  return handle ? `https://x.com/${handle}` : "";
+};
+
+const formatXHandle = (value = "") => {
+  const handle = normalizeXHandle(value);
+  return handle ? `@${handle}` : "";
+};
 
 const sanitizeName = (value = "", fallback = "applicant") =>
   String(value || fallback)
@@ -144,6 +165,9 @@ const createSampleData = () => {
       responseEndpointUrl: "",
       responseSyncToken: "",
       responseDriveFolderUrl: "",
+      bellboXHandle: DEFAULT_BELLBO_X_HANDLE,
+      requireBellboFollow: true,
+      xContactMessage: DEFAULT_X_CONTACT_MESSAGE,
       lastResponseSyncAt: ""
     },
     forms: [form],
@@ -220,6 +244,11 @@ const makeSharePayload = (form, settings, period = null) => ({
   submission: {
     endpointUrl: settings.responseEndpointUrl || "",
     driveFolderUrl: resolveDriveFolderUrl(settings, form, period)
+  },
+  contact: {
+    bellboXHandle: normalizeXHandle(settings.bellboXHandle || DEFAULT_BELLBO_X_HANDLE),
+    requireBellboFollow: settings.requireBellboFollow !== false,
+    xContactMessage: settings.xContactMessage || DEFAULT_X_CONTACT_MESSAGE
   }
 });
 
@@ -744,6 +773,15 @@ function ResponsesPanel({ responses, syncResponses, syncState, lastResponseSyncA
                 <span className="status-pill">{response.status || "未確認"}</span>
               </div>
               <div className="answer-list">
+                {response.contactFollow && (
+                  <div className="answer-item contact-follow-answer">
+                    <b>Xフォロー確認</b>
+                    <span>
+                      {response.contactFollow.account || "-"} / {response.contactFollow.confirmed ? "確認済み" : "未確認"}
+                    </span>
+                    {response.contactFollow.url && <a href={response.contactFollow.url} target="_blank" rel="noreferrer">Xで開く</a>}
+                  </div>
+                )}
                 {(response.rawAnswers || []).map((answer) => (
                   <div key={answer.id} className="answer-item">
                     <b>{answer.label}</b>
@@ -779,6 +817,38 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
           <Field label="回答同期トークン" value={settings.responseSyncToken || ""} onChange={(value) => updateSettings({ responseSyncToken: value })} placeholder="Code.gs の SECRET_TOKEN と同じ文字列" wide />
           <Field label="既定の回答保存先DriveフォルダーURL" value={settings.responseDriveFolderUrl || ""} onChange={(value) => updateSettings({ responseDriveFolderUrl: value })} placeholder="https://drive.google.com/drive/folders/..." wide />
         </div>
+        <div className="settings-subsection">
+          <div>
+            <h2>X連絡設定</h2>
+            <p className="muted">応募後のやりとりに使う、べるぼのXフォロー案内を公開フォームへ表示します。</p>
+          </div>
+          <div className="form-grid">
+            <Field
+              label="べるぼ Xアカウント"
+              value={formatXHandle(settings.bellboXHandle || DEFAULT_BELLBO_X_HANDLE)}
+              onChange={(value) => updateSettings({ bellboXHandle: normalizeXHandle(value) })}
+              placeholder="@bellbo13"
+            />
+            <label className="check-field settings-check">
+              <input
+                type="checkbox"
+                checked={settings.requireBellboFollow !== false}
+                onChange={(event) => updateSettings({ requireBellboFollow: event.target.checked })}
+              />
+              応募前にフォロー確認を必須にする
+            </label>
+            <TextArea
+              label="フォロー案内文"
+              value={settings.xContactMessage || DEFAULT_X_CONTACT_MESSAGE}
+              onChange={(value) => updateSettings({ xContactMessage: value })}
+            />
+          </div>
+          {makeXUrl(settings.bellboXHandle || DEFAULT_BELLBO_X_HANDLE) && (
+            <p className="hint-text">
+              公開フォームでは <a href={makeXUrl(settings.bellboXHandle || DEFAULT_BELLBO_X_HANDLE)} target="_blank" rel="noreferrer">{formatXHandle(settings.bellboXHandle || DEFAULT_BELLBO_X_HANDLE)}</a> へのフォローボタンを表示します。
+            </p>
+          )}
+        </div>
         <div className="settings-note">
           <AlertTriangle size={18} />
           <p>短いURL `#/r/...` をオンラインで使う場合は、`public/app-config.json` の `formEndpointUrl` に同じGAS URLを入れてコミットします。圧縮URL `#/s/...` はURL内に送信先を含むため、先に動作確認できます。</p>
@@ -807,7 +877,14 @@ function PublicSubmissionForm({ logoSrc, payload, loading, error, message }) {
   const form = payload?.form;
   const period = payload?.period;
   const submission = payload?.submission || {};
+  const contact = payload?.contact || {};
+  const bellboXHandle = normalizeXHandle(contact.bellboXHandle || DEFAULT_BELLBO_X_HANDLE);
+  const bellboXUrl = makeXUrl(bellboXHandle);
+  const showBellboFollow = Boolean(bellboXUrl);
+  const requireBellboFollow = showBellboFollow && contact.requireBellboFollow !== false;
+  const xContactMessage = contact.xContactMessage || DEFAULT_X_CONTACT_MESSAGE;
   const [answers, setAnswers] = useState({});
+  const [bellboFollowConfirmed, setBellboFollowConfirmed] = useState(false);
   const [formError, setFormError] = useState("");
   const [submitStatus, setSubmitStatus] = useState("");
   const [submitBusy, setSubmitBusy] = useState(false);
@@ -816,6 +893,7 @@ function PublicSubmissionForm({ logoSrc, payload, loading, error, message }) {
 
   useEffect(() => {
     setAnswers({});
+    setBellboFollowConfirmed(false);
     setFormError("");
     setSubmitStatus("");
   }, [form?.id, period?.id]);
@@ -919,6 +997,14 @@ function PublicSubmissionForm({ logoSrc, payload, loading, error, message }) {
       },
       period: period ? { ...period } : null,
       submission,
+      contact: showBellboFollow
+        ? {
+            bellboXHandle,
+            bellboXUrl,
+            requireBellboFollow,
+            followConfirmed: bellboFollowConfirmed
+          }
+        : null,
       response: {
         id: newId("res"),
         submittedAt: new Date().toISOString(),
@@ -927,6 +1013,14 @@ function PublicSubmissionForm({ logoSrc, payload, loading, error, message }) {
         respondent: inferRespondent(),
         status: "未確認",
         summary: rawAnswers.filter((answer) => answer.answer).map((answer) => `${answer.label}: ${answer.answer}`).join("\n"),
+        contactFollow: showBellboFollow
+          ? {
+              account: formatXHandle(bellboXHandle),
+              url: bellboXUrl,
+              required: requireBellboFollow,
+              confirmed: bellboFollowConfirmed
+            }
+          : null,
         attachments
       },
       rawAnswers
@@ -937,6 +1031,10 @@ function PublicSubmissionForm({ logoSrc, payload, loading, error, message }) {
     event.preventDefault();
     setFormError("");
     setSubmitStatus("");
+    if (requireBellboFollow && !bellboFollowConfirmed) {
+      setFormError("応募後の連絡のため、べるぼのXフォロー確認にチェックを入れてください。");
+      return;
+    }
     const responsePayload = buildPayload();
     const totalAttachmentBytes = responsePayload.response.attachments.reduce((sum, attachment) => sum + Number(attachment.size || 0), 0);
     if (totalAttachmentBytes > attachmentLimitBytes) {
@@ -958,6 +1056,7 @@ function PublicSubmissionForm({ logoSrc, payload, loading, error, message }) {
       const savedFiles = Array.isArray(result.savedFiles) ? result.savedFiles.length : 0;
       setSubmitStatus(`${form.thanksMessage || "ご応募ありがとうございました。"}（受付番号: ${result.savedAs || responsePayload.response.id}${savedFiles ? ` / 添付${savedFiles}件保存済み` : ""}）`);
       setAnswers({});
+      setBellboFollowConfirmed(false);
       event.currentTarget.reset();
     } catch (submitError) {
       setSubmitStatus(`送信できませんでした（${submitError?.message || "不明なエラー"}）。時間を置いて再送信するか、運営側へご連絡ください。`);
@@ -994,6 +1093,27 @@ function PublicSubmissionForm({ logoSrc, payload, loading, error, message }) {
         </div>
         {formError && <p className="form-error">{formError}</p>}
         {submitStatus && <p className="submit-status">{submitStatus}</p>}
+        {showBellboFollow && (
+          <div className="x-follow-panel">
+            <div className="x-follow-copy">
+              <b>応募後の連絡について</b>
+              <p>{xContactMessage}</p>
+            </div>
+            <div className="x-follow-actions">
+              <a className="secondary" href={bellboXUrl} target="_blank" rel="noreferrer">
+                <Link size={16} />{formatXHandle(bellboXHandle)} を開く
+              </a>
+              <label className="inline-check">
+                <input
+                  type="checkbox"
+                  checked={bellboFollowConfirmed}
+                  onChange={(event) => setBellboFollowConfirmed(event.target.checked)}
+                />
+                べるぼをフォローしました{requireBellboFollow ? " *" : ""}
+              </label>
+            </div>
+          </div>
+        )}
         <form className="public-form" onSubmit={submit}>
           {form.questions.map((question) => (
             <label className="field wide public-question" key={question.id}>

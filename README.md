@@ -8,6 +8,7 @@ Voice Casting Studio is a browser-based tool for creating voice actor audition f
 - Add recording upload questions for voice samples.
 - Set application periods.
 - Choose a Google Drive folder for form responses and recordings.
+- Configure Bellbo's X follow guidance for post-application contact.
 - Share portable compressed form URLs.
 - Publish short form URLs through Google Apps Script.
 - Sync received responses back into the management screen.
