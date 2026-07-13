@@ -782,6 +782,7 @@ export const getLayoutPresetForGuestCount = (count = 1) => {
 export const defaultImports = {
   guestCsvUrl: "",
   listenerCsvUrl: "",
+  listenerFormId: "",
   personalityCsvUrl: "",
   bellboTrackUrl: "",
   lastLog: []
@@ -1340,6 +1341,16 @@ export const buildResponseFromRow = (row, episodeId, formId, fallbackRespondent 
       [/AI\s*アーティスト|AI artist|AI名義/i]
     ) || (hasMeaningfulAnswers ? fallbackRespondent : "");
   const xUrl = pickImportValue(row, ["X URL", "Twitter URL", "Xアカウント", "Twitterアカウント", "X", "Twitter"], [/((X|Twitter|旧Twitter).*(URL|アカウント|ID|ユーザー名|リンク))|((URL|リンク).*(X|Twitter|旧Twitter))/i]);
+  const email = pickImportValue(
+    row,
+    ["メールアドレス", "メールアドレス（予備連絡先）", "Email Address", "Email", "mail", "メール"],
+    [/(メール|mail|email).*(アドレス|address)?/i]
+  );
+  const desiredRole = pickImportValue(
+    row,
+    ["希望役", "希望する役", "応募役", "役名", "第一希望", "希望キャラクター", "希望ポジション"],
+    [/希望.*(役|キャラクター|ポジション)|応募.*役|役名|第一希望/i]
+  );
   const iconUrl = pickImportValue(
     row,
     ["ゲストアイコン画像", "アイコン画像", "プロフィール画像", "サムネ用画像", "画像URL", "アイコンURL", "icon", "avatar", "profile image"],
@@ -1351,7 +1362,7 @@ export const buildResponseFromRow = (row, episodeId, formId, fallbackRespondent 
   const songThought = pickImportValue(row, ["曲に込めた想い", "楽曲への想い", "曲紹介", "紹介文", "記事で触れてほしいポイント"], [/曲.*(想い|思い|紹介|こだわり|ポイント|メッセージ)|楽曲.*(想い|思い|紹介|こだわり|ポイント|メッセージ)/]);
   const internal = pickImportValue(row, ["制作側だけに共有するメモ", "内部確認", "運営メモ", "非公開メモ"], [/制作側|内部|運営|非公開|メモ|補足/]);
   const constraints = pickImportValue(row, ["触れないでほしいこと", "NG質問", "表記注意", "注意事項", "記事/SNSで触れないこと・表記ルール"], [/触れない|NG|表記注意|注意事項|伏せたい|非公開|禁止|避けて|表記ルール/]);
-  const remainingAnswers = formatRemainingAnswers(row, [respondent, xUrl, iconUrl, profile, topics, songThought, internal, constraints]);
+  const remainingAnswers = formatRemainingAnswers(row, [respondent, xUrl, email, desiredRole, iconUrl, profile, topics, songThought, internal, constraints]);
 
   return {
     id: newId("res"),
@@ -1360,9 +1371,15 @@ export const buildResponseFromRow = (row, episodeId, formId, fallbackRespondent 
     formId,
     respondent,
     status: "未確認",
+    contactEmail: email,
+    contactX: xUrl,
+    desiredRole,
+    proposedRole: "",
+    messageDraft: "",
+    messageSentAt: "",
     publicInfo: compactLines([profile, xUrl && `X: ${xUrl}`]),
-    articleUse: compactLines([topics, songThought, remainingAnswers && `その他の回答:\n${remainingAnswers}`]),
-    internalOnly: internal,
+    articleUse: compactLines([desiredRole && `希望役: ${desiredRole}`, topics, songThought, remainingAnswers && `その他の回答:\n${remainingAnswers}`]),
+    internalOnly: compactLines([email && `メール: ${email}`, internal]),
     constraints,
     attachments: iconUrl
       ? [
@@ -1731,7 +1748,7 @@ export const buildImportPreviewRows = (rows = [], kind = "", mapping = {}) => {
   });
 };
 
-export const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "") => {
+export const importRowsIntoData = (current, selectedEpisode, rows, kind, periodId = "", sourceFormId = "") => {
   if (!selectedEpisode || rows.length === 0) {
     return { data: current, result: { responses: 0, tracks: 0 } };
   }
@@ -1789,7 +1806,7 @@ export const importRowsIntoData = (current, selectedEpisode, rows, kind, periodI
 
     if (kind === "listener") {
       const tracks = buildTracksFromRow(row, selectedEpisode.id, "リスナー応募曲", "", periodId);
-      const response = buildResponseFromImportedRecordingRow(row, selectedEpisode.id, "form_imported_recordings", "", tracks, periodId);
+      const response = buildResponseFromImportedRecordingRow(row, selectedEpisode.id, sourceFormId || "form_imported_recordings", "", tracks, periodId);
       if (
         response.respondent ||
         response.publicInfo ||
@@ -2238,6 +2255,10 @@ export const sampleData = {
       shareSlug: "voice-casting",
       color: "#8bd7df",
       description: "お名前、連絡用X、希望役、プロフィール、録音サンプルを受け取る応募フォームです。",
+      googleFormUrl: "",
+      responseSheetUrl: "",
+      expectedColumns: "タイムスタンプ / 応募者名 / メールアドレス / 連絡用Xアカウント / 希望役 / 録音タイトル / 録音ファイル / 参考URL / 表記注意",
+      importMemo: "Googleフォームの回答先スプレッドシートURLを入れて、回答取り込みからプレビュー確認します。",
       receptionStartDate: "2026-07-12",
       receptionEndDate: "",
       attachmentLimitMb: DEFAULT_ATTACHMENT_LIMIT_MB,
@@ -2268,6 +2289,10 @@ export const sampleData = {
       shareSlug: "voice-materials",
       color: "#f3c96b",
       description: "追加録音や差し替え素材を後から受け取るためのフォームです。",
+      googleFormUrl: "",
+      responseSheetUrl: "",
+      expectedColumns: "タイムスタンプ / 応募者名 / メールアドレス / 録音タイトル / 録音ファイル / 補足",
+      importMemo: "追加提出用Googleフォームの回答先スプレッドシートURLを入れます。",
       receptionStartDate: "",
       receptionEndDate: "",
       attachmentLimitMb: DEFAULT_ATTACHMENT_LIMIT_MB,
@@ -2453,6 +2478,10 @@ export function migrateData(input) {
       receptionEndDate: form.receptionEndDate || "",
       submissionLimit: normalizeSubmissionLimit(form.submissionLimit) || "",
       attachmentLimitMb: normalizeAttachmentLimitMb(form.attachmentLimitMb),
+      googleFormUrl: form.googleFormUrl || "",
+      responseSheetUrl: form.responseSheetUrl || form.csvUrl || "",
+      expectedColumns: form.expectedColumns || "",
+      importMemo: form.importMemo || "",
       shareSlug: form.shareSlug || getFormPublishedSlug(form),
       color: normalizeFormColor(form.color, FORM_COLOR_PALETTE[formIndex % FORM_COLOR_PALETTE.length]),
       questions
@@ -2622,6 +2651,12 @@ export function migrateData(input) {
       attachments: [],
       recordings: [],
       periodId: "",
+      contactEmail: "",
+      contactX: "",
+      desiredRole: "",
+      proposedRole: "",
+      messageDraft: "",
+      messageSentAt: "",
       ...response
     })),
     tracks: (input.tracks ?? sampleData.tracks).map((track) => ({

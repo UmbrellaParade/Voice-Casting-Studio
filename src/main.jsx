@@ -266,7 +266,7 @@ const TRACK_FIELD_TYPE_LABELS = Object.fromEntries(TRACK_FIELD_TYPE_OPTIONS);
 const MAIN_NAV_ITEMS = [
   ["dashboard", "概要", Radio],
   ["episodes", "募集企画", CalendarDays],
-  ["forms", "応募フォーム", Send],
+  ["forms", "Googleフォーム", Send],
   ["imports", "回答取り込み", Upload],
   ["responses", "応募一覧", ClipboardCopy],
   ["settings", "設定", Settings]
@@ -275,6 +275,25 @@ const MAIN_NAV_ITEMS = [
 const MAIN_NAV_KEYS = new Set(MAIN_NAV_ITEMS.map(([key]) => key));
 const UI_STATE_KEY = `${STORAGE_KEY}:ui`;
 const formAnchorId = (formId) => `form-section-${formId}`;
+
+const AUDITION_STATUS_OPTIONS = ["未確認", "合格", "不合格", "キープ", "他の役に抜擢予定"];
+const MESSAGE_TARGET_STATUSES = ["不合格", "合格", "キープ", "他の役に抜擢予定"];
+const DEFAULT_MESSAGE_SUBJECTS = {
+  合格: "声優募集 選考結果のご連絡",
+  不合格: "声優募集 選考結果のご連絡",
+  キープ: "声優募集 選考状況のご連絡",
+  "他の役に抜擢予定": "声優募集 別役でのご相談"
+};
+const DEFAULT_MESSAGE_TEMPLATES = {
+  合格:
+    "{name}様\n\nこのたびはご応募いただき、ありがとうございました。\n録音を確認させていただいた結果、ぜひ今回の企画でお願いしたいと考えております。\n\n今後の流れや担当内容について、あらためてご連絡いたします。\n引き続きどうぞよろしくお願いいたします。",
+  不合格:
+    "{name}様\n\nこのたびはご応募いただき、誠にありがとうございました。\nお送りいただいた録音を拝聴し、慎重に検討いたしましたが、今回は見送りとさせていただきます。\n\n貴重なお時間を使ってご応募くださったこと、心より感謝いたします。\nまた別の機会がありましたら、ぜひよろしくお願いいたします。",
+  キープ:
+    "{name}様\n\nこのたびはご応募いただき、ありがとうございます。\nお送りいただいた録音を確認し、現在キープ候補として検討しております。\n\n最終判断まで少しお時間をいただきますが、進展がありましたらあらためてご連絡いたします。\nどうぞよろしくお願いいたします。",
+  "他の役に抜擢予定":
+    "{name}様\n\nこのたびはご応募いただき、ありがとうございます。\n録音を確認したところ、当初の希望役とは別に「{role}」でご相談できないかと考えております。\n\n差し支えなければ、別役での参加可否についてご返信いただけますと幸いです。\nどうぞよろしくお願いいたします。"
+};
 
 const getTrackFieldDefaults = (settings = {}) => normalizeTrackFields(settings.trackFieldDefaults);
 
@@ -307,6 +326,10 @@ const makeFormSnapshot = (form) => ({
   type: form.type || "自由フォーム",
   status: form.status || "準備中",
   description: form.description || "",
+  googleFormUrl: form.googleFormUrl || "",
+  responseSheetUrl: form.responseSheetUrl || "",
+  expectedColumns: form.expectedColumns || "",
+  importMemo: form.importMemo || "",
   receptionStartDate: form.receptionStartDate || "",
   receptionEndDate: form.receptionEndDate || "",
   submissionLimit: form.submissionLimit || "",
@@ -659,6 +682,12 @@ function App() {
     updateData(key, (items) => items.filter((item) => item.id !== id));
   };
 
+  const bulkPatchResponses = (ids = [], patch = {}) => {
+    const idSet = new Set(ids);
+    if (!idSet.size) return;
+    updateData("responses", (responses) => responses.map((response) => (idSet.has(response.id) ? { ...response, ...patch } : response)));
+  };
+
   const addTrack = () => {
     if (!selectedEpisode) return;
     updateData("tracks", (tracks) => [
@@ -709,12 +738,16 @@ function App() {
       ...forms,
       {
         id: newId("form"),
-        name: "新しい応募フォーム",
+        name: "新しいGoogleフォーム",
         type: "声優募集",
         status: "準備中",
         shareSlug: "",
         color: normalizeFormColor(FORM_COLOR_PALETTE[forms.length % FORM_COLOR_PALETTE.length]),
         description: "",
+        googleFormUrl: "",
+        responseSheetUrl: "",
+        expectedColumns: "タイムスタンプ / 応募者名 / メールアドレス / 連絡用Xアカウント / 希望役 / 録音タイトル / 録音ファイル / 参考URL / 表記注意",
+        importMemo: "",
         receptionStartDate: "",
         receptionEndDate: "",
         submissionLimit: "",
@@ -981,7 +1014,8 @@ function App() {
     setData((current) => {
       const currentEpisode = current.episodes.find((episode) => episode.id === targetEpisodeId) ?? selectedEpisode;
       if (!currentEpisode) return appendImportLogToData(current, `${label}: 対象の放送回が見つかりませんでした。`);
-      const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, kind, periodId);
+      const sourceFormId = kind === "listener" ? current.imports?.listenerFormId || "" : "";
+      const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, kind, periodId, sourceFormId);
       const recordingBreakdown = result.tracks > 0 ? `（新規${result.trackCreates ?? 0}件 / 更新${result.trackUpdates ?? 0}件）` : "";
       const emptyResultNote =
         result.responses === 0 && result.tracks === 0
@@ -1100,7 +1134,7 @@ function App() {
 
     setData((current) => {
       const currentEpisode = current.episodes.find((episode) => episode.id === period.episodeId) ?? selectedEpisode;
-      const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, "listener", period.id);
+      const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, "listener", period.id, period.formId);
       const recordingBreakdown = result.tracks > 0 ? `（新規${result.trackCreates ?? 0}件 / 更新${result.trackUpdates ?? 0}件）` : "";
       const nextWithPeriod = {
         ...next,
@@ -1134,7 +1168,7 @@ function App() {
 
       setData((current) => {
         const currentEpisode = current.episodes.find((episode) => episode.id === period.episodeId) ?? selectedEpisode;
-        const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, "listener", period.id);
+        const { data: next, result } = importRowsIntoData(current, currentEpisode, rows, "listener", period.id, period.formId);
         const recordingBreakdown = result.tracks > 0 ? `（新規${result.trackCreates ?? 0}件 / 更新${result.trackUpdates ?? 0}件）` : "";
         const nextWithPeriod = {
           ...next,
@@ -1493,6 +1527,12 @@ ${socialRows || "-"}
       formId: response.formId || data.forms[0]?.id || "",
       respondent: response.respondent || "",
       status: response.status || "未確認",
+      contactEmail: response.contactEmail || response.email || "",
+      contactX: response.contactX || response.xUrl || "",
+      desiredRole: response.desiredRole || "",
+      proposedRole: response.proposedRole || "",
+      messageDraft: response.messageDraft || "",
+      messageSentAt: response.messageSentAt || "",
       publicInfo: response.publicInfo || "",
       articleUse: response.articleUse || "",
       internalOnly: response.internalOnly || "",
@@ -1721,6 +1761,8 @@ ${socialRows || "-"}
               removeQuestion={removeQuestion}
               collapsibleState={collapsibleState}
               setCollapsibleOpen={setCollapsibleOpen}
+              updateImports={updateImports}
+              setActive={setActive}
             />
           )}
           {active === "responses" && (
@@ -1734,6 +1776,7 @@ ${socialRows || "-"}
               syncResponses={syncResponses}
               syncState={syncState}
               lastResponseSyncAt={data.settings.lastResponseSyncAt || ""}
+              bulkPatchResponses={bulkPatchResponses}
             />
           )}
           {active === "tracks" && (
@@ -1910,14 +1953,14 @@ function RestoreDataView({ logoSrc, payload, restoreData }) {
 function Dashboard({ data, selectedEpisode, episodeTracks, setActive }) {
   const stats = [
     ["募集企画", data.episodes.length, CalendarDays],
-    ["応募フォーム", data.forms.length, Send],
+    ["Googleフォーム", data.forms.length, Send],
     ["回答取り込み", data.imports?.lastLog?.length ? "履歴あり" : "未実行", Upload],
     ["応募一覧", data.responses.length, ClipboardCopy],
     ["Drive保存先", data.settings.responseDriveFolderUrl ? "設定済" : "未設定", FolderOpen]
   ];
   const statTargets = {
     募集企画: "episodes",
-    応募フォーム: "forms",
+    Googleフォーム: "forms",
     回答取り込み: "imports",
     応募一覧: "responses",
     Drive保存先: "settings"
@@ -1925,7 +1968,7 @@ function Dashboard({ data, selectedEpisode, episodeTracks, setActive }) {
 
   return (
     <div className="view-stack">
-      <SectionTitle title="ダッシュボード" subtitle="声優募集フォーム、録音物の保存先、応募状況を確認します。" />
+      <SectionTitle title="ダッシュボード" subtitle="Googleフォーム、録音物の保存先、応募状況を確認します。" />
       <div className="stat-grid">
         {stats.map(([label, value, Icon]) => (
           <button className="stat-card" key={label} onClick={() => setActive(statTargets[label])}>
@@ -1939,8 +1982,8 @@ function Dashboard({ data, selectedEpisode, episodeTracks, setActive }) {
       <article className="panel">
         <h2>基本の流れ</h2>
         <div className="button-row">
-          <button className="secondary" onClick={() => setActive("forms")}>1. フォーム作成</button>
-          <button className="secondary" onClick={() => setActive("forms")}>2. 受付期間設定</button>
+          <button className="secondary" onClick={() => setActive("forms")}>1. Googleフォーム登録</button>
+          <button className="secondary" onClick={() => setActive("forms")}>2. 回答先シート設定</button>
           <button className="secondary" onClick={() => setActive("settings")}>3. Drive保存先設定</button>
           <button className="secondary" onClick={() => setActive("imports")}>4. 回答取り込み</button>
           <button className="primary" onClick={() => setActive("responses")}>5. 応募確認</button>
@@ -1967,7 +2010,7 @@ function Dashboard({ data, selectedEpisode, episodeTracks, setActive }) {
         <article className="panel">
           <h2>受付準備</h2>
           <div className="check-list">
-            <StatusLine done={data.forms.length > 0} label="応募フォーム" />
+            <StatusLine done={data.forms.length > 0} label="Googleフォーム" />
             <StatusLine done={Boolean(data.settings.responseEndpointUrl)} label="回答保存Webhook" />
             <StatusLine done={Boolean(data.settings.responseDriveFolderUrl)} label="Drive保存先フォルダー" />
             <StatusLine done={data.responses.length > 0} label="応募データ" />
@@ -2150,6 +2193,47 @@ function SourceImportCard({
   );
 }
 
+function getResponseEmail(response = {}) {
+  const direct = String(response.contactEmail || "").trim();
+  const text = direct || `${response.internalOnly || ""}\n${response.publicInfo || ""}`;
+  return text.split(/[\s,;、，]+/).find((part) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(part)) || "";
+}
+
+function getResponseContactX(response = {}) {
+  return String(response.contactX || "").trim();
+}
+
+function getResponseDesiredRole(response = {}) {
+  if (response.desiredRole) return response.desiredRole;
+  const match = String(response.articleUse || "").match(/希望役[:：]\s*([^\n]+)/);
+  return match?.[1]?.trim() || "";
+}
+
+function fillMessageTemplate(template = "", response = {}, options = {}) {
+  const name = options.bulk ? "応募者の皆さま" : response.respondent || "応募者";
+  const desiredRole = getResponseDesiredRole(response);
+  const role = response.proposedRole || desiredRole || "別役";
+  const source = options.bulk
+    ? String(template || "").replaceAll("{name}様", "{name}").replaceAll("{name}さま", "{name}")
+    : String(template || "");
+  return source
+    .replaceAll("{name}", name)
+    .replaceAll("{status}", response.status || "")
+    .replaceAll("{role}", role)
+    .replaceAll("{desiredRole}", desiredRole || "-")
+    .replaceAll("{memo}", response.internalOnly || "")
+    .trim();
+}
+
+function makeMailtoUrl(recipients = [], subject = "", body = "", useBcc = false) {
+  const cleanRecipients = recipients.map((email) => String(email || "").trim()).filter(Boolean);
+  const params = new URLSearchParams();
+  if (useBcc && cleanRecipients.length) params.set("bcc", cleanRecipients.join(","));
+  if (subject) params.set("subject", subject);
+  if (body) params.set("body", body);
+  return `mailto:${useBcc ? "" : encodeURIComponent(cleanRecipients[0] || "")}?${params.toString()}`;
+}
+
 function getFileSizeLabel(size) {
   const mb = Math.round((Number(size || 0) / 1024 / 1024) * 10) / 10;
   return Number.isFinite(mb) && mb > 0 ? `${mb}MB` : "-";
@@ -2322,7 +2406,7 @@ function Episodes({ episodes, selectedEpisodeId, setSelectedEpisodeId, patchItem
 
   return (
     <div className="view-stack">
-      <SectionTitle title="募集企画管理" subtitle="声優募集や追加録音など、応募フォームをまとめる単位を管理します。" action={<button className="primary" onClick={addEpisode}><Plus size={16} />追加</button>} />
+      <SectionTitle title="募集企画管理" subtitle="声優募集や追加録音など、Googleフォームの回答をまとめる単位を管理します。" action={<button className="primary" onClick={addEpisode}><Plus size={16} />追加</button>} />
       <div className="records">
         {episodes.map((episode) => (
           <article className={episode.id === selectedEpisodeId ? "record selected" : "record"} key={episode.id}>
@@ -2559,7 +2643,9 @@ function Forms({
   saveTrackFieldsAsDefault,
   removeQuestion,
   collapsibleState,
-  setCollapsibleOpen
+  setCollapsibleOpen,
+  updateImports,
+  setActive
 }) {
   const [copiedFormId, setCopiedFormId] = useState("");
   const [publishMessage, setPublishMessage] = useState("");
@@ -2595,6 +2681,105 @@ function Forms({
     collapsibleState,
     setCollapsibleOpen
   });
+
+  const sendFormToImport = (form) => {
+    updateImports({ listenerCsvUrl: form.responseSheetUrl || "", listenerFormId: form.id });
+    setActive("imports");
+  };
+
+  const copyGoogleFormRequest = async (form) => {
+    const text = [
+      "Googleフォームを作る時のメモです。",
+      "",
+      `フォーム名: ${form.name || "未入力"}`,
+      form.description ? `説明: ${form.description}` : "",
+      "必要な列:",
+      form.expectedColumns || "タイムスタンプ / 応募者名 / メールアドレス / 連絡用Xアカウント / 希望役 / 録音タイトル / 録音ファイル / 参考URL / 表記注意",
+      "",
+      "回答先はGoogleスプレッドシートに接続し、そのスプレッドシートURLをVoice Casting Studioの回答先シート欄に貼ります。"
+    ]
+      .filter(Boolean)
+      .join("\n");
+    await navigator.clipboard.writeText(text);
+    setPresetMessage("Googleフォーム作成メモをコピーしました。");
+    window.setTimeout(() => setPresetMessage(""), 2400);
+  };
+
+  return (
+    <div className="view-stack">
+      <SectionTitle
+        title="Googleフォーム管理"
+        subtitle="応募フォーム本体はGoogleフォームで作り、回答先スプレッドシート/CSVをこのツールへ取り込みます。"
+        action={<button className="primary" onClick={addForm}><Plus size={16} />管理カード追加</button>}
+      />
+      <article className="panel">
+        <h2>Googleフォーム運用の流れ</h2>
+        <div className="google-form-flow">
+          <div><b>1</b><span>Googleフォームを作る</span></div>
+          <div><b>2</b><span>回答先スプレッドシートを作る</span></div>
+          <div><b>3</b><span>シートURLを登録</span></div>
+          <div><b>4</b><span>回答取り込みでプレビュー反映</span></div>
+        </div>
+        <p className="hint-text">録音アップロード欄はGoogleフォームの「ファイルのアップロード」またはDrive共有リンク回答で運用できます。取り込み時に応募者名と同じ行の録音URLを結びつけます。</p>
+      </article>
+      {presetMessage && <p className="hint-text">{presetMessage}</p>}
+      <div className="records">
+        {forms.map((form) => (
+          <PersistentDetails {...detailsProps(`form:${form.id}:google`, true)} className="record collapsible-record form-record" key={form.id} id={formAnchorId(form.id)} style={getFormColorStyle(form.color)}>
+            <summary className="record-summary">
+              <strong><i className="form-color-dot" aria-hidden="true" />{form.name || "Googleフォーム名未入力"}</strong>
+              <span>{form.status || "準備中"}</span>
+              <span>{formatDateRange(form.receptionStartDate, form.receptionEndDate)}</span>
+              <span>{form.responseSheetUrl ? "回答先あり" : "回答先未設定"}</span>
+            </summary>
+            <div className="record-body">
+              <div className="record-head compact">
+                <strong>Googleフォーム設定</strong>
+                <div className="inline-actions">
+                  <button className="secondary" onClick={() => copyGoogleFormRequest(form)}><ClipboardCopy size={16} />作成メモをコピー</button>
+                  <button className="primary" onClick={() => sendFormToImport(form)} disabled={!form.responseSheetUrl}><Upload size={16} />回答取り込みへ</button>
+                  <button
+                    className="icon-danger"
+                    onClick={() => {
+                      removeFormWithBackup(form);
+                      setPresetMessage(`「${form.name || "Googleフォーム名未入力"}」を削除し、プリセットにバックアップしました。`);
+                      window.setTimeout(() => setPresetMessage(""), 3000);
+                    }}
+                    title="削除バックアップを残して削除"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+              <div className="form-grid">
+                <Field label="管理名" value={form.name} onChange={(value) => patchItem("forms", form.id, { name: value })} />
+                <SelectField label="状態" value={form.status || "準備中"} options={["準備中", "受付中", "受付終了", "取り込み中", "完了", "保留"]} onChange={(value) => patchItem("forms", form.id, { status: value })} />
+                <Field label="GoogleフォームURL" value={form.googleFormUrl || ""} onChange={(value) => patchItem("forms", form.id, { googleFormUrl: value })} placeholder="https://docs.google.com/forms/d/..." wide />
+                <Field label="回答先スプレッドシート / CSV URL" value={form.responseSheetUrl || ""} onChange={(value) => patchItem("forms", form.id, { responseSheetUrl: value })} placeholder="https://docs.google.com/spreadsheets/d/..." wide />
+                <Field label="受付開始" type="date" value={form.receptionStartDate || ""} onChange={(value) => patchItem("forms", form.id, { receptionStartDate: value })} />
+                <Field label="受付終了" type="date" value={form.receptionEndDate || ""} onChange={(value) => patchItem("forms", form.id, { receptionEndDate: value })} />
+                <TextArea label="フォーム説明 / 運用メモ" value={form.description || ""} onChange={(value) => patchItem("forms", form.id, { description: value })} />
+                <TextArea label="取り込みたい列名メモ" value={form.expectedColumns || ""} onChange={(value) => patchItem("forms", form.id, { expectedColumns: value })} />
+                <TextArea label="取り込みメモ" value={form.importMemo || ""} onChange={(value) => patchItem("forms", form.id, { importMemo: value })} />
+              </div>
+              <div className="inline-actions">
+                {form.googleFormUrl && (
+                  <a className="secondary file-button" href={form.googleFormUrl} target="_blank" rel="noreferrer noopener">
+                    <Link size={16} />Googleフォームを開く
+                  </a>
+                )}
+                {form.responseSheetUrl && (
+                  <a className="secondary file-button" href={form.responseSheetUrl} target="_blank" rel="noreferrer noopener">
+                    <Link size={16} />回答先シートを開く
+                  </a>
+                )}
+              </div>
+            </div>
+          </PersistentDetails>
+        ))}
+      </div>
+    </div>
+  );
 
   const addSelectedPreset = () => {
     if (!selectedPreset) return;
@@ -2966,12 +3151,58 @@ function Forms({
   );
 }
 
-function Responses({ forms, responses, patchItem, removeItem, addResponse, importResponseJson, syncResponses, syncState, lastResponseSyncAt }) {
+function Responses({ forms, responses, patchItem, removeItem, addResponse, importResponseJson, syncResponses, syncState, lastResponseSyncAt, bulkPatchResponses }) {
+  const [statusFilter, setStatusFilter] = useState("すべて");
+  const [messageStatus, setMessageStatus] = useState("不合格");
+  const [messageSubject, setMessageSubject] = useState(DEFAULT_MESSAGE_SUBJECTS["不合格"]);
+  const [messageTemplate, setMessageTemplate] = useState(DEFAULT_MESSAGE_TEMPLATES["不合格"]);
+  const [copyMessage, setCopyMessage] = useState("");
+  const formLabels = Object.fromEntries(forms.map((form) => [form.id, form.name]));
+  const statusCounts = Object.fromEntries(
+    ["すべて", ...AUDITION_STATUS_OPTIONS].map((status) => [
+      status,
+      status === "すべて" ? responses.length : responses.filter((response) => (response.status || "未確認") === status).length
+    ])
+  );
+  const filteredResponses =
+    statusFilter === "すべて" ? responses : responses.filter((response) => (response.status || "未確認") === statusFilter);
+  const targetResponses = responses.filter((response) => (response.status || "未確認") === messageStatus);
+  const targetEmails = targetResponses.map(getResponseEmail).filter(Boolean);
+
+  const updateMessageStatus = (status) => {
+    setMessageStatus(status);
+    setMessageSubject(DEFAULT_MESSAGE_SUBJECTS[status] || "選考結果のご連絡");
+    setMessageTemplate(DEFAULT_MESSAGE_TEMPLATES[status] || "");
+  };
+
+  const copyText = async (text, message = "コピーしました。") => {
+    await navigator.clipboard.writeText(text);
+    setCopyMessage(message);
+    window.setTimeout(() => setCopyMessage(""), 2200);
+  };
+
+  const buildIndividualMessage = (response) => response.messageDraft || fillMessageTemplate(messageTemplate, response);
+  const buildAllMessagesText = () =>
+    targetResponses
+      .map((response) =>
+        [
+          `--- ${response.respondent || "応募者未入力"} / ${getResponseEmail(response) || getResponseContactX(response) || "連絡先未入力"} ---`,
+          buildIndividualMessage(response)
+        ].join("\n")
+      )
+      .join("\n\n");
+
+  const markTargetsSent = () => {
+    bulkPatchResponses(targetResponses.map((response) => response.id), { messageSentAt: new Date().toISOString() });
+    setCopyMessage(`${messageStatus}の対象者を連絡済みにしました。`);
+    window.setTimeout(() => setCopyMessage(""), 2200);
+  };
+
   return (
     <div className="view-stack">
       <SectionTitle
-        title="回答管理"
-        subtitle="公開プロフィール、審査に使う内容、制作メモ、NG/表記ルールを分けて保持します。"
+        title="応募一覧 / 審査管理"
+        subtitle="応募者名と録音を同じ回答行で確認し、審査結果ごとに連絡文を作れます。"
         action={
           <div className="inline-actions">
             <button className="primary" onClick={syncResponses} disabled={syncState?.busy}>
@@ -2991,49 +3222,128 @@ function Responses({ forms, responses, patchItem, removeItem, addResponse, impor
           {lastResponseSyncAt ? `（最終同期: ${new Date(lastResponseSyncAt).toLocaleString("ja-JP")}）` : ""}
         </p>
       )}
-      <div className="records">
-        {responses.map((response) => (
-          <article className="record" key={response.id}>
-            <div className="record-head">
-              <strong>{response.respondent || "回答者未入力"}</strong>
-              <button className="icon-danger" onClick={() => removeItem("responses", response.id)}><Trash2 size={16} /></button>
-            </div>
-            <RecordingList response={response} />
-            <div className="form-grid">
-              <Field label="回答者" value={response.respondent} onChange={(value) => patchItem("responses", response.id, { respondent: value })} />
-              <SelectField label="フォーム" value={response.formId} options={forms.map((form) => form.id)} labels={Object.fromEntries(forms.map((form) => [form.id, form.name]))} onChange={(value) => patchItem("responses", response.id, { formId: value })} />
-              <SelectField label="状態" value={response.status} options={["未確認", "確認済み", "要確認"]} onChange={(value) => patchItem("responses", response.id, { status: value })} />
-              <TextArea label="公開してOKなプロフィール" value={response.publicInfo} onChange={(value) => patchItem("responses", response.id, { publicInfo: value })} />
-              <TextArea label="審査・確認に使う内容" value={response.articleUse} onChange={(value) => patchItem("responses", response.id, { articleUse: value })} />
-              <TextArea label="制作側だけに共有するメモ" value={response.internalOnly} onChange={(value) => patchItem("responses", response.id, { internalOnly: value })} />
-              <TextArea label="公開/連絡で触れないこと・表記ルール" value={response.constraints} onChange={(value) => patchItem("responses", response.id, { constraints: value })} />
-            </div>
-            {response.attachments?.length > 0 && (
-              <div className="attachment-list">
-                <div className="subhead">添付ファイル</div>
-                {response.attachments.map((attachment, index) => (
-                  <div className="attachment-item" key={`${attachment.fileName}-${index}`}>
-                    <span>{attachment.fileName}</span>
-                    <small>{Math.round((attachment.size || 0) / 1024 / 1024 * 10) / 10}MB</small>
-                    <button className="secondary" onClick={() => downloadAttachment(attachment)}><Download size={16} />ダウンロード</button>
-                    <button className="secondary" onClick={() => saveAttachmentWithPicker(attachment)}><FolderOpen size={16} />保存先を選ぶ</button>
-                    {attachment.driveUrl && (
-                      <a className="secondary file-button" href={attachment.driveUrl} target="_blank" rel="noreferrer noopener">
-                        <Link size={16} />Driveで開く
-                      </a>
-                    )}
-                    {attachment.dataUrl && isImageAttachment(attachment) && (
-                      <img className="attachment-image" src={attachment.dataUrl} alt={attachment.fileName || "添付画像"} />
-                    )}
-                    {attachment.dataUrl && isAudioAttachment(attachment) && (
-                      <audio className="attachment-audio" controls preload="metadata" src={attachment.dataUrl} />
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </article>
+
+      <div className="status-filter-grid">
+        {["すべて", ...AUDITION_STATUS_OPTIONS].map((status) => (
+          <button key={status} className={statusFilter === status ? "active" : ""} onClick={() => setStatusFilter(status)}>
+            <span>{status}</span>
+            <b>{statusCounts[status] ?? 0}</b>
+          </button>
         ))}
+      </div>
+
+      <article className="panel message-builder">
+        <div className="record-head compact">
+          <div>
+            <h2>連絡文作成</h2>
+            <p className="muted">対象ステータスの応募者へ送る文面をまとめて作れます。メール送信はメールアプリの下書き作成までです。</p>
+          </div>
+          <div className="message-target-count">{messageStatus}: {targetResponses.length}件 / メール {targetEmails.length}件</div>
+        </div>
+        <div className="form-grid">
+          <SelectField label="対象ステータス" value={messageStatus} options={MESSAGE_TARGET_STATUSES} onChange={updateMessageStatus} />
+          <Field label="件名" value={messageSubject} onChange={setMessageSubject} />
+          <TextArea label="共通テンプレート" value={messageTemplate} onChange={setMessageTemplate} />
+        </div>
+        <p className="hint-text">差し込み: {"{name}"} 応募者名 / {"{desiredRole}"} 希望役 / {"{role}"} 別役候補 / {"{status}"} 審査結果 / {"{memo}"} 制作メモ</p>
+        <div className="inline-actions">
+          <button className="secondary" onClick={() => copyText(buildAllMessagesText(), `${messageStatus}の個別文面をまとめてコピーしました。`)} disabled={!targetResponses.length}>
+            <ClipboardCopy size={16} />個別文面を一括コピー
+          </button>
+          <a
+            className={targetEmails.length ? "secondary file-button" : "secondary file-button disabled-link"}
+            href={targetEmails.length ? makeMailtoUrl(targetEmails, messageSubject, fillMessageTemplate(messageTemplate, {}, { bulk: true }), true) : undefined}
+            onClick={(event) => {
+              if (!targetEmails.length) event.preventDefault();
+            }}
+          >
+            <Send size={16} />一括メール下書き
+          </a>
+          <button className="secondary" onClick={markTargetsSent} disabled={!targetResponses.length}>
+            <Save size={16} />対象を連絡済みにする
+          </button>
+        </div>
+        {copyMessage && <p className="hint-text">{copyMessage}</p>}
+      </article>
+
+      <div className="records">
+        {filteredResponses.map((response) => {
+          const email = getResponseEmail(response);
+          const contactX = getResponseContactX(response);
+          const desiredRole = getResponseDesiredRole(response);
+          const individualMessage = buildIndividualMessage(response);
+          return (
+            <article className="record response-card" key={response.id}>
+              <div className="record-head">
+                <div>
+                  <strong>{response.respondent || "応募者未入力"}</strong>
+                  <div className="response-badges">
+                    <span className={`review-status status-${normalizeKey(response.status || "未確認")}`}>{response.status || "未確認"}</span>
+                    {desiredRole && <span>希望役: {desiredRole}</span>}
+                    {response.messageSentAt && <span>連絡済み</span>}
+                  </div>
+                </div>
+                <button className="icon-danger" onClick={() => removeItem("responses", response.id)}><Trash2 size={16} /></button>
+              </div>
+              <RecordingList response={response} />
+              <div className="form-grid">
+                <Field label="応募者名" value={response.respondent} onChange={(value) => patchItem("responses", response.id, { respondent: value })} />
+                <SelectField label="Googleフォーム" value={response.formId} options={forms.map((form) => form.id)} labels={formLabels} onChange={(value) => patchItem("responses", response.id, { formId: value })} />
+                <SelectField label="審査結果" value={response.status || "未確認"} options={AUDITION_STATUS_OPTIONS} onChange={(value) => patchItem("responses", response.id, { status: value })} />
+                <Field label="希望役" value={desiredRole} onChange={(value) => patchItem("responses", response.id, { desiredRole: value })} />
+                <Field label="別役候補" value={response.proposedRole || ""} onChange={(value) => patchItem("responses", response.id, { proposedRole: value })} />
+                <Field label="メールアドレス" value={response.contactEmail || ""} onChange={(value) => patchItem("responses", response.id, { contactEmail: value })} />
+                <Field label="連絡用X / URL" value={response.contactX || ""} onChange={(value) => patchItem("responses", response.id, { contactX: value })} />
+                <TextArea label="審査・確認に使う内容" value={response.articleUse} onChange={(value) => patchItem("responses", response.id, { articleUse: value })} />
+                <TextArea label="制作側メモ" value={response.internalOnly} onChange={(value) => patchItem("responses", response.id, { internalOnly: value })} />
+                <TextArea label="NG/表記ルール" value={response.constraints} onChange={(value) => patchItem("responses", response.id, { constraints: value })} />
+                <TextArea label="個別連絡文" value={individualMessage} onChange={(value) => patchItem("responses", response.id, { messageDraft: value })} />
+              </div>
+              <div className="inline-actions communication-actions">
+                <button className="secondary" onClick={() => copyText(individualMessage, `${response.respondent || "応募者"}さんの文面をコピーしました。`)}>
+                  <ClipboardCopy size={16} />文面コピー
+                </button>
+                {email && (
+                  <a className="secondary file-button" href={makeMailtoUrl([email], messageSubject, individualMessage)} target="_blank" rel="noreferrer noopener">
+                    <Send size={16} />メール下書き
+                  </a>
+                )}
+                {contactX && (
+                  <a className="secondary file-button" href={contactX.startsWith("http") ? contactX : makeXUrl(contactX)} target="_blank" rel="noreferrer noopener">
+                    <Link size={16} />Xを開く
+                  </a>
+                )}
+                <button className="secondary" onClick={() => patchItem("responses", response.id, { messageSentAt: new Date().toISOString() })}>
+                  <Save size={16} />連絡済み
+                </button>
+              </div>
+              {response.attachments?.length > 0 && (
+                <div className="attachment-list">
+                  <div className="subhead">添付ファイル</div>
+                  {response.attachments.map((attachment, index) => (
+                    <div className="attachment-item" key={`${attachment.fileName}-${index}`}>
+                      <span>{attachment.fileName}</span>
+                      <small>{Math.round((attachment.size || 0) / 1024 / 1024 * 10) / 10}MB</small>
+                      <button className="secondary" onClick={() => downloadAttachment(attachment)}><Download size={16} />ダウンロード</button>
+                      <button className="secondary" onClick={() => saveAttachmentWithPicker(attachment)}><FolderOpen size={16} />保存先を選ぶ</button>
+                      {attachment.driveUrl && (
+                        <a className="secondary file-button" href={attachment.driveUrl} target="_blank" rel="noreferrer noopener">
+                          <Link size={16} />Driveで開く
+                        </a>
+                      )}
+                      {attachment.dataUrl && isImageAttachment(attachment) && (
+                        <img className="attachment-image" src={attachment.dataUrl} alt={attachment.fileName || "添付画像"} />
+                      )}
+                      {attachment.dataUrl && isAudioAttachment(attachment) && (
+                        <audio className="attachment-audio" controls preload="metadata" src={attachment.dataUrl} />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </article>
+          );
+        })}
       </div>
     </div>
   );
@@ -3410,11 +3720,11 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
         <div className="record-head">
           <div>
             <h2>詳細設定</h2>
-            <p className="muted">フォーム作成と応募一覧は上部ナビからも開けます。</p>
+            <p className="muted">Googleフォーム管理、回答取り込み、応募一覧は上部ナビからも開けます。</p>
           </div>
         </div>
         <div className="advanced-actions">
-          <button className="secondary" onClick={() => setActive("forms")}><FileText size={16} />フォーム管理</button>
+          <button className="secondary" onClick={() => setActive("forms")}><FileText size={16} />Googleフォーム管理</button>
           <button className="secondary" onClick={() => setActive("imports")}><Upload size={16} />回答取り込み</button>
           <button className="secondary" onClick={() => setActive("responses")}><ClipboardCopy size={16} />回答管理</button>
         </div>
@@ -3425,10 +3735,10 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
           <p className="hint-text wide">ここはCodex用バックアップを置く場所です。オンラインフォームの回答保存先ではありません。</p>
           <Field label="選択したフォルダー名" value={settings.obsidianFolderName || ""} readOnly />
           <Field label="回答保存Webhook URL" value={settings.responseEndpointUrl || ""} onChange={(value) => updateSettings({ responseEndpointUrl: value })} placeholder="Google Apps ScriptのWebアプリURL" wide />
-          <p className="hint-text wide">docs/google-apps-script/Code.gs をApps Scriptにデプロイして、WebアプリURLをここに貼ります。フォーム送信の受信、新着回答の同期、短いURL公開がこの1本で動きます。</p>
+          <p className="hint-text wide">自前フォームを使う場合だけ必要です。Googleフォーム運用では、回答先スプレッドシートURLをGoogleフォーム管理に貼り、回答取り込みから読み込みます。</p>
           <Field label="回答同期トークン" value={settings.responseSyncToken || ""} onChange={(value) => updateSettings({ responseSyncToken: value })} placeholder="Apps ScriptのSECRET_TOKENと同じ文字列" wide />
           <Field label="回答保存先Google DriveフォルダーURL" value={settings.responseDriveFolderUrl || ""} onChange={(value) => updateSettings({ responseDriveFolderUrl: value })} placeholder="DriveフォルダーのURL" wide />
-          <p className="hint-text wide">回答JSON・音源・画像はこのフォルダーに保存されます。変更したら、使用中フォームの「短いURLを公開/更新」を押し直すと新しい保存先が回答者側にも反映されます。空欄の場合はApps Script側のFOLDER_IDを使います。</p>
+          <p className="hint-text wide">自前フォーム/GAS受信口を使う場合の保存先です。Googleフォーム運用ではGoogleフォーム側の回答先Drive/スプレッドシートを正本として扱います。</p>
           <TextArea label="音源保存先メモ" value={settings.audioSaveMemo || ""} onChange={(value) => updateSettings({ audioSaveMemo: value })} />
           <Field label="べるぼ Xアカウント" value={settings.bellboXHandle || ""} onChange={(value) => updateSettings({ bellboXHandle: normalizeXHandle(value) })} />
           <TextArea label="X連絡ブロック説明文" value={settings.xContactMessage || DEFAULT_X_CONTACT_MESSAGE} onChange={(value) => updateSettings({ xContactMessage: value })} />

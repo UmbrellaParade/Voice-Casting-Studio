@@ -843,6 +843,126 @@ h1 {
   font-weight: 800;
 }
 
+.google-form-flow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.google-form-flow div {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid #eadfce;
+  border-radius: 8px;
+  background: #fbf6ed;
+}
+
+.google-form-flow b {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: #241f2f;
+  color: #fff;
+}
+
+.google-form-flow span {
+  color: #3b3347;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.45;
+}
+
+.status-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.status-filter-grid button {
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  min-height: 58px;
+  border-color: #d6ccbd;
+  background: #fffdf8;
+  color: #241f2f;
+}
+
+.status-filter-grid button.active {
+  border-color: #241f2f;
+  background: #241f2f;
+  color: #fff;
+}
+
+.status-filter-grid span {
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.status-filter-grid b {
+  font-size: 20px;
+}
+
+.message-builder {
+  border-color: #d5c8f2;
+  background: #fbf8ff;
+}
+
+.message-target-count {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #241f2f;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.response-card {
+  display: grid;
+  gap: 12px;
+}
+
+.response-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.response-badges span,
+.review-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #f1eadf;
+  color: #5b5267;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.review-status {
+  background: #241f2f;
+  color: #fff;
+}
+
+.communication-actions {
+  padding-top: 2px;
+}
+
+.disabled-link {
+  opacity: .45;
+  pointer-events: none;
+}
+
 .color-control-row {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr);
@@ -2123,6 +2243,11 @@ textarea {
   .import-mapping-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .google-form-flow,
+  .status-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
@@ -2310,6 +2435,8 @@ textarea {
   .bellbo-url-row,
   .form-grid,
   .form-preset-panel,
+  .google-form-flow,
+  .status-filter-grid,
   .track-meta-grid,
   .question-row,
   .track-field-row,

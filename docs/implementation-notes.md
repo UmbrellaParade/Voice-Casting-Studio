@@ -5,7 +5,7 @@ Voice Casting Studio currently uses Radio Article Studio as the base codebase.
 Visible workflow:
 
 - `募集企画`: lightweight grouping for an audition project
-- `応募フォーム`: form builder, reception period, submission limit, file upload fields, short URL publishing
+- `Googleフォーム`: Google Form / response sheet URL management for audition submissions
 - `回答取り込み`: Google Sheets / CSV import with preview, column mapping, and apply-to-responses flow
 - `応募一覧`: submitted responses and attached recordings
 - `設定`: Google Apps Script endpoint, Drive folder, Bellbo X follow settings, backup import/export
