@@ -1,14 +1,16 @@
 # Umbrella Parade Voice Casting Studio
 
-Voice Casting Studio is a voice drama audition management tool based on Radio Article Studio.
+Voice Casting Studio is a shared script recording and voice audition management tool based on Radio Article Studio.
 
-It keeps the original Umbrella Parade header style and local-first workflow, then narrows the visible screens to the audition workflow:
+The main screen is a recording board shared by the director and voice actors:
 
-- create and publish audition forms
-- set form reception dates and submission limits inside each form
-- receive WAV/MP3 audition recordings
-- save response JSON and attachments to a configured Google Drive folder
-- sync submitted responses back into the management screen
+- paste a full script from Google Sheets, Excel, TSV, or CSV
+- filter by one character or extract dialogue between multiple characters
+- show neighboring lines as recording context
+- assign characters and issue a dedicated URL to each actor
+- share recorded, submitted, approved, retake, and hold progress
+- upload MP3/WAV/M4A files to Google Drive or submit a Drive URL
+- keep Google Forms audition import and applicant review screens
 - export/import local backups
 
 ## Local Development
@@ -37,3 +39,5 @@ The production build is configured for GitHub Pages at `/Voice-Casting-Studio/`.
 7. Paste the target Drive folder URL into `回答保存先Google DriveフォルダーURL`.
 
 After changing webhook or Drive settings, publish/update the form short URL again so respondents receive the latest save destination.
+
+The same Apps Script deployment supports the shared recording board. Set `共同収録 Apps Script URL` and `共同収録 Google DriveフォルダーURL`, then publish the project from `収録ボード > 配役・共有`.

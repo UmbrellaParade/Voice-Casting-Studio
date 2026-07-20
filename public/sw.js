@@ -1,4 +1,4 @@
-const CACHE_VERSION = "voice-casting-studio-v3";
+const CACHE_VERSION = "voice-casting-studio-v4";
 const BASE_PATH = new URL(self.registration.scope).pathname;
 const APP_SHELL = [
   BASE_PATH,

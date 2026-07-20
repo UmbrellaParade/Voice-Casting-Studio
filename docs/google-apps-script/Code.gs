@@ -8,6 +8,7 @@
 //   2. ツールの「新着回答を同期」への回答一覧配信（doGet action=listResponses）
 //   3. 短いURLフォーム定義の公開/配信（doPost action=publishForm / doGet action=getForm）
 //   4. サムネPNGのDrive保存（doPost action=saveThumbnails）
+//   5. 台本収録ボードの公開・進捗同期・録音提出
 //
 // セットアップ手順は docs/google-drive-response-endpoint.md を参照。
 
@@ -25,6 +26,8 @@ const INLINE_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
 const RESPONSES_DIR = "_responses";
 const FORMS_DIR = "_forms";
 const THUMBNAILS_DIR = "サムネ";
+const RECORDING_PROJECTS_DIR = "_recording_projects";
+const RECORDING_UPLOADS_DIR = "収録提出";
 const LOG_SHEET_NAME = "回答ログ";
 
 function jsonOutput(body) {
@@ -44,6 +47,11 @@ function doPost(e) {
       requireToken(payload.token);
       return handleSaveThumbnails(payload);
     }
+    if (action === "publishRecordingProject") {
+      requireToken(payload.token);
+      return handlePublishRecordingProject(payload);
+    }
+    if (action === "updateRecordingLine") return handleUpdateRecordingLine(payload);
     return jsonOutput({ ok: false, error: "未対応のactionです: " + action });
   } catch (error) {
     return jsonOutput({ ok: false, error: errorMessage(error) });
@@ -61,6 +69,7 @@ function doGet(e) {
       requireToken(params.token);
       return handleListResponses(params);
     }
+    if (action === "getRecordingProject") return handleGetRecordingProject(params);
     return jsonOutput({ ok: false, error: "未対応のactionです: " + action });
   } catch (error) {
     return jsonOutput({ ok: false, error: errorMessage(error) });
@@ -348,6 +357,211 @@ function handleGetForm(params) {
   if (!files.hasNext()) throw new Error("このslugのフォームは公開されていません: " + slug);
   const payload = JSON.parse(files.next().getBlob().getDataAsString("UTF-8"));
   return jsonOutput({ ok: true, payload: payload });
+}
+
+// ---- 台本収録ボード ----
+
+function getRecordingProjectFile(root, projectId) {
+  const safeId = sanitizeName(projectId, "");
+  if (!safeId) throw new Error("収録プロジェクトIDがありません。");
+  const folder = getOrCreateFolder(root, RECORDING_PROJECTS_DIR);
+  const files = folder.getFilesByName(safeId + ".json");
+  if (!files.hasNext()) throw new Error("共有された収録プロジェクトが見つかりません。管理者に共有更新を依頼してください。");
+  return files.next();
+}
+
+function readRecordingProject(root, projectId) {
+  return JSON.parse(getRecordingProjectFile(root, projectId).getBlob().getDataAsString("UTF-8"));
+}
+
+function writeRecordingProject(root, project) {
+  const safeId = sanitizeName(project.id, "");
+  if (!safeId) throw new Error("収録プロジェクトIDがありません。");
+  const folder = getOrCreateFolder(root, RECORDING_PROJECTS_DIR);
+  const fileName = safeId + ".json";
+  const content = JSON.stringify(project, null, 2);
+  const files = folder.getFilesByName(fileName);
+  if (files.hasNext()) {
+    files.next().setContent(content);
+  } else {
+    folder.createFile(fileName, content, "application/json");
+  }
+}
+
+function findRecordingViewer(project, memberId, accessKey) {
+  const members = Array.isArray(project.castMembers) ? project.castMembers : [];
+  const viewer = members.filter(function (member) {
+    return String(member.id || "") === String(memberId || "") &&
+      String(member.accessKey || "") === String(accessKey || "");
+  })[0];
+  if (!viewer) throw new Error("共有URLが無効か、アクセスキーが更新されています。管理者から最新URLを受け取ってください。");
+  return viewer;
+}
+
+function sanitizeRecordingProject(project) {
+  const copy = JSON.parse(JSON.stringify(project));
+  copy.castMembers = (copy.castMembers || []).map(function (member) {
+    return {
+      id: member.id || "",
+      actorName: member.actorName || "",
+      characterIds: member.characterIds || []
+    };
+  });
+  return copy;
+}
+
+function sanitizeRecordingViewer(viewer) {
+  return {
+    id: viewer.id || "",
+    actorName: viewer.actorName || "",
+    characterIds: viewer.characterIds || []
+  };
+}
+
+function normalizeRecordingProjectForStorage(project) {
+  if (!project || !project.id) throw new Error("収録プロジェクトがありません。");
+  const copy = JSON.parse(JSON.stringify(project));
+  copy.characters = Array.isArray(copy.characters) ? copy.characters : [];
+  copy.castMembers = (Array.isArray(copy.castMembers) ? copy.castMembers : []).map(function (member) {
+    const next = member || {};
+    if (!next.accessKey) next.accessKey = Utilities.getUuid().replace(/-/g, "");
+    next.characterIds = Array.isArray(next.characterIds) ? next.characterIds : [];
+    return next;
+  });
+  copy.lines = Array.isArray(copy.lines) ? copy.lines : [];
+  copy.updatedAt = new Date().toISOString();
+  return copy;
+}
+
+function mergeExistingRecordingProgress(incoming, existing) {
+  if (!existing || !Array.isArray(existing.lines)) return incoming;
+  const existingById = {};
+  existing.lines.forEach(function (line) {
+    existingById[line.id] = line;
+  });
+  incoming.lines = incoming.lines.map(function (line) {
+    const saved = existingById[line.id];
+    if (!saved) return line;
+    return Object.assign({}, line, {
+      actorStatus: saved.actorStatus || line.actorStatus,
+      reviewStatus: saved.reviewStatus || line.reviewStatus,
+      recordingUrl: saved.recordingUrl || line.recordingUrl,
+      recordingFileName: saved.recordingFileName || line.recordingFileName,
+      actorNote: saved.actorNote || line.actorNote,
+      directorNote: saved.directorNote || line.directorNote,
+      updatedAt: saved.updatedAt || line.updatedAt
+    });
+  });
+  return incoming;
+}
+
+function handlePublishRecordingProject(payload) {
+  const root = getRootFolder(payload.driveFolderUrl);
+  let project = normalizeRecordingProjectForStorage(payload.project);
+  try {
+    project = mergeExistingRecordingProgress(project, readRecordingProject(root, project.id));
+  } catch (error) {
+    // 初回公開時は既存ファイルがないため、そのまま新規作成する
+  }
+  project.sharedAt = new Date().toISOString();
+  project.updatedAt = project.sharedAt;
+  writeRecordingProject(root, project);
+  return jsonOutput({ ok: true, projectId: project.id, now: project.sharedAt });
+}
+
+function handleGetRecordingProject(params) {
+  const root = getRootFolder(params.folder);
+  const project = readRecordingProject(root, params.projectId);
+  let viewer = null;
+  if (params.token) {
+    requireToken(params.token);
+  } else {
+    viewer = findRecordingViewer(project, params.memberId, params.key);
+  }
+  return jsonOutput({
+    ok: true,
+    project: sanitizeRecordingProject(project),
+    viewer: viewer ? sanitizeRecordingViewer(viewer) : null,
+    now: new Date().toISOString()
+  });
+}
+
+function saveRecordingAttachment(root, project, viewer, line, attachment) {
+  if (!attachment || !attachment.dataUrl) return null;
+  const maxBytes = 25 * 1024 * 1024;
+  if (Number(attachment.size || 0) > maxBytes) {
+    throw new Error("録音ファイルは25MB以下にしてください。大きい場合はDrive共有URLを使ってください。");
+  }
+  const mimeType = String(attachment.mimeType || "");
+  if (mimeType && mimeType.indexOf("audio/") !== 0) {
+    throw new Error("録音ファイルはMP3、WAV、M4Aなどの音声形式にしてください。");
+  }
+  const blob = decodeDataUrl(attachment.dataUrl);
+  if (!blob) throw new Error("録音ファイルを読み取れませんでした。");
+  const uploads = getOrCreateFolder(root, RECORDING_UPLOADS_DIR);
+  const projectFolder = getOrCreateFolder(uploads, sanitizeName(project.title || project.id, "収録プロジェクト"));
+  const character = (project.characters || []).filter(function (item) {
+    return item.id === line.characterId;
+  })[0];
+  const owner = viewer ? viewer.actorName : character && character.name;
+  const ownerFolder = getOrCreateFolder(projectFolder, sanitizeName(owner, "提出録音"));
+  const fileName = nowStamp() + "_" + sanitizeName(attachment.fileName, "recording");
+  blob.setName(fileName);
+  const file = ownerFolder.createFile(blob);
+  return { url: file.getUrl(), fileName: fileName };
+}
+
+function handleUpdateRecordingLine(payload) {
+  const root = getRootFolder(payload.driveFolderUrl);
+  const project = readRecordingProject(root, payload.projectId);
+  const lines = Array.isArray(project.lines) ? project.lines : [];
+  const line = lines.filter(function (item) {
+    return String(item.id || "") === String(payload.lineId || "");
+  })[0];
+  if (!line) throw new Error("対象のセリフが見つかりません。");
+
+  let viewer = null;
+  let isAdmin = false;
+  if (payload.token) {
+    requireToken(payload.token);
+    isAdmin = true;
+  } else {
+    viewer = findRecordingViewer(project, payload.memberId, payload.accessKey);
+    if ((viewer.characterIds || []).indexOf(line.characterId) < 0) {
+      throw new Error("このセリフは担当外のため変更できません。");
+    }
+  }
+
+  const patch = payload.patch || {};
+  const allowedActorFields = ["actorStatus", "recordingUrl", "recordingFileName", "actorNote"];
+  const allowedAdminFields = allowedActorFields.concat(["reviewStatus", "directorNote"]);
+  const allowed = isAdmin ? allowedAdminFields : allowedActorFields;
+  allowed.forEach(function (key) {
+    if (Object.prototype.hasOwnProperty.call(patch, key)) line[key] = String(patch[key] || "");
+  });
+
+  const validActorStatuses = ["未収録", "収録済み", "再提出済み"];
+  const validReviewStatuses = ["未確認", "確認中", "OK", "リテイク", "保留"];
+  if (validActorStatuses.indexOf(line.actorStatus) < 0) line.actorStatus = "未収録";
+  if (validReviewStatuses.indexOf(line.reviewStatus) < 0) line.reviewStatus = "未確認";
+
+  const savedAttachment = saveRecordingAttachment(root, project, viewer, line, payload.recordingAttachment);
+  if (savedAttachment) {
+    line.recordingUrl = savedAttachment.url;
+    line.recordingFileName = savedAttachment.fileName;
+    line.actorStatus = line.reviewStatus === "リテイク" ? "再提出済み" : "収録済み";
+  }
+
+  line.updatedAt = new Date().toISOString();
+  project.updatedAt = line.updatedAt;
+  writeRecordingProject(root, project);
+  return jsonOutput({
+    ok: true,
+    project: sanitizeRecordingProject(project),
+    viewer: viewer ? sanitizeRecordingViewer(viewer) : null,
+    savedRecording: savedAttachment,
+    now: line.updatedAt
+  });
 }
 
 // ---- サムネPNG保存 ----

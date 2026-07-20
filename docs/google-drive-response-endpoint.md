@@ -9,6 +9,8 @@ The Apps Script endpoint handles:
 - WAV/MP3 and image attachment storage in Google Drive
 - response list sync back to the management screen
 - short URL form payload publishing
+- recording script publishing and progress sync
+- actor recording uploads and director review updates
 
 ## Folder Layout
 
@@ -18,6 +20,12 @@ The configured Drive folder will contain files like this:
 Voice Casting Responses/
 ├─ _forms/
 ├─ _responses/
+├─ _recording_projects/
+│  └─ recording_project_id.json
+├─ 収録提出/
+│  └─ 作品名/
+│     └─ 声優さん名/
+│        └─ 20260720-120000_recording.wav
 ├─ ボイスドラマ声優応募フォーム/
 │  ├─ 20260712-120000_applicant_sample.wav
 │  └─ ...
@@ -40,3 +48,18 @@ If a submission is tied to a募集企画, the attachment folder uses that企画�
 10. Publish/update the form short URL.
 
 `FOLDER_ID` in `Code.gs` is only a fallback. The tool setting `回答保存先Google DriveフォルダーURL` takes priority.
+
+## Shared Recording Board
+
+The recording board uses the same Apps Script deployment and `SECRET_TOKEN`.
+
+1. In Settings, enter the Web app URL in `共同収録 Apps Script URL`.
+2. Enter the target Drive folder in `共同収録 Google DriveフォルダーURL`.
+3. Open `収録ボード`, then `配役・共有`.
+4. Assign one or more characters to each actor.
+5. Select `共有を開始`.
+6. Copy each actor's dedicated URL and send it to that actor.
+
+The actor URL contains an access key. An actor can view the shared script and progress, but can only change recording fields for assigned characters. Director-only review fields require the `SECRET_TOKEN`.
+
+When `共同収録 Apps Script URL` or its Drive folder is blank, the response endpoint settings are reused.

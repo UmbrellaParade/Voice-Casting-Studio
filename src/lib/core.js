@@ -1,6 +1,7 @@
 // 純粋ヘルパー・定数・サンプルデータ・データ移行（React非依存）
 import LZString from "lz-string";
 import { postToGasEndpoint, getFromGasEndpoint, loadAppConfig } from "./gas.js";
+import { normalizeRecordingProjects, sampleRecordingProjects } from "./recording.js";
 
 export const STORAGE_KEY = "voice-casting-studio:v2";
 export const STORAGE_COMPRESSED_PREFIX = "lz16:";
@@ -2224,7 +2225,9 @@ export const sampleData = {
     audioSaveMemo: DEFAULT_AUDIO_SAVE_MEMO,
     trackFieldDefaults: DEFAULT_VOICE_RECORDING_FIELDS,
     responseSyncToken: "",
-    lastResponseSyncAt: ""
+    lastResponseSyncAt: "",
+    recordingEndpointUrl: "",
+    recordingDriveFolderUrl: ""
   },
   imports: defaultImports,
   thumbnailStudio: defaultThumbnailStudio,
@@ -2330,6 +2333,7 @@ export const sampleData = {
     }
   ],
   responses: [],
+  recordingProjects: sampleRecordingProjects,
   tracks: [],
   assets: []
 };
@@ -2547,6 +2551,8 @@ export function migrateData(input) {
     : normalizedTrackFieldDefaults;
   if (!("responseSyncToken" in settings)) settings.responseSyncToken = "";
   if (!("lastResponseSyncAt" in settings)) settings.lastResponseSyncAt = "";
+  if (!("recordingEndpointUrl" in settings)) settings.recordingEndpointUrl = "";
+  if (!("recordingDriveFolderUrl" in settings)) settings.recordingDriveFolderUrl = "";
   if (!settings.responseDriveFolderUrl) settings.responseDriveFolderUrl = DEFAULT_RESPONSE_DRIVE_FOLDER_URL;
   const episodes = (input.episodes ?? sampleData.episodes).map((episode) => {
     const articleSlug = episode.articleSlug || extractSlugFromUrl(episode.articleUrl);
@@ -2659,6 +2665,7 @@ export function migrateData(input) {
       messageSentAt: "",
       ...response
     })),
+    recordingProjects: normalizeRecordingProjects(input.recordingProjects ?? sampleData.recordingProjects),
     tracks: (input.tracks ?? sampleData.tracks).map((track) => ({
       audioFile: "",
       audio: null,

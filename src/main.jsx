@@ -252,6 +252,8 @@ import {
   ThumbnailComposer,
   Assets
 } from "./components/thumbnail.jsx";
+import { RecordingStudio, SharedRecordingBoard } from "./components/RecordingStudio.jsx";
+import { readRecordingShareReference } from "./lib/recording.js";
 
 const moveArrayItem = (items = [], fromIndex, toIndex) => {
   if (fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length || fromIndex === toIndex) return items;
@@ -264,6 +266,7 @@ const moveArrayItem = (items = [], fromIndex, toIndex) => {
 const TRACK_FIELD_TYPE_LABELS = Object.fromEntries(TRACK_FIELD_TYPE_OPTIONS);
 
 const MAIN_NAV_ITEMS = [
+  ["recording", "収録ボード", Mic2],
   ["dashboard", "概要", Radio],
   ["episodes", "募集企画", CalendarDays],
   ["forms", "Googleフォーム", Send],
@@ -273,7 +276,7 @@ const MAIN_NAV_ITEMS = [
 ];
 
 const MAIN_NAV_KEYS = new Set(MAIN_NAV_ITEMS.map(([key]) => key));
-const UI_STATE_KEY = `${STORAGE_KEY}:ui`;
+const UI_STATE_KEY = `${STORAGE_KEY}:ui:v2`;
 const formAnchorId = (formId) => `form-section-${formId}`;
 
 const AUDITION_STATUS_OPTIONS = ["未確認", "合格", "不合格", "キープ", "他の役に抜擢予定"];
@@ -405,7 +408,7 @@ function App() {
   const logoSrc = `${import.meta.env.BASE_URL}assets/umbrella-parade-logo.png`;
   const [data, setData] = useState(loadData);
   const [initialUiState] = useState(readUiState);
-  const [active, setActive] = useState(() => (MAIN_NAV_KEYS.has(initialUiState.active) ? initialUiState.active : "dashboard"));
+  const [active, setActive] = useState(() => (MAIN_NAV_KEYS.has(initialUiState.active) ? initialUiState.active : "recording"));
   const [selectedEpisodeId, setSelectedEpisodeId] = useState(() =>
     data.episodes.some((episode) => episode.id === initialUiState.selectedEpisodeId)
       ? initialUiState.selectedEpisodeId
@@ -419,6 +422,7 @@ function App() {
   const [transferCopied, setTransferCopied] = useState(false);
   const [sharedPayload, setSharedPayload] = useState(readSharedFormPayload);
   const [restorePayload, setRestorePayload] = useState(readRestorePayload);
+  const [recordingShareReference, setRecordingShareReference] = useState(readRecordingShareReference);
   const [importingSource, setImportingSource] = useState("");
   const [importPreviews, setImportPreviews] = useState({});
   const [storageWarning, setStorageWarning] = useState("");
@@ -481,6 +485,7 @@ function App() {
     const onHashChange = () => {
       setSharedPayload(readSharedFormPayload());
       setRestorePayload(readRestorePayload());
+      setRecordingShareReference(readRecordingShareReference());
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
@@ -1656,6 +1661,10 @@ ${socialRows || "-"}
     return <RestoreDataView logoSrc={logoSrc} payload={restorePayload} restoreData={restoreData} />;
   }
 
+  if (recordingShareReference) {
+    return <SharedRecordingBoard logoSrc={logoSrc} reference={recordingShareReference} />;
+  }
+
   if (sharedPayload) {
     return <PublicSubmissionForm logoSrc={logoSrc} payload={sharedPayload} operatorSettings={data.settings} />;
   }
@@ -1703,6 +1712,17 @@ ${socialRows || "-"}
         </aside>
 
         <section className="content-panel">
+          {active === "recording" && (
+            <RecordingStudio
+              projects={data.recordingProjects ?? []}
+              updateProjects={(updater) => updateData("recordingProjects", updater)}
+              episodes={data.episodes}
+              selectedEpisodeId={selectedEpisodeId}
+              setSelectedEpisodeId={setSelectedEpisodeId}
+              settings={data.settings}
+              setActive={setActive}
+            />
+          )}
           {active === "dashboard" && (
             <Dashboard
               data={data}
@@ -3698,22 +3718,50 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
         <div className="sync-heading">
           <Database size={20} />
           <div>
-            <h3>アプリ化とデータ同期</h3>
+            <h3>共同収録とデータ保存</h3>
             <p>
               スマホではホーム画面に追加、PCではブラウザのインストールからアプリ風に起動できます。
-              現在の制作データはこの端末のブラウザ内に保存されるため、スマホとPCの自動連動にはGoogle Drive、Firebase、Supabaseなどのクラウド保存機能が別途必要です。
+              台本収録ボードはGoogle Apps ScriptとDriveを介して、管理者と声優さんの進捗を共有できます。
             </p>
           </div>
         </div>
         <div className="sync-status-grid">
           <div>
-            <b>今すぐ可能</b>
-            <span>ホーム画面追加、オフライン起動補助、JSON書き出し/読み込みでの引き継ぎ</span>
+            <b>端末内データ</b>
+            <span>募集企画、応募一覧、台本編集内容。JSON書き出しでも引き継げます。</span>
           </div>
           <div>
-            <b>次フェーズ</b>
-            <span>ログイン、クラウド保存、スマホ/PC間の自動同期、共同編集</span>
+            <b>共同収録データ</b>
+            <span>声優さんの収録済み、録音提出、確認OK、リテイクを共有URLで同期します。</span>
           </div>
+        </div>
+      </article>
+      <article className="panel">
+        <div className="record-head">
+          <div>
+            <h2>共同収録ボード接続</h2>
+            <p className="muted">付属のCode.gsをWebアプリとして公開し、同じURLとDrive保存先を設定します。</p>
+          </div>
+          <button className="secondary" onClick={() => setActive("recording")}><Mic2 size={16} />収録ボードを開く</button>
+        </div>
+        <div className="form-grid">
+          <Field
+            label="共同収録 Apps Script URL"
+            value={settings.recordingEndpointUrl || ""}
+            onChange={(value) => updateSettings({ recordingEndpointUrl: value })}
+            placeholder="https://script.google.com/macros/s/.../exec"
+            wide
+          />
+          <Field
+            label="共同収録 Google DriveフォルダーURL"
+            value={settings.recordingDriveFolderUrl || ""}
+            onChange={(value) => updateSettings({ recordingDriveFolderUrl: value })}
+            placeholder="https://drive.google.com/drive/folders/..."
+            wide
+          />
+          <p className="hint-text wide">
+            空欄の場合は下の回答保存Webhook URL・回答保存先Driveを共用します。同期トークンは回答同期トークンと共通です。
+          </p>
         </div>
       </article>
       <article className="panel">
@@ -3724,6 +3772,7 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
           </div>
         </div>
         <div className="advanced-actions">
+          <button className="secondary" onClick={() => setActive("recording")}><Mic2 size={16} />台本収録ボード</button>
           <button className="secondary" onClick={() => setActive("forms")}><FileText size={16} />Googleフォーム管理</button>
           <button className="secondary" onClick={() => setActive("imports")}><Upload size={16} />回答取り込み</button>
           <button className="secondary" onClick={() => setActive("responses")}><ClipboardCopy size={16} />回答管理</button>
