@@ -5,6 +5,7 @@ Voice Casting Studio is a shared script recording and voice audition management 
 The main screen is a recording board shared by the director and voice actors:
 
 - paste a full script from Google Sheets, Excel, TSV, or CSV
+- add ruby readings in the editor or import `｜漢字《かんじ》` notation from a sheet
 - filter by one character or extract dialogue between multiple characters
 - show neighboring lines as recording context
 - assign characters and issue a dedicated URL to each actor

@@ -63,3 +63,5 @@ The recording board uses the same Apps Script deployment and `SECRET_TOKEN`.
 The actor URL contains an access key. An actor can view the shared script and progress, but can only change recording fields for assigned characters. Director-only review fields require the `SECRET_TOKEN`.
 
 When `共同収録 Apps Script URL` or its Drive folder is blank, the response endpoint settings are reused.
+
+Script ruby readings are stored inside each line with Aozora Bunko-style notation such as `｜覚悟《かくご》`. The management and actor views render that notation as HTML ruby text. The same notation can be entered directly in a Google Sheets/CSV script source.

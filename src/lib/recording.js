@@ -1,5 +1,6 @@
 export const ACTOR_RECORDING_STATUSES = ["未収録", "収録済み", "再提出済み"];
 export const DIRECTOR_REVIEW_STATUSES = ["未確認", "確認中", "OK", "リテイク", "保留"];
+const RUBY_SOURCE = "(?:[|｜]([^《\\n]+)《([^》\\n]+)》|\\{([^|{}\\n]+)\\|([^{}\\n]+)\\})";
 
 const CHARACTER_COLORS = ["#168b9a", "#d65285", "#7a63ad", "#b57024", "#2f7d4a", "#5f6d7a"];
 
@@ -14,6 +15,70 @@ export const createRecordingAccessKey = () => {
     return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
   }
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+};
+
+const makeRubyPattern = () => new RegExp(RUBY_SOURCE, "g");
+
+export const parseRubyText = (value = "") => {
+  const source = String(value || "");
+  const pattern = makeRubyPattern();
+  const segments = [];
+  let cursor = 0;
+  let match;
+  while ((match = pattern.exec(source))) {
+    if (match.index > cursor) segments.push({ type: "text", text: source.slice(cursor, match.index) });
+    segments.push({
+      type: "ruby",
+      base: match[1] || match[3] || "",
+      reading: match[2] || match[4] || ""
+    });
+    cursor = pattern.lastIndex;
+  }
+  if (cursor < source.length) segments.push({ type: "text", text: source.slice(cursor) });
+  return segments.length ? segments : [{ type: "text", text: source }];
+};
+
+export const hasRubyNotation = (value = "") => makeRubyPattern().test(String(value || ""));
+
+export const stripRubyNotation = (value = "") =>
+  String(value || "").replace(makeRubyPattern(), (_, baseA, readingA, baseB) => baseA || baseB || "");
+
+export const addRubyNotation = (value = "", base = "", reading = "") => {
+  const source = String(value || "");
+  const target = String(base || "").trim();
+  const rubyReading = String(reading || "").trim();
+  if (!target || !rubyReading) {
+    return { ok: false, text: source, message: "ルビを付ける文字と読みを入力してください。" };
+  }
+
+  const pattern = makeRubyPattern();
+  let cursor = 0;
+  let match;
+  while ((match = pattern.exec(source))) {
+    const plain = source.slice(cursor, match.index);
+    const plainIndex = plain.indexOf(target);
+    if (plainIndex >= 0) {
+      const absoluteIndex = cursor + plainIndex;
+      return {
+        ok: true,
+        text: `${source.slice(0, absoluteIndex)}｜${target}《${rubyReading}》${source.slice(absoluteIndex + target.length)}`,
+        message: `「${target}」にルビを付けました。`
+      };
+    }
+    cursor = pattern.lastIndex;
+  }
+
+  const tailIndex = source.slice(cursor).indexOf(target);
+  if (tailIndex >= 0) {
+    const absoluteIndex = cursor + tailIndex;
+    return {
+      ok: true,
+      text: `${source.slice(0, absoluteIndex)}｜${target}《${rubyReading}》${source.slice(absoluteIndex + target.length)}`,
+      message: `「${target}」にルビを付けました。`
+    };
+  }
+
+  return { ok: false, text: source, message: `セリフ内に「${target}」が見つかりません。` };
 };
 
 export const createRecordingProject = ({ episodeId = "", title = "新しい収録プロジェクト" } = {}) => ({
@@ -100,7 +165,7 @@ export const sampleRecordingProjects = [
         sceneTitle: "Scene 01 雨上がり",
         order: 3,
         characterId: "character_vel",
-        text: "うん。もう決めたんだ。",
+        text: "うん。もう｜決めた《きめた》んだ。",
         direction: "強がらず、静かな決意で。",
         fileName: "S01_003_VEL",
         actorStatus: "収録済み",

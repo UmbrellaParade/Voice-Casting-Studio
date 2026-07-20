@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  BookOpenText,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -10,6 +11,7 @@ import {
   Clock3,
   ExternalLink,
   Eye,
+  Eraser,
   FileAudio,
   FilePlus2,
   KeyRound,
@@ -41,13 +43,17 @@ import {
   DIRECTOR_REVIEW_STATUSES,
   createRecordingAccessKey,
   createRecordingProject,
+  addRubyNotation,
   getCharacterName,
   getFilteredRecordingLines,
   getRecordingProgress,
   makeRecordingShareUrl,
   mergeRemoteRecordingProject,
   normalizeRecordingProject,
-  parseScriptTable
+  parseRubyText,
+  parseScriptTable,
+  hasRubyNotation,
+  stripRubyNotation
 } from "../lib/recording.js";
 import { Field, SectionTitle, TextArea } from "./ui.jsx";
 
@@ -79,6 +85,77 @@ const getPlaybackUrl = (url = "") => {
   if (!trimmed) return "";
   return getGoogleDriveFileId(trimmed) ? makeDirectAudioDownloadUrl(trimmed) : trimmed;
 };
+
+function RubyText({ text = "" }) {
+  return (
+    <>
+      {parseRubyText(text).map((segment, index) =>
+        segment.type === "ruby" ? (
+          <ruby key={`${segment.base}-${segment.reading}-${index}`}>
+            {segment.base}
+            <rp>（</rp>
+            <rt>{segment.reading}</rt>
+            <rp>）</rp>
+          </ruby>
+        ) : (
+          <React.Fragment key={`text-${index}`}>{segment.text}</React.Fragment>
+        )
+      )}
+    </>
+  );
+}
+
+function RubyEditor({ text, onChange, compact = false }) {
+  const [target, setTarget] = useState("");
+  const [reading, setReading] = useState("");
+  const [message, setMessage] = useState("");
+
+  const applyRuby = () => {
+    const result = addRubyNotation(text, target, reading);
+    setMessage(result.message);
+    if (!result.ok) return;
+    onChange(result.text);
+    setTarget("");
+    setReading("");
+  };
+
+  const removeRuby = () => {
+    if (!hasRubyNotation(text)) return;
+    if (!confirm("このセリフのルビをすべて外しますか？文字そのものは残ります。")) return;
+    onChange(stripRubyNotation(text));
+    setMessage("このセリフのルビを外しました。");
+  };
+
+  return (
+    <div className={`ruby-editor${compact ? " compact" : ""}`}>
+      <div className="ruby-editor-heading">
+        <span><BookOpenText size={15} />ルビ</span>
+        <small>セリフ内の文字を指定して、読みを上に表示します。</small>
+      </div>
+      <div className="ruby-editor-controls">
+        <label>
+          <span>ルビを付ける文字</span>
+          <input value={target} onChange={(event) => setTarget(event.target.value)} placeholder="例：覚悟" />
+        </label>
+        <label>
+          <span>読み</span>
+          <input value={reading} onChange={(event) => setReading(event.target.value)} placeholder="例：かくご" />
+        </label>
+        <button type="button" className="secondary" onClick={applyRuby} disabled={!target.trim() || !reading.trim()}>
+          <BookOpenText size={15} />ルビを付ける
+        </button>
+        <button type="button" className="icon-button danger-icon" title="このセリフのルビをすべて外す" onClick={removeRuby} disabled={!hasRubyNotation(text)}>
+          <Eraser size={15} />
+        </button>
+      </div>
+      <div className="ruby-preview">
+        <span>表示</span>
+        <p><RubyText text={text || "セリフを入力すると、ここにルビ付きで表示されます。"} /></p>
+      </div>
+      {message && <small className="ruby-editor-message">{message}</small>}
+    </div>
+  );
+}
 
 const copyText = async (text, setMessage, message = "コピーしました。") => {
   try {
@@ -249,7 +326,7 @@ function AdminLineCard({ project, line, patchLine, removeLine, moveLine }) {
           </b>
         </div>
         <div className="script-line-copy">
-          <p>{line.text || "セリフ未入力"}</p>
+          <p><RubyText text={line.text || "セリフ未入力"} /></p>
           {line.direction && <small><MessageSquareText size={14} />{line.direction}</small>}
           {line.fileName && <code>{line.fileName}</code>}
         </div>
@@ -319,6 +396,7 @@ function AdminLineCard({ project, line, patchLine, removeLine, moveLine }) {
                 </select>
               </label>
               <TextArea label="セリフ" value={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
+              <RubyEditor text={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
               <TextArea label="演技指示" value={line.direction} onChange={(value) => patchLine(line.id, { direction: value })} />
               <Field label="録音ファイル名" value={line.fileName} onChange={(value) => patchLine(line.id, { fileName: value })} />
               <Field label="録音URL" value={line.recordingUrl} onChange={(value) => patchLine(line.id, { recordingUrl: value })} />
@@ -407,6 +485,7 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
   const [importText, setImportText] = useState("");
   const [importMessage, setImportMessage] = useState("");
   const [showAllLines, setShowAllLines] = useState(false);
+  const [rubyLineId, setRubyLineId] = useState("");
 
   const applyImport = () => {
     const rows = parseScriptTable(importText, parseCsv);
@@ -446,6 +525,10 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
         <div className="script-import-example">
           <code>シーン</code><code>話者</code><code>セリフ</code><code>演技指示</code><code>ファイル名</code>
         </div>
+        <p className="ruby-import-hint">
+          <BookOpenText size={15} />
+          スプレッドシート側でルビを入れる場合は、セリフ欄へ <code>｜覚悟《かくご》</code> と入力します。
+        </p>
         <textarea
           className="script-import-textarea"
           value={importText}
@@ -484,7 +567,23 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
                 </select>
                 <input value={line.sceneTitle} onChange={(event) => patchLine(line.id, { sceneTitle: event.target.value })} aria-label="シーン" />
                 <textarea value={line.text} onChange={(event) => patchLine(line.id, { text: event.target.value })} aria-label="セリフ" />
+                <button
+                  type="button"
+                  className={rubyLineId === line.id ? "icon-button active" : "icon-button"}
+                  title="ルビを設定"
+                  aria-label={`${getCharacterName(project, line.characterId)} ${line.order}番のルビを設定`}
+                  onClick={() => setRubyLineId((current) => current === line.id ? "" : line.id)}
+                >
+                  <BookOpenText size={16} />
+                </button>
                 <button type="button" className="icon-button danger-icon" title="削除" onClick={() => removeLine(line.id)}><Trash2 size={16} /></button>
+                {rubyLineId === line.id && (
+                  <RubyEditor
+                    compact
+                    text={line.text}
+                    onChange={(value) => patchLine(line.id, { text: value })}
+                  />
+                )}
               </div>
             ))}
           </div>
@@ -1048,7 +1147,7 @@ function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, 
           <b style={{ "--character-color": character?.color || "#5f6d7a" }}><i />{character?.name || "話者未設定"}</b>
         </div>
         <div className="script-line-copy">
-          <p>{line.text}</p>
+          <p><RubyText text={line.text} /></p>
           {line.direction && <small><MessageSquareText size={14} />{line.direction}</small>}
           {line.fileName && <code>{line.fileName}</code>}
         </div>
