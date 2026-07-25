@@ -34,6 +34,33 @@ test("accepts bracket, colon, and multi-line dialogue forms", () => {
   assert.equal(rows[2].text, "これは\n二行のセリフ");
 });
 
+test("separates chapters that reuse the same scene name", () => {
+  const rows = parseGoogleDocsScript(`第一章
+シーン1
+ヴェル「行こう。」
+
+第二章
+シーン1
+ヴェル「ただいま。」`);
+
+  assert.deepEqual(rows.map((row) => row.chapterTitle), ["第一章", "第二章"]);
+  assert.deepEqual(rows.map((row) => row.sceneTitle), ["シーン1", "シーン1"]);
+
+  const project = normalizeRecordingProject({
+    characters: [{ id: "character_vel", name: "ヴェル" }],
+    lines: rows.map((row, index) => ({
+      ...row,
+      id: `line_${index}`,
+      chapterId: "chapter_duplicate",
+      sceneId: "scene_01",
+      characterId: "character_vel"
+    }))
+  });
+
+  assert.notEqual(project.lines[0].chapterId, project.lines[1].chapterId);
+  assert.notEqual(project.lines[0].sceneId, project.lines[1].sceneId);
+});
+
 test("excludes stage directions from recording progress", () => {
   const project = normalizeRecordingProject({
     characters: [{ id: "character_vel", name: "ヴェル" }],
@@ -117,4 +144,29 @@ test("matches duplicate dialogue one line at a time", () => {
 
   assert.deepEqual(plan.matches.map((line) => line?.id || null), ["line_one", "line_two", null]);
   assert.deepEqual({ retained: plan.retained, added: plan.added, removed: plan.removed }, { retained: 2, added: 1, removed: 0 });
+});
+
+test("matches duplicate dialogue to the same chapter and scene first", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "character_vel", name: "ヴェル" }],
+    lines: [
+      { id: "line_chapter_one", chapterId: "chapter_01", chapterTitle: "第一章", sceneId: "chapter_01_scene_01", sceneTitle: "シーン1", characterId: "character_vel", text: "はい。" },
+      { id: "line_chapter_two", chapterId: "chapter_02", chapterTitle: "第二章", sceneId: "chapter_02_scene_01", sceneTitle: "シーン1", characterId: "character_vel", text: "はい。" }
+    ]
+  });
+
+  const plan = getScriptImportPlan(project, [
+    { chapterTitle: "第二章", sceneTitle: "シーン1", speaker: "ヴェル", text: "はい。" },
+    { chapterTitle: "第一章", sceneTitle: "シーン1", speaker: "ヴェル", text: "はい。" }
+  ]);
+
+  assert.deepEqual(plan.matches.map((line) => line.id), ["line_chapter_two", "line_chapter_one"]);
+});
+
+test("keeps the WordPress user id attached to private questions", () => {
+  const project = normalizeRecordingProject({
+    questions: [{ id: "question_private", authorName: "声優A", wpUserId: 42, body: "確認です。" }]
+  });
+
+  assert.equal(project.questions[0].wpUserId, 42);
 });

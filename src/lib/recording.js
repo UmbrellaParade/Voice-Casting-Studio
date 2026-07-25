@@ -1,5 +1,10 @@
 export const ACTOR_RECORDING_STATUSES = ["未収録", "収録済み", "再提出済み"];
 export const DIRECTOR_REVIEW_STATUSES = ["未確認", "確認中", "OK", "リテイク", "保留"];
+export const PRODUCTION_MATERIAL_CATEGORIES = ["主題歌", "BGM", "SE", "完成音源", "サムネイル"];
+export const PRODUCTION_MATERIAL_STATUSES = ["準備中", "制作中", "確認待ち", "完成"];
+export const PRODUCTION_QUESTION_STATUSES = ["未回答", "回答済み", "解決済み"];
+export const PRODUCTION_SCHEDULE_TYPES = ["収録締切", "公開予定", "編集", "収録", "その他"];
+export const PRODUCTION_SCHEDULE_STATUSES = ["予定", "進行中", "完了", "延期"];
 const RUBY_SOURCE = "(?:[|｜]([^《\\n]+)《([^》\\n]+)》|\\{([^|{}\\n]+)\\|([^{}\\n]+)\\})";
 
 const CHARACTER_COLORS = ["#168b9a", "#d65285", "#7a63ad", "#b57024", "#2f7d4a", "#5f6d7a"];
@@ -88,9 +93,16 @@ export const createRecordingProject = ({ episodeId = "", title = "新しい収�
   description: "",
   scriptVersion: "初稿",
   status: "準備中",
+  recordingDeadline: "",
+  releaseDate: "",
+  editingStatus: "未着手",
   characters: [],
   castMembers: [],
   lines: [],
+  materials: [],
+  questions: [],
+  scheduleItems: [],
+  announcements: [],
   sharedAt: "",
   updatedAt: new Date().toISOString()
 });
@@ -104,9 +116,36 @@ export const sampleRecordingProjects = [
     scriptVersion: "初稿",
     status: "収録準備中",
     characters: [
-      { id: "character_vel", name: "ヴェル", color: "#168b9a" },
-      { id: "character_amamori", name: "アマモリ", color: "#d65285" },
-      { id: "character_narration", name: "ナレーション", color: "#5f6d7a" }
+      {
+        id: "character_vel",
+        name: "ヴェル",
+        color: "#168b9a",
+        imageUrl: "",
+        profile: "静かな決意を内側に秘めた主人公。強がりすぎず、相手へのやさしさが声に残る人物。",
+        background: "大切な人を守るため、雨の街を離れる決意をした。",
+        recordingFolderUrl: "",
+        openChatUrl: ""
+      },
+      {
+        id: "character_amamori",
+        name: "アマモリ",
+        color: "#d65285",
+        imageUrl: "",
+        profile: "ヴェルの決意を心配しながらも、最後には背中を押す相棒。",
+        background: "ヴェルとは幼い頃から雨の街で過ごしてきた。",
+        recordingFolderUrl: "",
+        openChatUrl: ""
+      },
+      {
+        id: "character_narration",
+        name: "ナレーション",
+        color: "#5f6d7a",
+        imageUrl: "",
+        profile: "場面の温度と余韻を伝える語り手。",
+        background: "",
+        recordingFolderUrl: "",
+        openChatUrl: ""
+      }
     ],
     castMembers: [
       {
@@ -127,7 +166,9 @@ export const sampleRecordingProjects = [
     lines: [
       {
         id: "line_sample_001",
-        sceneId: "scene_01",
+        chapterId: "chapter_01",
+        chapterTitle: "第一章",
+        sceneId: "chapter_01_scene_01",
         sceneTitle: "Scene 01 雨上がり",
         order: 1,
         characterId: "character_narration",
@@ -144,7 +185,9 @@ export const sampleRecordingProjects = [
       },
       {
         id: "line_sample_002",
-        sceneId: "scene_01",
+        chapterId: "chapter_01",
+        chapterTitle: "第一章",
+        sceneId: "chapter_01_scene_01",
         sceneTitle: "Scene 01 雨上がり",
         order: 2,
         characterId: "character_amamori",
@@ -161,7 +204,9 @@ export const sampleRecordingProjects = [
       },
       {
         id: "line_sample_003",
-        sceneId: "scene_01",
+        chapterId: "chapter_01",
+        chapterTitle: "第一章",
+        sceneId: "chapter_01_scene_01",
         sceneTitle: "Scene 01 雨上がり",
         order: 3,
         characterId: "character_vel",
@@ -178,7 +223,9 @@ export const sampleRecordingProjects = [
       },
       {
         id: "line_sample_004",
-        sceneId: "scene_01",
+        chapterId: "chapter_01",
+        chapterTitle: "第一章",
+        sceneId: "chapter_01_scene_01",
         sceneTitle: "Scene 01 雨上がり",
         order: 4,
         characterId: "character_amamori",
@@ -195,8 +242,10 @@ export const sampleRecordingProjects = [
       },
       {
         id: "line_sample_005",
-        sceneId: "scene_02",
-        sceneTitle: "Scene 02 出発",
+        chapterId: "chapter_02",
+        chapterTitle: "第二章",
+        sceneId: "chapter_02_scene_01",
+        sceneTitle: "Scene 01 出発",
         order: 5,
         characterId: "character_vel",
         text: "心配しなくても大丈夫。",
@@ -211,12 +260,88 @@ export const sampleRecordingProjects = [
         updatedAt: ""
       }
     ],
+    recordingDeadline: "2026-08-31",
+    releaseDate: "2026-10-01",
+    editingStatus: "脚本・配役調整中",
+    materials: [
+      {
+        id: "material_theme_sample",
+        category: "主題歌",
+        title: "主題歌 デモ音源",
+        url: "",
+        fileName: "",
+        aspectRatio: "",
+        status: "制作中",
+        notes: "歌詞と仮ミックスの確認用。",
+        updatedAt: ""
+      },
+      {
+        id: "material_thumbnail_sample",
+        category: "サムネイル",
+        title: "告知用サムネイル",
+        url: "",
+        fileName: "",
+        aspectRatio: "16:9",
+        status: "準備中",
+        notes: "YouTube公開用。",
+        updatedAt: ""
+      }
+    ],
+    questions: [
+      {
+        id: "question_sample_001",
+        lineId: "line_sample_003",
+        characterId: "character_vel",
+        authorName: "ヴェル役 声優さん",
+        body: "「決めた」の部分は、迷いを残す演技にした方がよいでしょうか？",
+        answer: "",
+        status: "未回答",
+        createdAt: "2026-07-25T09:00:00.000Z",
+        updatedAt: "2026-07-25T09:00:00.000Z"
+      }
+    ],
+    scheduleItems: [
+      {
+        id: "schedule_sample_001",
+        type: "収録締切",
+        title: "第一章の初回収録",
+        date: "2026-08-15",
+        status: "予定",
+        notes: "担当セリフを一度提出してください。"
+      },
+      {
+        id: "schedule_sample_002",
+        type: "編集",
+        title: "音声編集・リテイク確認",
+        date: "2026-09-15",
+        status: "予定",
+        notes: "収録済み音源をまとめて確認します。"
+      }
+    ],
+    announcements: [
+      {
+        id: "announcement_sample_001",
+        title: "第一章の収録準備を進めています",
+        body: "担当セリフと演技指示を確認し、分からない箇所は質問ページから送ってください。",
+        priority: "通常",
+        publishedAt: "2026-07-25T09:00:00.000Z"
+      }
+    ],
     sharedAt: "",
     updatedAt: ""
   }
 ];
 
 const normalizeStatus = (value, options, fallback) => (options.includes(value) ? value : fallback);
+
+const makeStableScopeId = (prefix, value) => {
+  let hash = 2166136261;
+  for (const character of String(value || "")) {
+    hash ^= character.codePointAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${prefix}_${(hash >>> 0).toString(36)}`;
+};
 
 export const normalizeRecordingProject = (project = {}, index = 0) => {
   const rawLines = Array.isArray(project.lines) ? project.lines : [];
@@ -226,7 +351,12 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
     const normalized = {
       id: character.id || createLocalId("character"),
       name: String(character.name || `登場人物${characterIndex + 1}`).trim(),
-      color: character.color || CHARACTER_COLORS[characterIndex % CHARACTER_COLORS.length]
+      color: character.color || CHARACTER_COLORS[characterIndex % CHARACTER_COLORS.length],
+      imageUrl: String(character.imageUrl || ""),
+      profile: String(character.profile || character.setting || ""),
+      background: String(character.background || character.backstory || ""),
+      recordingFolderUrl: String(character.recordingFolderUrl || character.driveFolderUrl || ""),
+      openChatUrl: String(character.openChatUrl || character.lineOpenChatUrl || "")
     };
     characterByName.set(normalized.name, normalized);
     return normalized;
@@ -238,7 +368,12 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       const character = {
         id: createLocalId("character"),
         name: speakerName,
-        color: CHARACTER_COLORS[characters.length % CHARACTER_COLORS.length]
+        color: CHARACTER_COLORS[characters.length % CHARACTER_COLORS.length],
+        imageUrl: "",
+        profile: "",
+        background: "",
+        recordingFolderUrl: "",
+        openChatUrl: ""
       };
       characters.push(character);
       characterByName.set(speakerName, character);
@@ -247,16 +382,48 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
 
   const characterIds = new Set(characters.map((character) => character.id));
   const fallbackCharacter = characters[0];
+  const chapterByTitle = new Map();
+  const chapterIdOwners = new Map();
+  const sceneByScope = new Map();
+  const sceneIdOwners = new Map();
   const lines = rawLines.map((line, lineIndex) => {
     const speakerName = String(line.character || line.speaker || "").trim();
     const matchedCharacter = characterByName.get(speakerName);
     const characterId = characterIds.has(line.characterId)
       ? line.characterId
       : matchedCharacter?.id || fallbackCharacter?.id || "";
+    const rawSceneTitle = String(line.sceneTitle || line.scene || `Scene ${line.sceneNo || 1}`).trim();
+    const legacyChapterHeading = !line.chapterTitle && !line.chapter && isChapterHeading(rawSceneTitle);
+    const chapterTitle = String(line.chapterTitle || line.chapter || (legacyChapterHeading ? rawSceneTitle : "第一章")).trim() || "第一章";
+    const chapterKey = chapterTitle.normalize("NFKC").toLocaleLowerCase("ja");
+    let chapterId = chapterByTitle.get(chapterKey);
+    if (!chapterId) {
+      const proposedChapterId = String(line.chapterId || "");
+      const proposedOwner = proposedChapterId ? chapterIdOwners.get(proposedChapterId) : "";
+      chapterId = proposedChapterId && (!proposedOwner || proposedOwner === chapterKey)
+        ? proposedChapterId
+        : makeStableScopeId("chapter", chapterKey);
+      chapterByTitle.set(chapterKey, chapterId);
+      chapterIdOwners.set(chapterId, chapterKey);
+    }
+    const sceneTitle = legacyChapterHeading ? "章の冒頭" : rawSceneTitle;
+    const sceneKey = `${chapterId}\u0000${sceneTitle.normalize("NFKC").toLocaleLowerCase("ja")}`;
+    let sceneId = sceneByScope.get(sceneKey);
+    if (!sceneId) {
+      const proposedSceneId = String(line.sceneId || "");
+      const proposedOwner = proposedSceneId ? sceneIdOwners.get(proposedSceneId) : "";
+      sceneId = proposedSceneId && (!proposedOwner || proposedOwner === sceneKey)
+        ? proposedSceneId
+        : makeStableScopeId("scene", sceneKey);
+      sceneByScope.set(sceneKey, sceneId);
+      sceneIdOwners.set(sceneId, sceneKey);
+    }
     return {
       id: line.id || createLocalId("line"),
-      sceneId: line.sceneId || `scene_${String(line.sceneNo || 1).padStart(2, "0")}`,
-      sceneTitle: line.sceneTitle || line.scene || `Scene ${line.sceneNo || 1}`,
+      chapterId,
+      chapterTitle,
+      sceneId,
+      sceneTitle,
       order: Number.isFinite(Number(line.order)) ? Number(line.order) : lineIndex + 1,
       characterId,
       kind: line.kind === "direction" ? "direction" : "dialogue",
@@ -280,15 +447,57 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
     description: project.description || "",
     scriptVersion: project.scriptVersion || "初稿",
     status: project.status || "準備中",
+    recordingDeadline: String(project.recordingDeadline || ""),
+    releaseDate: String(project.releaseDate || ""),
+    editingStatus: String(project.editingStatus || "未着手"),
     characters,
     castMembers: (Array.isArray(project.castMembers) ? project.castMembers : []).map((member, memberIndex) => ({
       id: member.id || createLocalId("cast"),
       actorName: member.actorName || `声優さん${memberIndex + 1}`,
       contact: member.contact || "",
       characterIds: (Array.isArray(member.characterIds) ? member.characterIds : []).filter((id) => characterIds.has(id)),
+      wpUserId: Number.isFinite(Number(member.wpUserId)) ? Number(member.wpUserId) : 0,
       accessKey: member.accessKey || createRecordingAccessKey()
     })),
     lines: lines.sort((a, b) => Number(a.order) - Number(b.order)),
+    materials: (Array.isArray(project.materials) ? project.materials : []).map((material, materialIndex) => ({
+      id: material.id || createLocalId("material"),
+      category: PRODUCTION_MATERIAL_CATEGORIES.includes(material.category) ? material.category : "BGM",
+      title: String(material.title || `素材${materialIndex + 1}`),
+      url: String(material.url || material.sourceUrl || ""),
+      fileName: String(material.fileName || ""),
+      aspectRatio: String(material.aspectRatio || ""),
+      status: PRODUCTION_MATERIAL_STATUSES.includes(material.status) ? material.status : "準備中",
+      notes: String(material.notes || ""),
+      updatedAt: String(material.updatedAt || "")
+    })),
+    questions: (Array.isArray(project.questions) ? project.questions : []).map((question) => ({
+      id: question.id || createLocalId("question"),
+      lineId: String(question.lineId || ""),
+      characterId: characterIds.has(question.characterId) ? question.characterId : "",
+      authorName: String(question.authorName || "メンバー"),
+      wpUserId: Number.isFinite(Number(question.wpUserId)) ? Number(question.wpUserId) : 0,
+      body: String(question.body || question.question || ""),
+      answer: String(question.answer || ""),
+      status: PRODUCTION_QUESTION_STATUSES.includes(question.status) ? question.status : "未回答",
+      createdAt: String(question.createdAt || new Date().toISOString()),
+      updatedAt: String(question.updatedAt || question.createdAt || "")
+    })),
+    scheduleItems: (Array.isArray(project.scheduleItems) ? project.scheduleItems : []).map((item, itemIndex) => ({
+      id: item.id || createLocalId("schedule"),
+      type: PRODUCTION_SCHEDULE_TYPES.includes(item.type) ? item.type : "その他",
+      title: String(item.title || `予定${itemIndex + 1}`),
+      date: String(item.date || ""),
+      status: PRODUCTION_SCHEDULE_STATUSES.includes(item.status) ? item.status : "予定",
+      notes: String(item.notes || "")
+    })),
+    announcements: (Array.isArray(project.announcements) ? project.announcements : []).map((announcement, announcementIndex) => ({
+      id: announcement.id || createLocalId("announcement"),
+      title: String(announcement.title || `お知らせ${announcementIndex + 1}`),
+      body: String(announcement.body || ""),
+      priority: announcement.priority === "重要" ? "重要" : "通常",
+      publishedAt: String(announcement.publishedAt || new Date().toISOString())
+    })),
     sharedAt: project.sharedAt || "",
     updatedAt: project.updatedAt || ""
   };
@@ -339,22 +548,46 @@ export const getScriptLineMatchKey = ({ speaker = "", text = "", kind = "", sour
   ].join("\u0000");
 };
 
+const getScriptLineLocationMatchKey = (line = {}) => [
+  normalizeScriptMatchValue(line.chapterTitle || "第一章"),
+  normalizeScriptMatchValue(line.sceneTitle || "Scene 1"),
+  getScriptLineMatchKey(line)
+].join("\u0001");
+
 export const getScriptImportPlan = (project, rows = []) => {
-  const queues = new Map();
+  const exactQueues = new Map();
+  const looseQueues = new Map();
   (project?.lines || []).forEach((line) => {
-    const key = getScriptLineMatchKey({
+    const candidate = {
       speaker: line.kind === "direction" ? "ト書き" : getCharacterName(project, line.characterId),
       text: line.text,
-      kind: line.kind
-    });
-    if (!queues.has(key)) queues.set(key, []);
-    queues.get(key).push(line);
+      kind: line.kind,
+      chapterTitle: line.chapterTitle,
+      sceneTitle: line.sceneTitle
+    };
+    const exactKey = getScriptLineLocationMatchKey(candidate);
+    const looseKey = getScriptLineMatchKey(candidate);
+    if (!exactQueues.has(exactKey)) exactQueues.set(exactKey, []);
+    if (!looseQueues.has(looseKey)) looseQueues.set(looseKey, []);
+    exactQueues.get(exactKey).push(line);
+    looseQueues.get(looseKey).push(line);
   });
 
-  const matches = rows.map((row) => {
-    const key = getScriptLineMatchKey(row);
-    const queue = queues.get(key);
-    return queue?.length ? queue.shift() : null;
+  const usedLineIds = new Set();
+  const takeUnused = (queue = []) => {
+    while (queue.length) {
+      const candidate = queue.shift();
+      if (!usedLineIds.has(candidate.id)) {
+        usedLineIds.add(candidate.id);
+        return candidate;
+      }
+    }
+    return null;
+  };
+  const matches = rows.map((row) => takeUnused(exactQueues.get(getScriptLineLocationMatchKey(row))));
+  rows.forEach((row, index) => {
+    if (matches[index]) return;
+    matches[index] = takeUnused(looseQueues.get(getScriptLineMatchKey(row)));
   });
   const retained = matches.filter(Boolean).length;
 
@@ -415,7 +648,7 @@ export const getFilteredRecordingLines = ({
     const statusMatch =
       statusFilter === "すべて" ||
       (!isDirection && (line.actorStatus === statusFilter || line.reviewStatus === statusFilter));
-    const haystack = `${line.sceneTitle} ${getCharacterName(project, line.characterId)} ${line.text} ${line.direction} ${line.fileName}`.toLocaleLowerCase("ja");
+    const haystack = `${line.chapterTitle} ${line.sceneTitle} ${getCharacterName(project, line.characterId)} ${line.text} ${line.direction} ${line.fileName}`.toLocaleLowerCase("ja");
     const queryMatch = !normalizedQuery || haystack.includes(normalizedQuery);
     if (selectedMatch && dialogueMatch && statusMatch && queryMatch) directIndexes.add(index);
   });
@@ -472,17 +705,30 @@ const normalizeDocumentLine = (value = "") =>
     .replace(/[\t ]+$/g, "")
     .trim();
 
-const isSceneHeading = (line = "") => {
-  const text = normalizeDocumentLine(line).replace(/^#{1,6}\s*/, "");
+const headingText = (line = "") => normalizeDocumentLine(line).replace(/^#{1,6}\s*/, "");
+
+const isChapterHeading = (line = "") => {
+  const text = headingText(line);
   return (
-    /^(?:scene|sc\.?|シーン)\s*[0-9０-９一二三四五六七八九十百]+/i.test(text) ||
-    /^第\s*[0-9０-９一二三四五六七八九十百]+\s*(?:場|幕|章)/.test(text) ||
-    /^[〇○●■◆◇]\s*\S+/.test(text) ||
-    /^【\s*(?:scene|シーン|第[^】]+(?:場|幕|章))[^】]*】$/i.test(text)
+    /^(?:第\s*)?[0-9０-９一二三四五六七八九十百千]+\s*章(?:\s|$|[【「『（(])/i.test(text) ||
+    /^(?:序章|終章|最終章|プロローグ|エピローグ|幕間)(?:\s|$|[【「『（(])/i.test(text) ||
+    /^【\s*(?:(?:第\s*)?[0-9０-９一二三四五六七八九十百千]+\s*章|序章|終章|最終章|プロローグ|エピローグ|幕間)[^】]*】$/i.test(text)
   );
 };
 
-const normalizeSceneHeading = (line = "") => normalizeDocumentLine(line).replace(/^#{1,6}\s*/, "");
+const isSceneHeading = (line = "") => {
+  const text = headingText(line);
+  if (isChapterHeading(text)) return false;
+  return (
+    /^(?:scene|sc\.?|シーン)\s*[0-9０-９一二三四五六七八九十百]+/i.test(text) ||
+    /^第\s*[0-9０-９一二三四五六七八九十百]+\s*(?:場|幕)/.test(text) ||
+    /^[〇○●■◆◇]\s*\S+/.test(text) ||
+    /^【\s*(?:scene|シーン|第[^】]+(?:場|幕))[^】]*】$/i.test(text)
+  );
+};
+
+const normalizeSceneHeading = (line = "") => headingText(line);
+const normalizeChapterHeading = (line = "") => headingText(line);
 
 const cleanSpeakerLabel = (value = "") =>
   normalizeDocumentLine(value)
@@ -565,6 +811,7 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
   const sourceLines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
   const knownSpeakerSet = new Set((knownSpeakers || []).map((speaker) => cleanSpeakerLabel(speaker)).filter(Boolean));
   const rows = [];
+  let currentChapter = "第一章";
   let currentScene = "Scene 1";
   let pendingSpeaker = "";
   let pendingDirection = "";
@@ -575,6 +822,7 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
     const normalizedDirection = normalizeDocumentLine(direction);
     if (!normalizedText && !normalizedDirection) return;
     rows.push({
+      chapterTitle: currentChapter,
       sceneTitle: currentScene,
       speaker: cleanSpeakerLabel(speaker) || "ト書き",
       text: normalizedText || normalizedDirection,
@@ -613,6 +861,14 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
       return;
     }
 
+    if (isChapterHeading(line)) {
+      currentChapter = normalizeChapterHeading(line);
+      currentScene = "章の冒頭";
+      pendingSpeaker = "";
+      pendingDirection = "";
+      return;
+    }
+
     if (isSceneHeading(line)) {
       currentScene = normalizeSceneHeading(line);
       pendingSpeaker = "";
@@ -624,7 +880,11 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
     if (parentheticalDirection) {
       if (pendingSpeaker) {
         pendingDirection = [pendingDirection, parentheticalDirection].filter(Boolean).join(" / ");
-      } else if (rows.length && rows[rows.length - 1].sceneTitle === currentScene) {
+      } else if (
+        rows.length &&
+        rows[rows.length - 1].chapterTitle === currentChapter &&
+        rows[rows.length - 1].sceneTitle === currentScene
+      ) {
         rows[rows.length - 1].direction = [rows[rows.length - 1].direction, parentheticalDirection].filter(Boolean).join(" / ");
       } else {
         pushRow({ speaker: "ト書き", lineText: parentheticalDirection, sourceKind: "direction" });
@@ -709,6 +969,7 @@ export const parseScriptTable = (text = "", parseCsv) => {
   const trimmed = String(text || "").trim();
   if (!trimmed) return [];
   const aliases = {
+    chapter: ["章", "chapter", "チャプター"],
     scene: ["シーン", "scene", "場面"],
     speaker: ["話者", "登場人物", "キャラクター", "speaker", "character"],
     text: ["セリフ", "台詞", "本文", "text", "line"],
@@ -728,6 +989,7 @@ export const parseScriptTable = (text = "", parseCsv) => {
           return String(alias ? normalizedEntries[alias] : "").trim();
         };
         return {
+          chapterTitle: get("chapter") || "第一章",
           sceneTitle: get("scene") || "Scene 1",
           speaker: get("speaker"),
           text: get("text"),
@@ -749,13 +1011,16 @@ export const parseScriptTable = (text = "", parseCsv) => {
 
   return body
     .map((row, index) => {
+      const hasChapterCell = !hasHeader && row.length >= 6;
+      const offset = hasChapterCell ? 1 : 0;
       const get = (key, fallbackIndex) => String(row[indexes[key] >= 0 ? indexes[key] : fallbackIndex] || "").trim();
       return {
-        sceneTitle: get("scene", 0) || "Scene 1",
-        speaker: get("speaker", 1),
-        text: get("text", 2),
-        direction: get("direction", 3),
-        fileName: get("fileName", 4),
+        chapterTitle: get("chapter", hasChapterCell ? 0 : -1) || "第一章",
+        sceneTitle: get("scene", offset) || "Scene 1",
+        speaker: get("speaker", offset + 1),
+        text: get("text", offset + 2),
+        direction: get("direction", offset + 3),
+        fileName: get("fileName", offset + 4),
         sourceOrder: index
       };
     })

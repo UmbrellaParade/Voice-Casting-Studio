@@ -12,7 +12,9 @@ import {
   FileText,
   FolderOpen,
   Image,
+  LayoutDashboard,
   Link,
+  MessageSquareText,
   Mic2,
   Music,
   Palette,
@@ -25,11 +27,19 @@ import {
   Share2,
   Trash2,
   Upload,
+  Users,
   X,
   ZoomIn
 } from "lucide-react";
 import "./styles.css";
 import { postToGasEndpoint, getFromGasEndpoint, loadAppConfig } from "./lib/gas.js";
+import {
+  createWordPressQuestion,
+  getWordPressRuntime,
+  loadWordPressWorkspace,
+  saveWordPressWorkspace,
+  updateWordPressRecordingLine
+} from "./lib/wordpress.js";
 
 import {
   STORAGE_KEY,
@@ -254,7 +264,9 @@ import {
   Assets
 } from "./components/thumbnail.jsx";
 import { RecordingStudio, SharedRecordingBoard } from "./components/RecordingStudio.jsx";
-import { readRecordingShareReference } from "./lib/recording.js";
+import { ProductionWorkspace } from "./components/ProductionHub.jsx";
+import { WordPressMemberPortal } from "./components/WordPressMemberPortal.jsx";
+import { normalizeRecordingProject, readRecordingShareReference } from "./lib/recording.js";
 
 const moveArrayItem = (items = [], fromIndex, toIndex) => {
   if (fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length || fromIndex === toIndex) return items;
@@ -267,6 +279,7 @@ const moveArrayItem = (items = [], fromIndex, toIndex) => {
 const TRACK_FIELD_TYPE_LABELS = Object.fromEntries(TRACK_FIELD_TYPE_OPTIONS);
 
 const SHOW_AUDITION_WORKFLOW = false;
+const WORDPRESS_RUNTIME = getWordPressRuntime();
 const AUDITION_NAV_ITEMS = [
   ["dashboard", "概要", Radio],
   ["episodes", "募集企画", CalendarDays],
@@ -275,12 +288,18 @@ const AUDITION_NAV_ITEMS = [
   ["responses", "応募一覧", ClipboardCopy]
 ];
 const MAIN_NAV_ITEMS = [
-  ["recording", "収録ボード", Mic2],
+  ["home", "ホーム", LayoutDashboard],
+  ["recording", "台本", FileText],
+  ["characters", "キャラクター", Users],
+  ["materials", "素材", Music],
+  ["questions", "質問", MessageSquareText],
+  ["schedule", "予定", CalendarDays],
   ...(SHOW_AUDITION_WORKFLOW ? AUDITION_NAV_ITEMS : []),
   ["settings", "設定", Settings]
 ];
 
 const MAIN_NAV_KEYS = new Set(MAIN_NAV_ITEMS.map(([key]) => key));
+const PRODUCTION_HUB_KEYS = new Set(["home", "characters", "materials", "questions", "schedule"]);
 const UI_STATE_KEY = `${STORAGE_KEY}:ui:v2`;
 const formAnchorId = (formId) => `form-section-${formId}`;
 
@@ -372,7 +391,7 @@ const makeFormPreset = (form, name = "") => ({
 function readUiState() {
   try {
     const raw = localStorage.getItem(UI_STATE_KEY);
-    if (!raw) return { active: "", selectedEpisodeId: "", collapsibles: {} };
+    if (!raw) return { active: "", selectedEpisodeId: "", selectedRecordingProjectId: "", collapsibles: {} };
     const parsed = JSON.parse(raw);
     const collapsibles =
       parsed?.collapsibles && typeof parsed.collapsibles === "object" && !Array.isArray(parsed.collapsibles)
@@ -381,10 +400,11 @@ function readUiState() {
     return {
       active: typeof parsed?.active === "string" ? parsed.active : "",
       selectedEpisodeId: typeof parsed?.selectedEpisodeId === "string" ? parsed.selectedEpisodeId : "",
+      selectedRecordingProjectId: typeof parsed?.selectedRecordingProjectId === "string" ? parsed.selectedRecordingProjectId : "",
       collapsibles
     };
   } catch {
-    return { active: "", selectedEpisodeId: "", collapsibles: {} };
+    return { active: "", selectedEpisodeId: "", selectedRecordingProjectId: "", collapsibles: {} };
   }
 }
 
@@ -410,14 +430,19 @@ const sanitizeAttachmentLimitInput = (value) => {
 };
 
 function App() {
-  const logoSrc = `${import.meta.env.BASE_URL}assets/umbrella-parade-logo.png`;
-  const [data, setData] = useState(loadData);
+  const logoSrc = publicAsset("assets/umbrella-parade-logo.png");
+  const [data, setData] = useState(() => WORDPRESS_RUNTIME ? sampleData : loadData());
   const [initialUiState] = useState(readUiState);
-  const [active, setActive] = useState(() => (MAIN_NAV_KEYS.has(initialUiState.active) ? initialUiState.active : "recording"));
+  const [active, setActive] = useState(() => (MAIN_NAV_KEYS.has(initialUiState.active) ? initialUiState.active : "home"));
   const [selectedEpisodeId, setSelectedEpisodeId] = useState(() =>
     data.episodes.some((episode) => episode.id === initialUiState.selectedEpisodeId)
       ? initialUiState.selectedEpisodeId
       : data.episodes[0]?.id ?? ""
+  );
+  const [selectedRecordingProjectId, setSelectedRecordingProjectId] = useState(() =>
+    (data.recordingProjects ?? []).some((project) => project.id === initialUiState.selectedRecordingProjectId)
+      ? initialUiState.selectedRecordingProjectId
+      : data.recordingProjects?.[0]?.id ?? ""
   );
   const [collapsibleState, setCollapsibleState] = useState(() => initialUiState.collapsibles);
   const [copied, setCopied] = useState(false);
@@ -431,22 +456,93 @@ function App() {
   const [importingSource, setImportingSource] = useState("");
   const [importPreviews, setImportPreviews] = useState({});
   const [storageWarning, setStorageWarning] = useState("");
+  const [wordpressState, setWordpressState] = useState(() => ({
+    status: WORDPRESS_RUNTIME ? "loading" : "local",
+    message: WORDPRESS_RUNTIME ? "WordPressから作品データを読み込んでいます…" : "",
+    users: [],
+    version: 0
+  }));
   const [syncState, setSyncState] = useState({ busy: false, message: "" });
   const [packExportMessage, setPackExportMessage] = useState("");
   const autoThumbnailGenerationRef = useRef("");
   const pendingSaveRef = useRef(null);
+  const wordpressLoadedRef = useRef(false);
 
   const setCollapsibleOpen = (key, open) => {
     setCollapsibleState((current) => (current[key] === open ? current : { ...current, [key]: open }));
   };
 
-  useEffect(() => {
-    if (sharedPayload || restorePayload) return;
-    saveUiState({ active, selectedEpisodeId, collapsibles: collapsibleState });
-  }, [active, selectedEpisodeId, collapsibleState, sharedPayload, restorePayload]);
+  const applyWordPressWorkspace = (result) => {
+    if (result.data) setData(migrateData(result.data));
+    else if (WORDPRESS_RUNTIME?.canManage) setData((current) => ({ ...current }));
+    wordpressLoadedRef.current = true;
+    setWordpressState({
+      status: "ready",
+      message: result.data ? "WordPressと同期しています。" : "新しい制作ワークスペースを準備しました。",
+      users: Array.isArray(result.users) ? result.users : [],
+      version: Number(result.version) || 0
+    });
+  };
+
+  const refreshWordPressData = async () => {
+    setWordpressState((current) => ({ ...current, status: "loading", message: "最新状況を読み込んでいます…" }));
+    try {
+      const result = await loadWordPressWorkspace();
+      applyWordPressWorkspace(result);
+      return result;
+    } catch (error) {
+      setWordpressState((current) => ({ ...current, status: "error", message: error.message }));
+      throw error;
+    }
+  };
+
+  const updateMemberRecordingLine = async (projectId, lineId, patch) => {
+    const result = await updateWordPressRecordingLine({ projectId, lineId, patch });
+    setData((current) => ({
+      ...current,
+      recordingProjects: current.recordingProjects.map((project) => project.id === projectId ? {
+        ...project,
+        lines: project.lines.map((line) => line.id === lineId ? { ...line, ...result.line } : line)
+      } : project)
+    }));
+    return result;
+  };
+
+  const addMemberQuestion = async (projectId, lineId, body) => {
+    const result = await createWordPressQuestion({ projectId, lineId, body });
+    setData((current) => ({
+      ...current,
+      recordingProjects: current.recordingProjects.map((project) => project.id === projectId
+        ? { ...project, questions: [result.question, ...project.questions] }
+        : project)
+    }));
+    return result;
+  };
 
   useEffect(() => {
-    if (!MAIN_NAV_KEYS.has(active)) setActive("recording");
+    if (!WORDPRESS_RUNTIME) return undefined;
+    let cancelled = false;
+    loadWordPressWorkspace()
+      .then((result) => {
+        if (cancelled) return;
+        applyWordPressWorkspace(result);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setWordpressState({ status: "error", message: error.message, users: [], version: 0 });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (sharedPayload || restorePayload) return;
+    saveUiState({ active, selectedEpisodeId, selectedRecordingProjectId, collapsibles: collapsibleState });
+  }, [active, selectedEpisodeId, selectedRecordingProjectId, collapsibleState, sharedPayload, restorePayload]);
+
+  useEffect(() => {
+    if (!MAIN_NAV_KEYS.has(active)) setActive("home");
   }, [active]);
 
   useEffect(() => {
@@ -456,9 +552,16 @@ function App() {
     }
   }, [data.episodes, selectedEpisodeId]);
 
+  useEffect(() => {
+    const projects = data.recordingProjects ?? [];
+    if (projects.some((project) => project.id === selectedRecordingProjectId)) return;
+    setSelectedRecordingProjectId(projects[0]?.id ?? "");
+  }, [data.recordingProjects, selectedRecordingProjectId]);
+
   // ブラウザ保存はLZ圧縮が重く、スライダー操作のたびに実行するとUIがカクつくため
   // 350msデバウンスする。タブを閉じる/離れる時はpagehideで即時保存する。
   useEffect(() => {
+    if (WORDPRESS_RUNTIME) return undefined;
     if (sharedPayload || restorePayload) {
       pendingSaveRef.current = null;
       return undefined;
@@ -475,6 +578,22 @@ function App() {
     };
     pendingSaveRef.current = persist;
     const timer = window.setTimeout(persist, 350);
+    return () => window.clearTimeout(timer);
+  }, [data, sharedPayload, restorePayload]);
+
+  useEffect(() => {
+    if (!WORDPRESS_RUNTIME?.canManage || !wordpressLoadedRef.current || sharedPayload || restorePayload) return undefined;
+    setWordpressState((current) => ({ ...current, status: "saving", message: "WordPressへ保存しています…" }));
+    const timer = window.setTimeout(() => {
+      saveWordPressWorkspace(data)
+        .then((result) => setWordpressState((current) => ({
+          ...current,
+          status: "ready",
+          message: "WordPressへ保存済み",
+          version: Number(result.version) || current.version
+        })))
+        .catch((error) => setWordpressState((current) => ({ ...current, status: "error", message: error.message })));
+    }, 850);
     return () => window.clearTimeout(timer);
   }, [data, sharedPayload, restorePayload]);
 
@@ -694,6 +813,14 @@ function App() {
 
   const removeItem = (key, id) => {
     updateData(key, (items) => items.filter((item) => item.id !== id));
+  };
+
+  const updateRecordingProject = (projectId, updater) => {
+    updateData("recordingProjects", (projects = []) => projects.map((project) => {
+      if (project.id !== projectId) return project;
+      const next = typeof updater === "function" ? updater(project) : { ...project, ...updater };
+      return normalizeRecordingProject({ ...next, updatedAt: new Date().toISOString() });
+    }));
   };
 
   const bulkPatchResponses = (ids = [], patch = {}) => {
@@ -1648,6 +1775,7 @@ ${socialRows || "-"}
     if (!confirm("サンプルデータに戻しますか？現在のブラウザ内データは上書きされます。")) return;
     setData(sampleData);
     setSelectedEpisodeId(sampleData.episodes[0].id);
+    setSelectedRecordingProjectId(sampleData.recordingProjects?.[0]?.id ?? "");
   };
 
   const restoreData = (incomingData) => {
@@ -1657,6 +1785,7 @@ ${socialRows || "-"}
       setData(next);
       setStorageWarning("");
       setSelectedEpisodeId(next.episodes?.[0]?.id ?? "");
+      setSelectedRecordingProjectId(next.recordingProjects?.[0]?.id ?? "");
       setSharedPayload(null);
       setRestorePayload(null);
       setActive("settings");
@@ -1678,6 +1807,20 @@ ${socialRows || "-"}
     return <PublicSubmissionForm logoSrc={logoSrc} payload={sharedPayload} operatorSettings={data.settings} />;
   }
 
+  if (WORDPRESS_RUNTIME && !WORDPRESS_RUNTIME.canManage) {
+    return (
+      <WordPressMemberPortal
+        logoSrc={logoSrc}
+        data={data}
+        runtime={WORDPRESS_RUNTIME}
+        connectionState={wordpressState}
+        onRefresh={refreshWordPressData}
+        onUpdateLine={updateMemberRecordingLine}
+        onCreateQuestion={addMemberQuestion}
+      />
+    );
+  }
+
   return (
     <main className="app-shell">
       <Header logoSrc={logoSrc} />
@@ -1694,6 +1837,13 @@ ${socialRows || "-"}
       {storageWarning && (
         <div className="storage-warning" role="alert">
           {storageWarning}
+        </div>
+      )}
+      {WORDPRESS_RUNTIME && (
+        <div className={`wordpress-sync-banner ${wordpressState.status}`} role={wordpressState.status === "error" ? "alert" : "status"}>
+          <Database size={16} />
+          <span>{wordpressState.message}</span>
+          <small>{WORDPRESS_RUNTIME.currentUser?.name || "ログイン中"}{WORDPRESS_RUNTIME.canManage ? " / 管理者" : " / 声優"}</small>
         </div>
       )}
 
@@ -1730,7 +1880,20 @@ ${socialRows || "-"}
               episodes={data.episodes}
               selectedEpisodeId={selectedEpisodeId}
               setSelectedEpisodeId={setSelectedEpisodeId}
+              selectedRecordingProjectId={selectedRecordingProjectId}
+              setSelectedRecordingProjectId={setSelectedRecordingProjectId}
               settings={data.settings}
+              setActive={setActive}
+            />
+          )}
+          {PRODUCTION_HUB_KEYS.has(active) && (
+            <ProductionWorkspace
+              view={active}
+              projects={data.recordingProjects ?? []}
+              selectedProjectId={selectedRecordingProjectId}
+              setSelectedProjectId={setSelectedRecordingProjectId}
+              updateProject={(updater) => updateRecordingProject(selectedRecordingProjectId, updater)}
+              siteUsers={wordpressState.users}
               setActive={setActive}
             />
           )}
@@ -3753,8 +3916,26 @@ function SettingsPanel({
 
   return (
     <div className="view-stack">
-      <SectionTitle title="設定/バックアップ" subtitle="ブラウザ内保存のエクスポート、インポート、主要パスを管理します。" />
-      <article className="panel sync-panel">
+      <SectionTitle
+        title="設定/バックアップ"
+        subtitle={WORDPRESS_RUNTIME ? "人物色とWordPress上の制作データのバックアップを管理します。" : "ブラウザ内保存のエクスポート、インポート、主要パスを管理します。"}
+      />
+      {WORDPRESS_RUNTIME ? (
+        <article className="panel sync-panel">
+          <div className="sync-heading">
+            <Database size={20} />
+            <div>
+              <h3>共有と保存</h3>
+              <p>作品データと進捗はWordPress、声優さんの録音と音声素材はGoogle Drive、キャラクター画像とサムネイルだけはWordPressメディアで管理します。</p>
+            </div>
+          </div>
+          <div className="sync-status-grid">
+            <div><b>関係者画面</b><span>WordPressアカウントと担当キャラクターに応じて表示範囲を分けます。</span></div>
+            <div><b>録音データ</b><span>WordPressへアップロードせず、Google Drive共有URLだけを保存します。</span></div>
+          </div>
+        </article>
+      ) : (
+        <article className="panel sync-panel">
         <div className="sync-heading">
           <Database size={20} />
           <div>
@@ -3775,7 +3956,8 @@ function SettingsPanel({
             <span>声優さんの収録済み、録音提出、確認OK、リテイクを共有URLで同期します。</span>
           </div>
         </div>
-      </article>
+        </article>
+      )}
       <article className="panel character-color-settings">
         <div className="record-head">
           <div>
@@ -3816,7 +3998,7 @@ function SettingsPanel({
         )}
         {colorProject?.sharedAt && <p className="hint-text">変更後は「配役・共有」で共有内容を更新すると、声優さんの画面にも反映されます。</p>}
       </article>
-      <article className="panel">
+      {!WORDPRESS_RUNTIME && <article className="panel">
         <div className="record-head">
           <div>
             <h2>共同収録ボード接続</h2>
@@ -3847,7 +4029,7 @@ function SettingsPanel({
             wide
           />
         </div>
-      </article>
+      </article>}
       {SHOW_AUDITION_WORKFLOW && (
         <article className="panel">
           <div className="record-head">
@@ -3865,10 +4047,11 @@ function SettingsPanel({
         </article>
       )}
       <article className="panel">
-        <div className="form-grid">
-          <Field label="Obsidian格納庫パス" value={settings.obsidianPath} onChange={(value) => updateSettings({ obsidianPath: value })} />
-          <p className="hint-text wide">ここはCodex用バックアップを置く場所です。オンラインフォームの回答保存先ではありません。</p>
-          <Field label="選択したフォルダー名" value={settings.obsidianFolderName || ""} readOnly />
+        {!WORDPRESS_RUNTIME && <>
+          <div className="form-grid">
+            <Field label="Obsidian格納庫パス" value={settings.obsidianPath} onChange={(value) => updateSettings({ obsidianPath: value })} />
+            <p className="hint-text wide">ここはCodex用バックアップを置く場所です。オンラインフォームの回答保存先ではありません。</p>
+            <Field label="選択したフォルダー名" value={settings.obsidianFolderName || ""} readOnly />
           {SHOW_AUDITION_WORKFLOW && (
             <>
               <Field label="回答保存Webhook URL" value={settings.responseEndpointUrl || ""} onChange={(value) => updateSettings({ responseEndpointUrl: value })} placeholder="Google Apps ScriptのWebアプリURL" wide />
@@ -3884,18 +4067,20 @@ function SettingsPanel({
               <TextArea label="X連絡ブロック説明文" value={settings.xContactMessage || DEFAULT_X_CONTACT_MESSAGE} onChange={(value) => updateSettings({ xContactMessage: value })} />
             </>
           )}
-        </div>
+          </div>
+          <div className="button-row">
+            <button className="secondary" onClick={() => updateSettings({ obsidianPath: DEFAULT_OBSIDIAN_PATH, obsidianFolderName: "Voice-Casting-Studio" })}>
+              <Save size={16} />既定のバックアップフォルダー
+            </button>
+            <button className="secondary" onClick={chooseFolder}>
+              <FolderOpen size={16} />フォルダーを選ぶ
+            </button>
+          </div>
+          {folderMessage && <p className="hint-text">{folderMessage}</p>}
+        </>}
+        {WORDPRESS_RUNTIME && <div className="record-head"><div><h2>制作データのバックアップ</h2><p className="muted">WordPressの投稿リビジョンに加えて、手元へJSONを書き出せます。</p></div></div>}
         <div className="button-row">
-          <button className="secondary" onClick={() => updateSettings({ obsidianPath: DEFAULT_OBSIDIAN_PATH, obsidianFolderName: "Voice-Casting-Studio" })}>
-            <Save size={16} />既定のバックアップフォルダー
-          </button>
-          <button className="secondary" onClick={chooseFolder}>
-            <FolderOpen size={16} />フォルダーを選ぶ
-          </button>
-        </div>
-        {folderMessage && <p className="hint-text">{folderMessage}</p>}
-        <div className="button-row">
-          <button className="secondary" onClick={copyTransferLink}><ClipboardCopy size={16} />{transferCopied ? "コピー済み" : "引き継ぎリンクをコピー"}</button>
+          {!WORDPRESS_RUNTIME && <button className="secondary" onClick={copyTransferLink}><ClipboardCopy size={16} />{transferCopied ? "コピー済み" : "引き継ぎリンクをコピー"}</button>}
           <button className="secondary" onClick={exportJson}><Download size={16} />JSONを書き出し</button>
           <label className="secondary file-button">
             <Upload size={16} />JSONを読み込み
@@ -3903,7 +4088,7 @@ function SettingsPanel({
           </label>
           <button className="danger" onClick={resetSample}><Trash2 size={16} />サンプルに戻す</button>
         </div>
-        <p className="hint-text">スマホへ一度だけ移す場合は、PCで引き継ぎリンクをコピーしてスマホで開きます。画像や音源を多く含む場合はJSON書き出し/読み込みを使ってください。</p>
+        <p className="hint-text">{WORDPRESS_RUNTIME ? "録音ファイル本体はJSONへ含めず、Google Drive URLだけを書き出します。" : "スマホへ一度だけ移す場合は、PCで引き継ぎリンクをコピーしてスマホで開きます。画像や音源を多く含む場合はJSON書き出し/読み込みを使ってください。"}</p>
       </article>
     </div>
   );

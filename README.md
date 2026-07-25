@@ -2,16 +2,19 @@
 
 Voice Casting Studio is a shared voice drama script and recording management tool based on Radio Article Studio.
 
-The main screen is a recording board shared by the director and voice actors:
+The current product is a voice drama production workspace shared by the director and voice actors:
 
-- paste a full script from Google Docs and preview detected scenes, speakers, dialogue, and stage directions
+- track recording, review, questions, deadlines, and announcements from Home
+- paste a full script from Google Docs and preview detected chapters, scenes, speakers, dialogue, and stage directions
+- navigate from the full script to a chapter, then to a scene without merging repeated scene names across chapters
 - import structured scripts from Google Sheets, Excel, TSV, or CSV
 - add ruby readings in the editor or import `｜漢字《かんじ》` notation from a sheet
 - filter by one character or extract dialogue between multiple characters
 - show neighboring lines as recording context
 - assign characters and issue a dedicated URL to each actor
 - share recorded, submitted, approved, retake, and hold progress
-- upload MP3/WAV/M4A files to Google Drive or submit a Drive URL
+- keep actor recordings in Google Drive and store only their Drive URLs in WordPress
+- manage character profiles, assigned actors, Drive folders, production materials, questions, schedules, and announcements
 - keep the former audition workflow dormant in the codebase for possible reuse
 - export/import local backups
 
@@ -31,6 +34,16 @@ npm run build
 ```
 
 The production build is configured for GitHub Pages at `/Voice-Casting-Studio/`.
+
+## Dedicated WordPress Theme
+
+The private subdomain can run Voice Casting Studio as its whole WordPress experience without a separate plugin and without modifying WordPress core.
+
+```bash
+npm run build:wordpress
+```
+
+The installable theme is generated at `wordpress-theme/voice-casting-studio`. See [docs/wordpress-theme-setup.md](docs/wordpress-theme-setup.md) for installation, roles, Drive permissions, and update steps.
 
 ## Google Drive Response Endpoint
 

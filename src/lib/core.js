@@ -22,10 +22,14 @@ export const MAX_SUBMISSION_BYTES = DEFAULT_ATTACHMENT_LIMIT_MB * 1024 * 1024;
 export const DEFAULT_THUMBNAIL_DRIVE_ENDPOINT_URL = "";
 export const DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL = "";
 export const DEFAULT_AUDIO_SAVE_MEMO = "Drive: 回答保存先フォルダー内の応募フォーム/募集企画別フォルダー";
-export const publicAsset = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\/+/, "")}`;
+export const publicAsset = (path) => {
+  const runtimeBase = globalThis.VoiceCastingStudio?.assetBaseUrl;
+  const base = runtimeBase || import.meta.env.BASE_URL;
+  return `${String(base).replace(/\/?$/, "/")}${path.replace(/^\/+/, "")}`;
+};
 export const GUEST_BADGE_ASSET_URL = publicAsset("thumbnail-overlays/guest-in-badge.png");
 
-if ("serviceWorker" in navigator && import.meta.env.PROD) {
+if ("serviceWorker" in navigator && import.meta.env.PROD && globalThis.VoiceCastingStudio?.mode !== "wordpress") {
   let refreshingForServiceWorkerUpdate = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (refreshingForServiceWorkerUpdate) return;

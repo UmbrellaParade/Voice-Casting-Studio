@@ -188,6 +188,35 @@ const getSceneGroups = (lines = []) => {
   return groups;
 };
 
+const getChapterGroups = (lines = []) => {
+  const chapters = [];
+  const chapterById = new Map();
+  lines.forEach((line) => {
+    const chapterId = line.chapterId || "chapter_default";
+    let chapter = chapterById.get(chapterId);
+    if (!chapter) {
+      chapter = {
+        chapterId,
+        title: line.chapterTitle || "第一章",
+        lines: [],
+        scenes: [],
+        sceneById: new Map()
+      };
+      chapterById.set(chapterId, chapter);
+      chapters.push(chapter);
+    }
+    chapter.lines.push(line);
+    let scene = chapter.sceneById.get(line.sceneId);
+    if (!scene) {
+      scene = { sceneId: line.sceneId, title: line.sceneTitle, lines: [] };
+      chapter.sceneById.set(line.sceneId, scene);
+      chapter.scenes.push(scene);
+    }
+    scene.lines.push(line);
+  });
+  return chapters.map(({ sceneById, ...chapter }) => chapter);
+};
+
 const makeCharacterTint = (color = "#5f6d7a", alpha = 0.1) => {
   const hex = String(color || "").trim().replace(/^#/, "");
   const normalized = hex.length === 3 ? hex.split("").map((part) => `${part}${part}`).join("") : hex;
@@ -196,7 +225,14 @@ const makeCharacterTint = (color = "#5f6d7a", alpha = 0.1) => {
   return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
 };
 
-function ChapterSelector({ scenes, selectedSceneId, setSelectedSceneId }) {
+function ChapterSelector({
+  chapters,
+  selectedChapterId,
+  selectedSceneId,
+  setSelectedChapterId,
+  setSelectedSceneId
+}) {
+  const selectedChapter = chapters.find((chapter) => chapter.chapterId === selectedChapterId);
   return (
     <div className="script-scope-picker">
       <div className="script-scope-heading">
@@ -206,25 +242,57 @@ function ChapterSelector({ scenes, selectedSceneId, setSelectedSceneId }) {
       <div className="script-chapter-options" role="tablist" aria-label="台本の章">
         <button
           type="button"
-          className={selectedSceneId ? "" : "active"}
-          onClick={() => setSelectedSceneId("")}
+          className={selectedChapterId ? "" : "active"}
+          onClick={() => setSelectedChapterId("")}
         >
           <strong>ボイスドラマ脚本全文</strong>
-          <small>{scenes.length}章</small>
+          <small>{chapters.length}章</small>
         </button>
-        {scenes.map((scene) => (
+        {chapters.map((chapter) => (
           <button
             type="button"
-            key={scene.sceneId}
-            className={selectedSceneId === scene.sceneId ? "active" : ""}
-            onClick={() => setSelectedSceneId(scene.sceneId)}
+            key={chapter.chapterId}
+            className={selectedChapterId === chapter.chapterId ? "active" : ""}
+            onClick={() => setSelectedChapterId(chapter.chapterId)}
           >
-            <strong>{scene.title}</strong>
-            <small>{scene.lines.filter((line) => line.kind !== "direction").length}セリフ</small>
+            <strong>{chapter.title}</strong>
+            <small>{chapter.scenes.length}シーン / {chapter.lines.filter((line) => line.kind !== "direction").length}セリフ</small>
           </button>
         ))}
       </div>
+      {selectedChapter && (
+        <div className="script-scene-scope">
+          <div className="script-scene-scope-heading">
+            <span>{selectedChapter.title}</span>
+            <small>シーンを選択</small>
+          </div>
+          <div className="script-scene-options" role="tablist" aria-label={`${selectedChapter.title}のシーン`}>
+            <button type="button" className={selectedSceneId ? "" : "active"} onClick={() => setSelectedSceneId("")}>
+              <strong>章の全文</strong>
+              <small>{selectedChapter.lines.filter((line) => line.kind !== "direction").length}セリフ</small>
+            </button>
+            {selectedChapter.scenes.map((scene) => (
+              <button type="button" key={scene.sceneId} className={selectedSceneId === scene.sceneId ? "active" : ""} onClick={() => setSelectedSceneId(scene.sceneId)}>
+                <strong>{scene.title}</strong>
+                <small>{scene.lines.filter((line) => line.kind !== "direction").length}セリフ</small>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function ScriptChapterSection({ chapter, open, onToggle, children }) {
+  return (
+    <section className={`script-chapter${open ? " open" : ""}`}>
+      <button type="button" className="script-chapter-heading" onClick={onToggle} aria-expanded={open}>
+        <span>{open ? <ChevronUp size={19} /> : <ChevronDown size={19} />}<strong>{chapter.title}</strong></span>
+        <small>{chapter.scenes.length}シーン / {chapter.lines.filter((line) => !line.isContext && line.kind !== "direction").length}セリフ</small>
+      </button>
+      {open && children}
+    </section>
   );
 }
 
@@ -447,6 +515,7 @@ function AdminLineCard({ project, line, patchLine, removeLine }) {
           </div>
           {detailsOpen && (
             <div className="line-detail-editor">
+              <Field label="章名" value={line.chapterTitle} onChange={(value) => patchLine(line.id, { chapterTitle: value })} />
               <Field label="シーン名" value={line.sceneTitle} onChange={(value) => patchLine(line.id, { sceneTitle: value })} />
               <label>
                 <span>話者</span>
@@ -480,6 +549,7 @@ function AdminLineCard({ project, line, patchLine, removeLine }) {
           </div>
           {detailsOpen && (
             <div className="line-detail-editor">
+              <Field label="章名" value={line.chapterTitle} onChange={(value) => patchLine(line.id, { chapterTitle: value })} />
               <Field label="シーン名" value={line.sceneTitle} onChange={(value) => patchLine(line.id, { sceneTitle: value })} />
               <TextArea label="ト書き" value={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
               <RubyEditor text={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
@@ -495,7 +565,8 @@ function AdminLineCard({ project, line, patchLine, removeLine }) {
 }
 
 function RecordingBoardView({ project, patchLine, removeLine }) {
-  const allScenes = useMemo(() => getSceneGroups(project.lines), [project.lines]);
+  const allChapters = useMemo(() => getChapterGroups(project.lines), [project.lines]);
+  const [selectedChapterId, setSelectedChapterId] = useState("");
   const [selectedSceneId, setSelectedSceneId] = useState("");
   const [selectedCharacterIds, setSelectedCharacterIds] = useState([]);
   const [mode, setMode] = useState("assignment");
@@ -503,18 +574,29 @@ function RecordingBoardView({ project, patchLine, removeLine }) {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("すべて");
   const [openSceneIds, setOpenSceneIds] = useState(() => new Set(project.lines[0]?.sceneId ? [project.lines[0].sceneId] : []));
+  const [openChapterIds, setOpenChapterIds] = useState(() => new Set(project.lines[0]?.chapterId ? [project.lines[0].chapterId] : []));
   const scopedProject = useMemo(() => ({
     ...project,
-    lines: selectedSceneId ? project.lines.filter((line) => line.sceneId === selectedSceneId) : project.lines
-  }), [project, selectedSceneId]);
-  const sceneSignature = allScenes.map((scene) => scene.sceneId).join("|");
+    lines: project.lines.filter((line) => {
+      if (selectedSceneId) return line.sceneId === selectedSceneId;
+      if (selectedChapterId) return line.chapterId === selectedChapterId;
+      return true;
+    })
+  }), [project, selectedChapterId, selectedSceneId]);
+  const chapterSignature = allChapters.map((chapter) => `${chapter.chapterId}:${chapter.scenes.map((scene) => scene.sceneId).join(",")}`).join("|");
   const characterScopeSignature = scopedProject.lines
     .map((line) => `${line.id}:${line.kind}:${line.characterId}`)
     .join("|");
 
   useEffect(() => {
-    if (selectedSceneId && !allScenes.some((scene) => scene.sceneId === selectedSceneId)) setSelectedSceneId("");
-  }, [selectedSceneId, sceneSignature]);
+    if (selectedChapterId && !allChapters.some((chapter) => chapter.chapterId === selectedChapterId)) {
+      setSelectedChapterId("");
+      setSelectedSceneId("");
+      return;
+    }
+    const selectedChapter = allChapters.find((chapter) => chapter.chapterId === selectedChapterId);
+    if (selectedSceneId && !selectedChapter?.scenes.some((scene) => scene.sceneId === selectedSceneId)) setSelectedSceneId("");
+  }, [selectedChapterId, selectedSceneId, chapterSignature]);
 
   useEffect(() => {
     const available = new Set(scopedProject.lines.filter((line) => line.kind !== "direction").map((line) => line.characterId));
@@ -522,13 +604,16 @@ function RecordingBoardView({ project, patchLine, removeLine }) {
       const next = current.filter((id) => available.has(id));
       return next.length === current.length ? current : next;
     });
-  }, [selectedSceneId, characterScopeSignature]);
+  }, [selectedChapterId, selectedSceneId, characterScopeSignature]);
 
   useEffect(() => {
     setOpenSceneIds(new Set(
-      selectedSceneId ? [selectedSceneId] : allScenes.map((scene) => scene.sceneId)
+      selectedSceneId
+        ? [selectedSceneId]
+        : allChapters.flatMap((chapter) => chapter.scenes.map((scene) => scene.sceneId))
     ));
-  }, [project.id, selectedSceneId, sceneSignature]);
+    setOpenChapterIds(new Set(selectedChapterId ? [selectedChapterId] : allChapters.map((chapter) => chapter.chapterId)));
+  }, [project.id, selectedChapterId, selectedSceneId, chapterSignature]);
 
   const visibleLines = useMemo(
     () => getFilteredRecordingLines({
@@ -541,7 +626,7 @@ function RecordingBoardView({ project, patchLine, removeLine }) {
     }),
     [scopedProject, selectedCharacterIds, mode, includeContext, query, statusFilter]
   );
-  const scenes = getSceneGroups(visibleLines);
+  const chapters = getChapterGroups(visibleLines);
 
   const toggleScene = (sceneId) => {
     setOpenSceneIds((current) => {
@@ -551,6 +636,19 @@ function RecordingBoardView({ project, patchLine, removeLine }) {
       return next;
     });
   };
+  const toggleChapter = (chapterId) => {
+    setOpenChapterIds((current) => {
+      const next = new Set(current);
+      if (next.has(chapterId)) next.delete(chapterId);
+      else next.add(chapterId);
+      return next;
+    });
+  };
+  const selectChapter = (chapterId) => {
+    setSelectedChapterId(chapterId);
+    setSelectedSceneId("");
+    setSelectedCharacterIds([]);
+  };
   const selectScene = (sceneId) => {
     setSelectedSceneId(sceneId);
     setSelectedCharacterIds([]);
@@ -558,7 +656,13 @@ function RecordingBoardView({ project, patchLine, removeLine }) {
 
   return (
     <>
-      <ChapterSelector scenes={allScenes} selectedSceneId={selectedSceneId} setSelectedSceneId={selectScene} />
+      <ChapterSelector
+        chapters={allChapters}
+        selectedChapterId={selectedChapterId}
+        selectedSceneId={selectedSceneId}
+        setSelectedChapterId={selectChapter}
+        setSelectedSceneId={selectScene}
+      />
       <ProgressSummary project={scopedProject} />
       <CharacterFilters
         project={scopedProject}
@@ -572,28 +676,23 @@ function RecordingBoardView({ project, patchLine, removeLine }) {
         setQuery={setQuery}
         statusFilter={statusFilter}
         setStatusFilter={setStatusFilter}
-        allLabel={selectedSceneId ? "章の全文" : "全文"}
+        allLabel={selectedSceneId ? "シーン全文" : selectedChapterId ? "章の全文" : "全文"}
       />
-      <div className="script-scenes">
-        {scenes.map((scene) => (
-          <ScriptSceneSection
-            key={scene.sceneId}
-            scene={scene}
-            open={openSceneIds.has(scene.sceneId)}
-            onToggle={() => toggleScene(scene.sceneId)}
-          >
-            <div className="script-line-list">
-              {scene.lines.map((line) => (
-                <AdminLineCard
-                  key={line.id}
-                  project={project}
-                  line={line}
-                  patchLine={patchLine}
-                  removeLine={removeLine}
-                />
+      <div className="script-chapters">
+        {chapters.map((chapter) => (
+          <ScriptChapterSection key={chapter.chapterId} chapter={chapter} open={openChapterIds.has(chapter.chapterId)} onToggle={() => toggleChapter(chapter.chapterId)}>
+            <div className="script-scenes">
+              {chapter.scenes.map((scene) => (
+                <ScriptSceneSection key={scene.sceneId} scene={scene} open={openSceneIds.has(scene.sceneId)} onToggle={() => toggleScene(scene.sceneId)}>
+                  <div className="script-line-list">
+                    {scene.lines.map((line) => (
+                      <AdminLineCard key={line.id} project={project} line={line} patchLine={patchLine} removeLine={removeLine} />
+                    ))}
+                  </div>
+                </ScriptSceneSection>
               ))}
             </div>
-          </ScriptSceneSection>
+          </ScriptChapterSection>
         ))}
         {!visibleLines.length && (
           <div className="recording-empty-state">
@@ -624,9 +723,11 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
     [importMode, importText, project.characters]
   );
   const importStats = useMemo(() => {
+    const chapters = new Set(parsedImportRows.map((row) => row.chapterTitle));
     const scenes = new Set(parsedImportRows.map((row) => row.sceneTitle));
     const speakers = new Set(parsedImportRows.map((row) => row.speaker).filter((speaker) => speaker && speaker !== "ト書き"));
     return {
+      chapters: chapters.size,
       scenes: scenes.size,
       speakers: [...speakers],
       directions: parsedImportRows.filter((row) => row.sourceKind === "direction" || row.speaker === "ト書き").length,
@@ -694,7 +795,7 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
         </div>
         {importMode === "table" && (
           <div className="script-import-example">
-            <code>シーン</code><code>話者</code><code>セリフ</code><code>演技指示</code><code>ファイル名</code>
+            <code>章</code><code>シーン</code><code>話者</code><code>セリフ</code><code>演技指示</code><code>ファイル名</code>
           </div>
         )}
         <p className="ruby-import-hint">
@@ -711,15 +812,15 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
           }}
           aria-label={importMode === "docs" ? "Googleドキュメントの脚本を貼り付け" : "表またはCSVの台本を貼り付け"}
           placeholder={importMode === "docs"
-            ? "〇雨上がり\nアマモリ「本当に行くつもりなの？」\nヴェル\n「うん。もう｜決めた《きめた》んだ。」\n（静かな決意で）"
-            : "シーン\t話者\tセリフ\t演技指示\tファイル名\nScene 01\tヴェル\tうん。もう決めたんだ。\t静かな決意で\tS01_003_VEL"}
+            ? "第一章\nシーン1 雨上がり\nアマモリ「本当に行くつもりなの？」\nヴェル\n「うん。もう｜決めた《きめた》んだ。」\n（静かな決意で）\n\n第二章\nシーン1 出発\nヴェル「行ってくるね。」"
+            : "章\tシーン\t話者\tセリフ\t演技指示\tファイル名\n第一章\tScene 01\tヴェル\tうん。もう決めたんだ。\t静かな決意で\tC01_S01_003_VEL"}
         />
         {importText.trim() && (
           <div className={`document-script-preview${parsedImportRows.length ? "" : " empty"}`}>
             <div className="document-preview-heading">
               <div>
                 <strong>取り込みプレビュー</strong>
-                <span>{importStats.dialogue}セリフ / {importStats.directions}件のト書き / {importStats.scenes}シーン</span>
+                <span>{importStats.dialogue}セリフ / {importStats.directions}件のト書き / {importStats.chapters}章 / {importStats.scenes}シーン</span>
               </div>
               <div className="document-speaker-list">
                 {importStats.speakers.slice(0, 8).map((speaker) => <span key={speaker}>{speaker}</span>)}
@@ -734,8 +835,8 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
             )}
             <div className="document-preview-list">
               {parsedImportRows.slice(0, 8).map((row, index) => (
-                <div className={row.speaker === "ト書き" ? "direction" : ""} key={`${row.sceneTitle}-${row.speaker}-${index}`}>
-                  <span>{row.sceneTitle}</span>
+                <div className={row.speaker === "ト書き" ? "direction" : ""} key={`${row.chapterTitle}-${row.sceneTitle}-${row.speaker}-${index}`}>
+                  <span>{row.chapterTitle} / {row.sceneTitle}</span>
                   <b>{row.speaker || "話者未設定"}</b>
                   <p><RubyText text={row.text} /></p>
                   {row.direction && <small>{row.direction}</small>}
@@ -788,7 +889,10 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
                       {project.characters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}
                     </select>
                   )}
-                <input value={line.sceneTitle} onChange={(event) => patchLine(line.id, { sceneTitle: event.target.value })} aria-label="シーン" />
+                <div className="script-editor-location">
+                  <input value={line.chapterTitle} onChange={(event) => patchLine(line.id, { chapterTitle: event.target.value })} aria-label="章" />
+                  <input value={line.sceneTitle} onChange={(event) => patchLine(line.id, { sceneTitle: event.target.value })} aria-label="シーン" />
+                </div>
                 <textarea value={line.text} onChange={(event) => patchLine(line.id, { text: event.target.value })} aria-label={line.kind === "direction" ? "ト書き" : "セリフ"} />
                 <button
                   type="button"
@@ -992,18 +1096,21 @@ export function RecordingStudio({
   episodes,
   selectedEpisodeId,
   setSelectedEpisodeId,
+  selectedRecordingProjectId,
+  setSelectedRecordingProjectId,
   settings,
   setActive
 }) {
   const episodeProjects = projects.filter((project) => !selectedEpisodeId || project.episodeId === selectedEpisodeId);
-  const [selectedProjectId, setSelectedProjectId] = useState(() => episodeProjects[0]?.id || projects[0]?.id || "");
+  const [internalSelectedProjectId, setInternalSelectedProjectId] = useState(() => episodeProjects[0]?.id || projects[0]?.id || "");
+  const selectedProjectId = selectedRecordingProjectId ?? internalSelectedProjectId;
+  const selectProjectId = setSelectedRecordingProjectId ?? setInternalSelectedProjectId;
   const [tab, setTab] = useState("board");
   const [syncState, setSyncState] = useState({ busy: false, message: "", error: false });
 
   useEffect(() => {
-    if (episodeProjects.some((item) => item.id === selectedProjectId)) return;
-    if (!episodeProjects.length && projects.some((item) => item.id === selectedProjectId)) return;
-    setSelectedProjectId(episodeProjects[0]?.id || projects[0]?.id || "");
+    if (projects.some((item) => item.id === selectedProjectId)) return;
+    selectProjectId(episodeProjects[0]?.id || projects[0]?.id || "");
   }, [projects, episodeProjects, selectedProjectId, selectedEpisodeId]);
 
   const project = projects.find((item) => item.id === selectedProjectId) || episodeProjects[0] || projects[0];
@@ -1058,14 +1165,14 @@ export function RecordingStudio({
       title: episode?.title ? `${episode.title} 収録台本` : "新しい収録プロジェクト"
     });
     updateProjects((current) => [next, ...current]);
-    setSelectedProjectId(next.id);
+    selectProjectId(next.id);
     setTab("script");
   };
 
   const removeProject = () => {
     if (!project || !confirm(`「${project.title}」を削除しますか？`)) return;
     updateProjects((current) => current.filter((item) => item.id !== project.id));
-    setSelectedProjectId("");
+    selectProjectId("");
   };
 
   const addLine = () => {
@@ -1082,6 +1189,8 @@ export function RecordingStudio({
         ...current.lines,
         {
           id: newId("line"),
+          chapterId: current.lines.at(-1)?.chapterId || newId("chapter"),
+          chapterTitle: current.lines.at(-1)?.chapterTitle || "第一章",
           sceneId: current.lines.at(-1)?.sceneId || newId("scene"),
           sceneTitle: current.lines.at(-1)?.sceneTitle || "Scene 1",
           order: current.lines.length + 1,
@@ -1116,7 +1225,8 @@ export function RecordingStudio({
       const characters = [...current.characters];
       const characterByName = new Map(characters.map((character) => [character.name, character]));
       const baseLines = replace ? [] : current.lines;
-      const sceneByTitle = new Map(current.lines.map((line) => [line.sceneTitle, line.sceneId]));
+      const chapterByTitle = new Map(current.lines.map((line) => [line.chapterTitle || "第一章", line.chapterId]));
+      const sceneByScope = new Map(current.lines.map((line) => [`${line.chapterTitle || "第一章"}\u0000${line.sceneTitle}`, line.sceneId]));
       const importPlan = replace ? getScriptImportPlan(current, rows) : { matches: [] };
       const nextLines = rows.map((row, index) => {
         const isDirection = row.sourceKind === "direction" || row.speaker === "ト書き";
@@ -1133,13 +1243,22 @@ export function RecordingStudio({
           characters.push(character);
           characterByName.set(character.name, character);
         }
-        let sceneId = sceneByTitle.get(row.sceneTitle);
+        const chapterTitle = row.chapterTitle || "第一章";
+        let chapterId = chapterByTitle.get(chapterTitle);
+        if (!chapterId) {
+          chapterId = newId("chapter");
+          chapterByTitle.set(chapterTitle, chapterId);
+        }
+        const sceneScopeKey = `${chapterTitle}\u0000${row.sceneTitle}`;
+        let sceneId = sceneByScope.get(sceneScopeKey);
         if (!sceneId) {
           sceneId = newId("scene");
-          sceneByTitle.set(row.sceneTitle, sceneId);
+          sceneByScope.set(sceneScopeKey, sceneId);
         }
         return {
           id: matchedLine?.id || newId("line"),
+          chapterId,
+          chapterTitle,
           sceneId,
           sceneTitle: row.sceneTitle,
           order: baseLines.length + index + 1,
@@ -1201,6 +1320,7 @@ export function RecordingStudio({
           actorName: "声優さん",
           contact: "",
           characterIds: [],
+          wpUserId: 0,
           accessKey: createRecordingAccessKey()
         }
       ]
@@ -1292,7 +1412,7 @@ export function RecordingStudio({
         <div>
           <label>
             <span>収録プロジェクト</span>
-            <select value={project.id} onChange={(event) => setSelectedProjectId(event.target.value)}>
+            <select value={project.id} onChange={(event) => selectProjectId(event.target.value)}>
               {projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
             </select>
           </label>
@@ -1466,6 +1586,7 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
   const [project, setProject] = useState(null);
   const [viewer, setViewer] = useState(null);
   const [endpointUrl, setEndpointUrl] = useState(reference.endpointUrl || "");
+  const [selectedChapterId, setSelectedChapterId] = useState("");
   const [selectedSceneId, setSelectedSceneId] = useState("");
   const [selectedCharacterIds, setSelectedCharacterIds] = useState([]);
   const [mode, setMode] = useState("assignment");
@@ -1475,12 +1596,17 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
   const [state, setState] = useState({ busy: true, message: "共有台本を読み込んでいます…", error: false, busyLineId: "" });
   const [drafts, setDrafts] = useState({});
   const [openSceneIds, setOpenSceneIds] = useState(new Set());
-  const allScenes = useMemo(() => getSceneGroups(project?.lines || []), [project?.lines]);
+  const [openChapterIds, setOpenChapterIds] = useState(new Set());
+  const allChapters = useMemo(() => getChapterGroups(project?.lines || []), [project?.lines]);
   const scopedProject = useMemo(() => project ? ({
     ...project,
-    lines: selectedSceneId ? project.lines.filter((line) => line.sceneId === selectedSceneId) : project.lines
-  }) : null, [project, selectedSceneId]);
-  const sceneSignature = allScenes.map((scene) => scene.sceneId).join("|");
+    lines: project.lines.filter((line) => {
+      if (selectedSceneId) return line.sceneId === selectedSceneId;
+      if (selectedChapterId) return line.chapterId === selectedChapterId;
+      return true;
+    })
+  }) : null, [project, selectedChapterId, selectedSceneId]);
+  const chapterSignature = allChapters.map((chapter) => `${chapter.chapterId}:${chapter.scenes.map((scene) => scene.sceneId).join(",")}`).join("|");
   const characterScopeSignature = (scopedProject?.lines || [])
     .map((line) => `${line.id}:${line.kind}:${line.characterId}`)
     .join("|");
@@ -1526,8 +1652,14 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
   }, [project?.id, viewer?.id]);
 
   useEffect(() => {
-    if (selectedSceneId && !allScenes.some((scene) => scene.sceneId === selectedSceneId)) setSelectedSceneId("");
-  }, [selectedSceneId, sceneSignature]);
+    if (selectedChapterId && !allChapters.some((chapter) => chapter.chapterId === selectedChapterId)) {
+      setSelectedChapterId("");
+      setSelectedSceneId("");
+      return;
+    }
+    const selectedChapter = allChapters.find((chapter) => chapter.chapterId === selectedChapterId);
+    if (selectedSceneId && !selectedChapter?.scenes.some((scene) => scene.sceneId === selectedSceneId)) setSelectedSceneId("");
+  }, [selectedChapterId, selectedSceneId, chapterSignature]);
 
   useEffect(() => {
     if (!scopedProject) return;
@@ -1536,13 +1668,16 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
       const next = current.filter((id) => available.has(id));
       return next.length === current.length ? current : next;
     });
-  }, [selectedSceneId, characterScopeSignature]);
+  }, [selectedChapterId, selectedSceneId, characterScopeSignature]);
 
   useEffect(() => {
     setOpenSceneIds(new Set(
-      selectedSceneId ? [selectedSceneId] : allScenes.map((scene) => scene.sceneId)
+      selectedSceneId
+        ? [selectedSceneId]
+        : allChapters.flatMap((chapter) => chapter.scenes.map((scene) => scene.sceneId))
     ));
-  }, [project?.id, selectedSceneId, sceneSignature]);
+    setOpenChapterIds(new Set(selectedChapterId ? [selectedChapterId] : allChapters.map((chapter) => chapter.chapterId)));
+  }, [project?.id, selectedChapterId, selectedSceneId, chapterSignature]);
 
   useEffect(() => {
     if (!project || !endpointUrl) return undefined;
@@ -1632,7 +1767,7 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
     query,
     statusFilter
   });
-  const scenes = getSceneGroups(visibleLines);
+  const chapters = getChapterGroups(visibleLines);
   const editableCharacters = new Set(viewer?.characterIds || []);
   const toggleScene = (sceneId) => {
     setOpenSceneIds((current) => {
@@ -1641,6 +1776,19 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
       else next.add(sceneId);
       return next;
     });
+  };
+  const toggleChapter = (chapterId) => {
+    setOpenChapterIds((current) => {
+      const next = new Set(current);
+      if (next.has(chapterId)) next.delete(chapterId);
+      else next.add(chapterId);
+      return next;
+    });
+  };
+  const selectChapter = (chapterId) => {
+    setSelectedChapterId(chapterId);
+    setSelectedSceneId("");
+    setSelectedCharacterIds([]);
   };
   const selectScene = (sceneId) => {
     setSelectedSceneId(sceneId);
@@ -1667,7 +1815,13 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
           </button>
         </div>
       </section>
-      <ChapterSelector scenes={allScenes} selectedSceneId={selectedSceneId} setSelectedSceneId={selectScene} />
+      <ChapterSelector
+        chapters={allChapters}
+        selectedChapterId={selectedChapterId}
+        selectedSceneId={selectedSceneId}
+        setSelectedChapterId={selectChapter}
+        setSelectedSceneId={selectScene}
+      />
       <ProgressSummary project={scopedProject} compact />
       {state.message && <p className={`shared-sync-message${state.error ? " error" : ""}`}>{state.message}</p>}
       <CharacterFilters
@@ -1682,35 +1836,36 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
         setQuery={setQuery}
         statusFilter={statusFilter}
         setStatusFilter={setStatusFilter}
-        allLabel={selectedSceneId ? "章の全文" : "全文"}
+        allLabel={selectedSceneId ? "シーン全文" : selectedChapterId ? "章の全文" : "全文"}
       />
-      <div className="script-scenes shared-scenes">
-        {scenes.map((scene) => (
-          <ScriptSceneSection
-            key={scene.sceneId}
-            scene={scene}
-            open={openSceneIds.has(scene.sceneId)}
-            onToggle={() => toggleScene(scene.sceneId)}
-          >
-            <div className="script-line-list">
-              {scene.lines.map((line) => {
-                const draft = drafts[line.id] || { recordingUrl: line.recordingUrl, actorNote: line.actorNote };
-                return (
-                  <SharedLineCard
-                    key={line.id}
-                    project={project}
-                    line={line}
-                    canEdit={!line.isContext && editableCharacters.has(line.characterId)}
-                    draft={draft}
-                    setDraft={setDraft}
-                    submitPatch={submitPatch}
-                    uploadRecording={uploadRecording}
-                    busy={state.busyLineId === line.id}
-                  />
-                );
-              })}
+      <div className="script-chapters shared-scenes">
+        {chapters.map((chapter) => (
+          <ScriptChapterSection key={chapter.chapterId} chapter={chapter} open={openChapterIds.has(chapter.chapterId)} onToggle={() => toggleChapter(chapter.chapterId)}>
+            <div className="script-scenes">
+              {chapter.scenes.map((scene) => (
+                <ScriptSceneSection key={scene.sceneId} scene={scene} open={openSceneIds.has(scene.sceneId)} onToggle={() => toggleScene(scene.sceneId)}>
+                  <div className="script-line-list">
+                    {scene.lines.map((line) => {
+                      const draft = drafts[line.id] || { recordingUrl: line.recordingUrl, actorNote: line.actorNote };
+                      return (
+                        <SharedLineCard
+                          key={line.id}
+                          project={project}
+                          line={line}
+                          canEdit={!line.isContext && editableCharacters.has(line.characterId)}
+                          draft={draft}
+                          setDraft={setDraft}
+                          submitPatch={submitPatch}
+                          uploadRecording={uploadRecording}
+                          busy={state.busyLineId === line.id}
+                        />
+                      );
+                    })}
+                  </div>
+                </ScriptSceneSection>
+              ))}
             </div>
-          </ScriptSceneSection>
+          </ScriptChapterSection>
         ))}
         {!visibleLines.length && (
           <div className="recording-empty-state">
