@@ -51,7 +51,10 @@ import {
   getFilteredRecordingLines,
   getRecordingProgress,
   getShareableRecordingProject,
+  getScriptChapterKey,
   getScriptImportPlan,
+  getScriptSceneKey,
+  isScriptStructureLabel,
   makeRecordingShareUrl,
   mergeRemoteRecordingProject,
   normalizeRecordingProject,
@@ -733,8 +736,37 @@ function ScriptEditor({
   const [tableImportText, setTableImportText] = useState("");
   const [importAction, setImportAction] = useState("merge");
   const [importMessage, setImportMessage] = useState("");
+  const [importRowEdits, setImportRowEdits] = useState({});
+  const [excludedImportRowKeys, setExcludedImportRowKeys] = useState([]);
+  const [showImportReview, setShowImportReview] = useState(false);
+  const [showManualComposer, setShowManualComposer] = useState(false);
+  const [manualMessage, setManualMessage] = useState("");
   const [showAllLines, setShowAllLines] = useState(false);
   const [rubyLineId, setRubyLineId] = useState("");
+  const [manualLine, setManualLine] = useState(() => {
+    const lastLine = project.lines.at(-1);
+    return {
+      chapterTitle: lastLine?.chapterTitle || "第一章",
+      sceneTitle: lastLine?.sceneTitle || "シーン1",
+      sourceKind: "dialogue",
+      speaker: project.characters[0]?.name || "",
+      text: "",
+      direction: ""
+    };
+  });
+
+  useEffect(() => {
+    const lastLine = project.lines.at(-1);
+    setManualLine({
+      chapterTitle: lastLine?.chapterTitle || "第一章",
+      sceneTitle: lastLine?.sceneTitle || "シーン1",
+      sourceKind: "dialogue",
+      speaker: project.characters[0]?.name || "",
+      text: "",
+      direction: ""
+    });
+    setManualMessage("");
+  }, [project.id]);
 
   const importText = importMode === "docs" ? docsImportText : tableImportText;
   const parsedImportRows = useMemo(
@@ -743,26 +775,83 @@ function ScriptEditor({
       : parseScriptTable(importText, parseCsv),
     [importMode, importText, project.characters]
   );
+  const importRowsWithKeys = useMemo(
+    () => parsedImportRows.map((row, index) => ({ ...row, reviewKey: `${row.sourceOrder ?? index}-${index}` })),
+    [parsedImportRows]
+  );
+  const reviewedImportRows = useMemo(() => {
+    const excluded = new Set(excludedImportRowKeys);
+    return importRowsWithKeys
+      .filter((row) => !excluded.has(row.reviewKey))
+      .map((row) => ({ ...row, ...(importRowEdits[row.reviewKey] || {}) }));
+  }, [excludedImportRowKeys, importRowEdits, importRowsWithKeys]);
   const importStats = useMemo(() => {
-    const chapters = new Set(parsedImportRows.map((row) => row.chapterTitle));
-    const scenes = new Set(parsedImportRows.map((row) => row.sceneTitle));
-    const speakers = new Set(parsedImportRows.map((row) => row.speaker).filter((speaker) => speaker && speaker !== "ト書き"));
+    const chapters = new Set(reviewedImportRows.map((row) => getScriptChapterKey(row.chapterTitle)));
+    const scenes = new Set(reviewedImportRows.map((row) => `${getScriptChapterKey(row.chapterTitle)}\u0000${getScriptSceneKey(row.sceneTitle)}`));
+    const speakers = new Set(reviewedImportRows.map((row) => row.speaker).filter((speaker) => speaker && speaker !== "ト書き"));
     return {
       chapters: chapters.size,
       scenes: scenes.size,
       speakers: [...speakers],
-      directions: parsedImportRows.filter((row) => row.sourceKind === "direction" || row.speaker === "ト書き").length,
-      dialogue: parsedImportRows.filter((row) => row.sourceKind !== "direction" && row.speaker !== "ト書き").length
+      directions: reviewedImportRows.filter((row) => row.sourceKind === "direction" || row.speaker === "ト書き").length,
+      dialogue: reviewedImportRows.filter((row) => row.sourceKind !== "direction" && row.speaker !== "ト書き").length
     };
-  }, [parsedImportRows]);
+  }, [reviewedImportRows]);
   const importPlan = useMemo(
-    () => getScriptImportPlan(project, parsedImportRows),
-    [project, parsedImportRows]
+    () => getScriptImportPlan(project, reviewedImportRows),
+    [project, reviewedImportRows]
+  );
+  const chapterOptions = useMemo(
+    () => [...new Set(project.lines.map((line) => line.chapterTitle).filter(Boolean))],
+    [project.lines]
+  );
+  const sceneOptions = useMemo(
+    () => [...new Set(project.lines
+      .filter((line) => getScriptChapterKey(line.chapterTitle) === getScriptChapterKey(manualLine.chapterTitle))
+      .map((line) => line.sceneTitle)
+      .filter(Boolean))],
+    [manualLine.chapterTitle, project.lines]
   );
 
+  const resetImportReview = () => {
+    setImportRowEdits({});
+    setExcludedImportRowKeys([]);
+    setShowImportReview(false);
+  };
+
+  const patchImportRow = (reviewKey, patch) => {
+    setImportRowEdits((current) => ({
+      ...current,
+      [reviewKey]: { ...(current[reviewKey] || {}), ...patch }
+    }));
+    setImportMessage("");
+  };
+
+  const setImportRowKind = (row, sourceKind) => {
+    patchImportRow(row.reviewKey, sourceKind === "direction"
+      ? { sourceKind, speaker: "ト書き" }
+      : {
+          sourceKind,
+          speaker: row.speaker && row.speaker !== "ト書き" && !isScriptStructureLabel(row.speaker)
+            ? row.speaker
+            : project.characters[0]?.name || ""
+        });
+  };
+
   const applyImport = () => {
-    if (!parsedImportRows.length) {
+    if (!reviewedImportRows.length) {
       setImportMessage("読み込める文章がありません。貼り付けた内容を確認してください。");
+      return;
+    }
+    const invalidRow = reviewedImportRows.find((row) =>
+      !String(row.chapterTitle || "").trim() ||
+      !String(row.sceneTitle || "").trim() ||
+      !String(row.text || "").trim() ||
+      (row.sourceKind !== "direction" && (!String(row.speaker || "").trim() || isScriptStructureLabel(row.speaker)))
+    );
+    if (invalidRow) {
+      setShowImportReview(true);
+      setImportMessage("章・シーン・本文と、セリフ行の登場人物を確認してください。未入力や見出し名の話者は反映できません。");
       return;
     }
     if (importAction === "merge" && project.lines.length && !confirm(
@@ -771,9 +860,10 @@ function ScriptEditor({
     if (importAction === "replace" && project.lines.length && !confirm(
       `台本を完全に入れ替えますか？\n\n現在の${project.lines.length}件のセリフ・ト書きと録音・確認状況は、新しい台本へ引き継ぎません。\n\n現在の台本は先に保存版へ残すため、あとから復元できます。登場人物の画像や設定、配役は残ります。`
     )) return;
-    importScriptRows(parsedImportRows, { mode: importAction, sourceText: importText });
+    importScriptRows(reviewedImportRows, { mode: importAction, sourceText: importText });
     if (importMode === "docs") setDocsImportText("");
     else setTableImportText("");
+    resetImportReview();
     setImportMessage(
       importAction === "merge"
         ? `${importStats.dialogue}セリフと${importStats.directions}件のト書きを反映し、${importPlan.retained}件の録音・確認状況を引き継ぎました。`
@@ -781,6 +871,24 @@ function ScriptEditor({
           ? `${importStats.dialogue}セリフと${importStats.directions}件のト書きへ完全に入れ替えました。入れ替え前の台本は保存版から復元できます。`
         : `${importStats.dialogue}セリフと${importStats.directions}件のト書きを台本へ追加しました。`
     );
+  };
+
+  const addManualScriptLine = () => {
+    const chapterTitle = String(manualLine.chapterTitle || "").trim();
+    const sceneTitle = String(manualLine.sceneTitle || "").trim();
+    const speaker = String(manualLine.speaker || "").trim();
+    const text = String(manualLine.text || "").trim();
+    if (!chapterTitle || !sceneTitle || !text) {
+      setManualMessage("章・シーン・本文を入力してください。");
+      return;
+    }
+    if (manualLine.sourceKind !== "direction" && (!speaker || isScriptStructureLabel(speaker))) {
+      setManualMessage("セリフの登場人物名を入力してください。章名やSEはト書きとして追加できます。");
+      return;
+    }
+    addLine({ ...manualLine, chapterTitle, sceneTitle, speaker, text });
+    setManualLine((current) => ({ ...current, text: "", direction: "" }));
+    setManualMessage(`${chapterTitle} / ${sceneTitle}へ追加しました。`);
   };
 
   return (
@@ -808,10 +916,10 @@ function ScriptEditor({
           </div>
         </div>
         <div className="script-import-mode segmented-control" aria-label="台本の取り込み元">
-          <button type="button" className={importMode === "docs" ? "active" : ""} onClick={() => { setImportMode("docs"); setImportMessage(""); }}>
+          <button type="button" className={importMode === "docs" ? "active" : ""} onClick={() => { setImportMode("docs"); setImportMessage(""); resetImportReview(); }}>
             <FileText size={15} />Google Docs
           </button>
-          <button type="button" className={importMode === "table" ? "active" : ""} onClick={() => { setImportMode("table"); setImportMessage(""); }}>
+          <button type="button" className={importMode === "table" ? "active" : ""} onClick={() => { setImportMode("table"); setImportMessage(""); resetImportReview(); }}>
             <Table2 size={15} />表・CSV
           </button>
         </div>
@@ -830,6 +938,8 @@ function ScriptEditor({
           onChange={(event) => {
             if (importMode === "docs") setDocsImportText(event.target.value);
             else setTableImportText(event.target.value);
+            setImportRowEdits({});
+            setExcludedImportRowKeys([]);
             setImportMessage("");
           }}
           aria-label={importMode === "docs" ? "Googleドキュメントの脚本を貼り付け" : "表またはCSVの台本を貼り付け"}
@@ -848,25 +958,76 @@ function ScriptEditor({
                 {importStats.speakers.slice(0, 8).map((speaker) => <span key={speaker}>{speaker}</span>)}
               </div>
             </div>
-            {importAction === "merge" && project.lines.length > 0 && parsedImportRows.length > 0 && (
+            {importAction === "merge" && project.lines.length > 0 && reviewedImportRows.length > 0 && (
               <div className="script-import-diff" aria-label="台本更新の差分">
                 <span className="retained"><b>{importPlan.retained}</b> 進捗を保持</span>
                 <span><b>{importPlan.added}</b> 新規・本文変更</span>
                 <span className="removed"><b>{importPlan.removed}</b> 削除</span>
               </div>
             )}
-            <div className="document-preview-list">
-              {parsedImportRows.slice(0, 8).map((row, index) => (
-                <div className={row.speaker === "ト書き" ? "direction" : ""} key={`${row.chapterTitle}-${row.sceneTitle}-${row.speaker}-${index}`}>
-                  <span>{row.chapterTitle} / {row.sceneTitle}</span>
-                  <b>{row.speaker || "話者未設定"}</b>
-                  <p><RubyText text={row.text} /></p>
-                  {row.direction && <small>{row.direction}</small>}
-                </div>
-              ))}
-              {parsedImportRows.length > 8 && <p className="document-preview-more">ほか {parsedImportRows.length - 8}件</p>}
-              {!parsedImportRows.length && <p className="document-preview-more">シーン見出しだけでなく、セリフや本文も貼り付けてください。</p>}
+            <div className="script-import-review-toolbar">
+              <button type="button" className="secondary compact" onClick={() => setShowImportReview((current) => !current)} disabled={!importRowsWithKeys.length}>
+                {showImportReview ? <ChevronUp size={15} /> : <FileText size={15} />}
+                {showImportReview ? "判定結果を閉じる" : `判定結果を編集（${reviewedImportRows.length}件）`}
+              </button>
+              {excludedImportRowKeys.length > 0 && (
+                <button type="button" className="secondary compact" onClick={() => setExcludedImportRowKeys([])}>
+                  <RotateCcw size={15} />除外した{excludedImportRowKeys.length}件を戻す
+                </button>
+              )}
+              <span>章・シーン・種類・登場人物・本文を、反映前に修正できます。</span>
             </div>
+            {showImportReview ? (
+              <div className="script-import-review-list">
+                <div className="script-import-review-labels" aria-hidden="true">
+                  <span>章 / シーン</span><span>種類 / 登場人物</span><span>本文 / 演技指示</span>
+                </div>
+                {reviewedImportRows.map((row, index) => (
+                  <div className={`script-import-review-row${row.sourceKind === "direction" || row.speaker === "ト書き" ? " direction" : ""}`} key={row.reviewKey}>
+                    <span className="script-import-review-order">{String(index + 1).padStart(3, "0")}</span>
+                    <div className="script-import-review-location">
+                      <input value={row.chapterTitle} onChange={(event) => patchImportRow(row.reviewKey, { chapterTitle: event.target.value })} aria-label={`${index + 1}行目の章`} placeholder="章" />
+                      <input value={row.sceneTitle} onChange={(event) => patchImportRow(row.reviewKey, { sceneTitle: event.target.value })} aria-label={`${index + 1}行目のシーン`} placeholder="シーン" />
+                    </div>
+                    <div className="script-import-review-speaker">
+                      <select value={row.sourceKind === "direction" || row.speaker === "ト書き" ? "direction" : "dialogue"} onChange={(event) => setImportRowKind(row, event.target.value)} aria-label={`${index + 1}行目の種類`}>
+                        <option value="dialogue">セリフ</option>
+                        <option value="direction">ト書き</option>
+                      </select>
+                      {row.sourceKind === "direction" || row.speaker === "ト書き" ? (
+                        <span>登場人物なし</span>
+                      ) : (
+                        <input list={`import-character-options-${project.id}`} value={row.speaker} onChange={(event) => patchImportRow(row.reviewKey, { speaker: event.target.value })} aria-label={`${index + 1}行目の登場人物`} placeholder="登場人物" />
+                      )}
+                    </div>
+                    <div className="script-import-review-copy">
+                      <textarea value={row.text} onChange={(event) => patchImportRow(row.reviewKey, { text: event.target.value })} aria-label={`${index + 1}行目の本文`} placeholder="本文" />
+                      <input value={row.direction || ""} onChange={(event) => patchImportRow(row.reviewKey, { direction: event.target.value })} aria-label={`${index + 1}行目の演技指示`} placeholder="演技指示（任意）" />
+                    </div>
+                    <button type="button" className="icon-button danger-icon" title="この行を取り込み対象から外す" onClick={() => setExcludedImportRowKeys((current) => [...current, row.reviewKey])}>
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+                {!reviewedImportRows.length && <p className="document-preview-more">すべて除外されています。必要な行を戻すか、原文を修正してください。</p>}
+              </div>
+            ) : (
+              <div className="document-preview-list">
+                {reviewedImportRows.slice(0, 8).map((row) => (
+                  <div className={row.sourceKind === "direction" || row.speaker === "ト書き" ? "direction" : ""} key={row.reviewKey}>
+                    <span>{row.chapterTitle} / {row.sceneTitle}</span>
+                    <b>{row.speaker || "話者未設定"}</b>
+                    <p><RubyText text={row.text} /></p>
+                    {row.direction && <small>{row.direction}</small>}
+                  </div>
+                ))}
+                {reviewedImportRows.length > 8 && <p className="document-preview-more">ほか {reviewedImportRows.length - 8}件</p>}
+                {!reviewedImportRows.length && <p className="document-preview-more">シーン見出しだけでなく、セリフや本文も貼り付けてください。</p>}
+              </div>
+            )}
+            <datalist id={`import-character-options-${project.id}`}>
+              {project.characters.map((character) => <option key={character.id} value={character.name} />)}
+            </datalist>
           </div>
         )}
         <div className="script-import-action segmented-control" aria-label="台本への反映方法">
@@ -881,14 +1042,70 @@ function ScriptEditor({
           <p className="script-import-mode-note warning"><History size={16} />現在の進捗を引き継がず、台本全体を新しくします。実行前の状態は自動で保存版へ残ります。</p>
         )}
         <div className="button-row">
-          <button type="button" className="primary" onClick={applyImport} disabled={!parsedImportRows.length}>
-            <Upload size={16} />{parsedImportRows.length ? `${parsedImportRows.length}件を台本へ反映` : "台本へ反映"}
-          </button>
-          <button type="button" className="secondary" onClick={addLine}>
-            <FilePlus2 size={16} />1セリフ追加
+          <button type="button" className="primary" onClick={applyImport} disabled={!reviewedImportRows.length}>
+            <Upload size={16} />{reviewedImportRows.length ? `${reviewedImportRows.length}件を台本へ反映` : "台本へ反映"}
           </button>
         </div>
         {importMessage && <p className="hint-text">{importMessage}</p>}
+      </article>
+
+      <article className="panel manual-script-panel">
+        <div className="record-head">
+          <div>
+            <h2>章・シーン・本文を手動で追加</h2>
+            <p className="muted">既存の名前を選ぶほか、新しい章名やシーン名、登場人物名をそのまま入力できます。</p>
+          </div>
+          <button type="button" className="secondary" onClick={() => setShowManualComposer((current) => !current)}>
+            {showManualComposer ? <ChevronUp size={16} /> : <FilePlus2 size={16} />}
+            {showManualComposer ? "閉じる" : "手動入力"}
+          </button>
+        </div>
+        {showManualComposer && (
+          <div className="manual-script-composer">
+            <div className="manual-script-fields">
+              <label>
+                <span>章</span>
+                <input list={`manual-chapter-options-${project.id}`} value={manualLine.chapterTitle} onChange={(event) => setManualLine((current) => ({ ...current, chapterTitle: event.target.value }))} placeholder="第一章" />
+              </label>
+              <label>
+                <span>シーン</span>
+                <input list={`manual-scene-options-${project.id}`} value={manualLine.sceneTitle} onChange={(event) => setManualLine((current) => ({ ...current, sceneTitle: event.target.value }))} placeholder="シーン1" />
+              </label>
+              <label>
+                <span>種類</span>
+                <select value={manualLine.sourceKind} onChange={(event) => setManualLine((current) => ({ ...current, sourceKind: event.target.value }))}>
+                  <option value="dialogue">セリフ</option>
+                  <option value="direction">ト書き</option>
+                </select>
+              </label>
+              {manualLine.sourceKind === "dialogue" && (
+                <label>
+                  <span>登場人物</span>
+                  <input list={`manual-character-options-${project.id}`} value={manualLine.speaker} onChange={(event) => setManualLine((current) => ({ ...current, speaker: event.target.value }))} placeholder="ヴェル" />
+                </label>
+              )}
+            </div>
+            <label className="manual-script-copy">
+              <span>{manualLine.sourceKind === "direction" ? "ト書き本文" : "セリフ本文"}</span>
+              <textarea value={manualLine.text} onChange={(event) => setManualLine((current) => ({ ...current, text: event.target.value }))} placeholder="本文を入力" />
+            </label>
+            {manualLine.sourceKind === "dialogue" && (
+              <label className="manual-script-copy">
+                <span>演技指示</span>
+                <input value={manualLine.direction} onChange={(event) => setManualLine((current) => ({ ...current, direction: event.target.value }))} placeholder="任意" />
+              </label>
+            )}
+            <div className="manual-script-submit">
+              <span>{manualMessage}</span>
+              <button type="button" className="primary" onClick={addManualScriptLine} disabled={!manualLine.text.trim()}>
+                <Plus size={16} />台本へ追加
+              </button>
+            </div>
+            <datalist id={`manual-chapter-options-${project.id}`}>{chapterOptions.map((chapter) => <option key={chapter} value={chapter} />)}</datalist>
+            <datalist id={`manual-scene-options-${project.id}`}>{sceneOptions.map((scene) => <option key={scene} value={scene} />)}</datalist>
+            <datalist id={`manual-character-options-${project.id}`}>{project.characters.map((character) => <option key={character.id} value={character.name} />)}</datalist>
+          </div>
+        )}
       </article>
 
       <article className="panel script-history-panel">
@@ -949,13 +1166,17 @@ function ScriptEditor({
             {project.lines.map((line) => (
               <div className="script-editor-row" key={line.id}>
                 <span>{String(line.order).padStart(3, "0")}</span>
-                {line.kind === "direction"
-                  ? <span className="script-editor-kind">ト書き</span>
-                  : (
+                <div className="script-editor-speaker">
+                  <select value={line.kind} onChange={(event) => patchLine(line.id, { kind: event.target.value })} aria-label={`${line.order}番の種類`}>
+                    <option value="dialogue">セリフ</option>
+                    <option value="direction">ト書き</option>
+                  </select>
+                  {line.kind !== "direction" && (
                     <select value={line.characterId} onChange={(event) => patchLine(line.id, { characterId: event.target.value })}>
                       {project.characters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}
                     </select>
                   )}
+                </div>
                 <div className="script-editor-location">
                   <input value={line.chapterTitle} onChange={(event) => patchLine(line.id, { chapterTitle: event.target.value })} aria-label="章" />
                   <input value={line.sceneTitle} onChange={(event) => patchLine(line.id, { sceneTitle: event.target.value })} aria-label="シーン" />
@@ -1261,40 +1482,66 @@ export function RecordingStudio({
     selectProjectId("");
   };
 
-  const addLine = () => {
+  const addLine = (draft = {}) => {
     if (!project || !canEditScript) return;
-    const firstCharacter = project.characters[0] || {
-      id: newId("character"),
-      name: "話者",
-      color: "#168b9a"
-    };
-    updateProject(project.id, (current) => ({
-      ...current,
-      characters: current.characters.length ? current.characters : [firstCharacter],
-      lines: [
-        ...current.lines,
-        {
-          id: newId("line"),
-          chapterId: current.lines.at(-1)?.chapterId || newId("chapter"),
-          chapterTitle: current.lines.at(-1)?.chapterTitle || "第一章",
-          sceneId: current.lines.at(-1)?.sceneId || newId("scene"),
-          sceneTitle: current.lines.at(-1)?.sceneTitle || "Scene 1",
-          order: current.lines.length + 1,
-          characterId: firstCharacter.id,
-          kind: "dialogue",
-          text: "",
-          direction: "",
-          fileName: "",
-          actorStatus: "未収録",
-          reviewStatus: "未確認",
-          recordingUrl: "",
-          recordingFileName: "",
-          actorNote: "",
-          directorNote: "",
-          updatedAt: ""
-        }
-      ]
-    }));
+    updateProject(project.id, (current) => {
+      const lastLine = current.lines.at(-1);
+      const chapterTitle = String(draft.chapterTitle || lastLine?.chapterTitle || "第一章").trim() || "第一章";
+      const sceneTitle = String(draft.sceneTitle || lastLine?.sceneTitle || "シーン1").trim() || "シーン1";
+      const kind = draft.sourceKind === "direction" || draft.kind === "direction" ? "direction" : "dialogue";
+      const speakerName = String(draft.speaker || "").trim();
+      const characters = [...current.characters];
+      const speakerKey = speakerName.normalize("NFKC").toLocaleLowerCase("ja");
+      let character = kind === "dialogue"
+        ? characters.find((item) => item.name.normalize("NFKC").toLocaleLowerCase("ja") === speakerKey)
+        : characters[0];
+      if (kind === "dialogue" && !character) {
+        character = {
+          id: newId("character"),
+          name: speakerName || `登場人物${characters.length + 1}`,
+          color: ["#168b9a", "#d65285", "#7a63ad", "#b57024", "#2f7d4a", "#5f6d7a"][characters.length % 6],
+          imageUrl: "",
+          profile: "",
+          background: "",
+          recordingFolderUrl: "",
+          openChatUrl: ""
+        };
+        characters.push(character);
+      }
+      const chapterKey = getScriptChapterKey(chapterTitle);
+      const existingChapterLine = current.lines.find((line) => getScriptChapterKey(line.chapterTitle) === chapterKey);
+      const sceneKey = getScriptSceneKey(sceneTitle);
+      const existingSceneLine = current.lines.find((line) =>
+        getScriptChapterKey(line.chapterTitle) === chapterKey && getScriptSceneKey(line.sceneTitle) === sceneKey
+      );
+      return {
+        ...current,
+        characters,
+        lines: [
+          ...current.lines,
+          {
+            id: newId("line"),
+            chapterId: existingChapterLine?.chapterId || newId("chapter"),
+            chapterTitle,
+            sceneId: existingSceneLine?.sceneId || newId("scene"),
+            sceneTitle,
+            order: current.lines.length + 1,
+            characterId: character?.id || "",
+            kind,
+            text: String(draft.text || ""),
+            direction: String(draft.direction || ""),
+            fileName: String(draft.fileName || ""),
+            actorStatus: "未収録",
+            reviewStatus: "未確認",
+            recordingUrl: "",
+            recordingFileName: "",
+            actorNote: "",
+            directorNote: "",
+            updatedAt: ""
+          }
+        ]
+      };
+    });
   };
 
   const removeLine = (lineId) => {
@@ -1324,18 +1571,18 @@ export function RecordingStudio({
         })
         : current;
       const characters = [...working.characters];
-      const characterByName = new Map(characters.map((character) => [character.name, character]));
+      const characterByName = new Map(characters.map((character) => [character.name.normalize("NFKC").toLocaleLowerCase("ja"), character]));
       const baseLines = mode === "append" ? working.lines : [];
       const locationSource = mode === "replace" ? [] : working.lines;
-      const chapterByTitle = new Map(locationSource.map((line) => [line.chapterTitle || "第一章", line.chapterId]));
-      const sceneByScope = new Map(locationSource.map((line) => [`${line.chapterTitle || "第一章"}\u0000${line.sceneTitle}`, line.sceneId]));
+      const chapterByTitle = new Map(locationSource.map((line) => [getScriptChapterKey(line.chapterTitle || "第一章"), line.chapterId]));
+      const sceneByScope = new Map(locationSource.map((line) => [`${getScriptChapterKey(line.chapterTitle || "第一章")}\u0000${getScriptSceneKey(line.sceneTitle)}`, line.sceneId]));
       const importPlan = mode === "merge" ? getScriptImportPlan(current, rows) : { matches: [] };
       const nextLines = rows.map((row, index) => {
         const isDirection = row.sourceKind === "direction" || row.speaker === "ト書き";
         const matchedLine = importPlan.matches[index];
         let character = isDirection
           ? characters.find((item) => item.id === matchedLine?.characterId) || characters[0]
-          : characterByName.get(row.speaker) || characters.find((item) => item.id === matchedLine?.characterId);
+          : characterByName.get(String(row.speaker || "").normalize("NFKC").toLocaleLowerCase("ja")) || characters.find((item) => item.id === matchedLine?.characterId);
         if (!character && !isDirection) {
           character = {
             id: newId("character"),
@@ -1343,15 +1590,17 @@ export function RecordingStudio({
             color: ["#168b9a", "#d65285", "#7a63ad", "#b57024", "#2f7d4a", "#5f6d7a"][characters.length % 6]
           };
           characters.push(character);
-          characterByName.set(character.name, character);
+          characterByName.set(character.name.normalize("NFKC").toLocaleLowerCase("ja"), character);
         }
-        const chapterTitle = row.chapterTitle || "第一章";
-        let chapterId = chapterByTitle.get(chapterTitle);
+        const chapterTitle = String(row.chapterTitle || "第一章").trim() || "第一章";
+        const chapterKey = getScriptChapterKey(chapterTitle);
+        let chapterId = chapterByTitle.get(chapterKey);
         if (!chapterId) {
           chapterId = newId("chapter");
-          chapterByTitle.set(chapterTitle, chapterId);
+          chapterByTitle.set(chapterKey, chapterId);
         }
-        const sceneScopeKey = `${chapterTitle}\u0000${row.sceneTitle}`;
+        const sceneTitle = String(row.sceneTitle || "シーン1").trim() || "シーン1";
+        const sceneScopeKey = `${chapterKey}\u0000${getScriptSceneKey(sceneTitle)}`;
         let sceneId = sceneByScope.get(sceneScopeKey);
         if (!sceneId) {
           sceneId = newId("scene");
@@ -1362,7 +1611,7 @@ export function RecordingStudio({
           chapterId,
           chapterTitle,
           sceneId,
-          sceneTitle: row.sceneTitle,
+          sceneTitle,
           order: baseLines.length + index + 1,
           characterId: character?.id || "",
           kind: isDirection ? "direction" : "dialogue",

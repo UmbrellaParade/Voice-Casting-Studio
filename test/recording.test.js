@@ -64,6 +64,57 @@ test("separates chapters that reuse the same scene name", () => {
   assert.notEqual(project.lines[0].sceneId, project.lines[1].sceneId);
 });
 
+test("keeps script metadata and audio cues out of the character list", () => {
+  const rows = parseGoogleDocsScript(`ボイスドラマ脚本
+脚本：Umbrella Parade
+【第一章】
+【シーン1】
+SE：扉が開く
+ヴェル
+「入ってもいい？」`);
+
+  assert.deepEqual(rows.map((row) => row.speaker), ["ト書き", "ヴェル"]);
+  assert.deepEqual(rows.map((row) => row.sourceKind), ["direction", "dialogue"]);
+  assert.equal(rows[0].text, "SE：扉が開く");
+  assert.equal(rows[1].chapterTitle, "第一章");
+  assert.equal(rows[1].sceneTitle, "シーン1");
+});
+
+test("normalizes decorated and numeric chapter variants into one hierarchy", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "character_vel", name: "ヴェル" }],
+    lines: [
+      { id: "line_one", chapterId: "chapter_a", chapterTitle: "【第一章】", sceneId: "scene_a", sceneTitle: "シーン１", characterId: "character_vel", text: "最初。" },
+      { id: "line_two", chapterId: "chapter_b", chapterTitle: "第1章 はじまり", sceneId: "scene_b", sceneTitle: "Scene 01", characterId: "character_vel", text: "次。" }
+    ]
+  });
+
+  assert.equal(project.lines[0].chapterId, project.lines[1].chapterId);
+  assert.equal(project.lines[0].sceneId, project.lines[1].sceneId);
+});
+
+test("repairs high-confidence script labels that were previously stored as characters", () => {
+  const project = normalizeRecordingProject({
+    characters: [
+      { id: "character_chapter", name: "第一章" },
+      { id: "character_se", name: "SE" },
+      { id: "character_script", name: "脚本全文" },
+      { id: "character_vel", name: "ヴェル" }
+    ],
+    castMembers: [{ id: "cast_one", characterIds: ["character_chapter", "character_vel"] }],
+    lines: [
+      { id: "line_chapter", characterId: "character_chapter", text: "章見出し" },
+      { id: "line_se", characterId: "character_se", text: "扉が開く" },
+      { id: "line_script", characterId: "character_script", text: "作品タイトル" },
+      { id: "line_vel", characterId: "character_vel", text: "入ってもいい？" }
+    ]
+  });
+
+  assert.deepEqual(project.characters.map((character) => character.name), ["ヴェル"]);
+  assert.deepEqual(project.lines.map((line) => line.kind), ["direction", "direction", "direction", "dialogue"]);
+  assert.deepEqual(project.castMembers[0].characterIds, ["character_vel"]);
+});
+
 test("excludes stage directions from recording progress", () => {
   const project = normalizeRecordingProject({
     characters: [{ id: "character_vel", name: "ヴェル" }],

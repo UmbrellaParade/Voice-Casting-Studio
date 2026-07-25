@@ -431,7 +431,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
   const rawLines = Array.isArray(project.lines) ? project.lines : [];
   const rawCharacters = Array.isArray(project.characters) ? project.characters : [];
   const characterByName = new Map();
-  const characters = rawCharacters.map((character, characterIndex) => {
+  const normalizedCharacters = rawCharacters.map((character, characterIndex) => {
     const normalized = {
       id: character.id || createLocalId("character"),
       name: String(character.name || `登場人物${characterIndex + 1}`).trim(),
@@ -442,13 +442,20 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       recordingFolderUrl: String(character.recordingFolderUrl || character.driveFolderUrl || ""),
       openChatUrl: String(character.openChatUrl || character.lineOpenChatUrl || "")
     };
-    characterByName.set(normalized.name, normalized);
     return normalized;
   });
+  const structuralCharacterIds = new Set(
+    normalizedCharacters
+      .filter((character) => isScriptStructureLabel(character.name))
+      .map((character) => character.id)
+  );
+  const characters = normalizedCharacters.filter((character) => !structuralCharacterIds.has(character.id));
+  characters.forEach((character) => characterByName.set(normalizeCharacterNameKey(character.name), character));
 
   rawLines.forEach((line) => {
     const speakerName = String(line.character || line.speaker || "").trim();
-    if (!line.characterId && speakerName && !characterByName.has(speakerName)) {
+    const speakerKey = normalizeCharacterNameKey(speakerName);
+    if (!line.characterId && speakerName && !isScriptStructureLabel(speakerName) && !characterByName.has(speakerKey)) {
       const character = {
         id: createLocalId("character"),
         name: speakerName,
@@ -460,7 +467,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
         openChatUrl: ""
       };
       characters.push(character);
-      characterByName.set(speakerName, character);
+      characterByName.set(speakerKey, character);
     }
   });
 
@@ -472,14 +479,15 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
   const sceneIdOwners = new Map();
   const lines = rawLines.map((line, lineIndex) => {
     const speakerName = String(line.character || line.speaker || "").trim();
-    const matchedCharacter = characterByName.get(speakerName);
-    const characterId = characterIds.has(line.characterId)
+    const structuralSpeaker = structuralCharacterIds.has(line.characterId) || isScriptStructureLabel(speakerName);
+    const matchedCharacter = characterByName.get(normalizeCharacterNameKey(speakerName));
+    const characterId = !structuralSpeaker && characterIds.has(line.characterId)
       ? line.characterId
       : matchedCharacter?.id || fallbackCharacter?.id || "";
     const rawSceneTitle = String(line.sceneTitle || line.scene || `Scene ${line.sceneNo || 1}`).trim();
     const legacyChapterHeading = !line.chapterTitle && !line.chapter && isChapterHeading(rawSceneTitle);
     const chapterTitle = String(line.chapterTitle || line.chapter || (legacyChapterHeading ? rawSceneTitle : "第一章")).trim() || "第一章";
-    const chapterKey = chapterTitle.normalize("NFKC").toLocaleLowerCase("ja");
+    const chapterKey = getScriptChapterKey(chapterTitle);
     let chapterId = chapterByTitle.get(chapterKey);
     if (!chapterId) {
       const proposedChapterId = String(line.chapterId || "");
@@ -491,7 +499,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       chapterIdOwners.set(chapterId, chapterKey);
     }
     const sceneTitle = legacyChapterHeading ? "章の冒頭" : rawSceneTitle;
-    const sceneKey = `${chapterId}\u0000${sceneTitle.normalize("NFKC").toLocaleLowerCase("ja")}`;
+    const sceneKey = `${chapterId}\u0000${getScriptSceneKey(sceneTitle)}`;
     let sceneId = sceneByScope.get(sceneKey);
     if (!sceneId) {
       const proposedSceneId = String(line.sceneId || "");
@@ -510,7 +518,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       sceneTitle,
       order: Number.isFinite(Number(line.order)) ? Number(line.order) : lineIndex + 1,
       characterId,
-      kind: line.kind === "direction" ? "direction" : "dialogue",
+      kind: line.kind === "direction" || structuralSpeaker ? "direction" : "dialogue",
       text: String(line.text || line.line || ""),
       direction: String(line.direction || line.note || ""),
       fileName: String(line.fileName || ""),
@@ -822,28 +830,124 @@ const normalizeDocumentLine = (value = "") =>
 
 const headingText = (line = "") => normalizeDocumentLine(line).replace(/^#{1,6}\s*/, "");
 
-const isChapterHeading = (line = "") => {
-  const text = headingText(line);
-  return (
-    /^(?:第\s*)?[0-9０-９一二三四五六七八九十百千]+\s*章(?:\s|$|[【「『（(])/i.test(text) ||
-    /^(?:序章|終章|最終章|プロローグ|エピローグ|幕間)(?:\s|$|[【「『（(])/i.test(text) ||
-    /^【\s*(?:(?:第\s*)?[0-9０-９一二三四五六七八九十百千]+\s*章|序章|終章|最終章|プロローグ|エピローグ|幕間)[^】]*】$/i.test(text)
-  );
+const unwrapHeadingWrapper = (value = "") => {
+  const text = headingText(value);
+  const wrapped = text.match(/^[【\[]\s*([\s\S]*?)\s*[】\]]\s*(.*)$/);
+  return wrapped ? `${wrapped[1]}${wrapped[2] ? ` ${wrapped[2]}` : ""}`.trim() : text;
+};
+
+const stripHeadingDecorations = (value = "") =>
+  unwrapHeadingWrapper(value)
+    .replace(/^(?:[■□◆◇●○〇◎▶▷►▸・＊*]+\s*)+/, "")
+    .trim();
+
+const CHAPTER_NUMBER_PATTERN = "[0-9０-９一二三四五六七八九十百千万〇零]+";
+const CHAPTER_SPECIAL_PATTERN = "序章|終章|最終章|プロローグ|エピローグ|幕間";
+
+const getChapterHeadingMatch = (line = "") => {
+  const text = stripHeadingDecorations(line);
+  const numeric = text.match(new RegExp(`^((?:第\\s*)?(${CHAPTER_NUMBER_PATTERN})\\s*章)(?=$|[\\s　:：\\-‐‑–—・「『（(【])`, "i"));
+  if (numeric) return { text, raw: numeric[1], number: numeric[2], special: "", length: numeric[0].length };
+  const western = text.match(new RegExp(`^((?:chapter|chap\\.?)\\s*(${CHAPTER_NUMBER_PATTERN}))(?=$|[\\s　:：\\-‐‑–—・「『（(【])`, "i"));
+  if (western) return { text, raw: western[1], number: western[2], special: "", western: true, length: western[0].length };
+  const special = text.match(new RegExp(`^(${CHAPTER_SPECIAL_PATTERN})(?=$|[\\s　:：\\-‐‑–—・「『（(【])`, "i"));
+  return special ? { text, raw: special[1], number: "", special: special[1], length: special[0].length } : null;
+};
+
+const parseChapterNumber = (value = "") => {
+  const text = String(value || "").normalize("NFKC").replace(/\s+/g, "");
+  if (/^\d+$/.test(text)) return Number(text);
+  const digits = { 零: 0, 〇: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  if (![...text].every((character) => character in digits || "十百千万".includes(character))) return null;
+  if (!/[十百千万]/.test(text)) return Number([...text].map((character) => digits[character]).join(""));
+  const units = { 十: 10, 百: 100, 千: 1000, 万: 10000 };
+  let total = 0;
+  let section = 0;
+  let current = 0;
+  [...text].forEach((character) => {
+    if (character in digits) {
+      current = digits[character];
+      return;
+    }
+    const unit = units[character];
+    if (unit === 10000) {
+      total += (section + current || 1) * unit;
+      section = 0;
+      current = 0;
+      return;
+    }
+    section += (current || 1) * unit;
+    current = 0;
+  });
+  return total + section + current;
+};
+
+const normalizeScopeValue = (value = "") =>
+  normalizeDocumentLine(value).normalize("NFKC").replace(/\s+/g, " ").toLocaleLowerCase("ja");
+
+const isChapterHeading = (line = "") => Boolean(getChapterHeadingMatch(line));
+
+const normalizeChapterHeading = (line = "") => {
+  const match = getChapterHeadingMatch(line);
+  if (!match) return stripHeadingDecorations(line) || "第一章";
+  const numberText = String(match.number || "").normalize("NFKC").replace(/\s+/g, "");
+  const base = match.special || (match.western ? `Chapter ${numberText}` : `第${numberText}章`);
+  const suffix = match.text
+    .slice(match.length)
+    .replace(/^[\s　:：\-‐‑–—・]+/, "")
+    .replace(/^[「『（(【]\s*|\s*[」』）)】]$/g, "")
+    .trim();
+  return suffix ? `${base} ${suffix}` : base;
+};
+
+export const getScriptChapterKey = (value = "") => {
+  const match = getChapterHeadingMatch(value);
+  if (!match) return `chapter:label:${normalizeScopeValue(stripHeadingDecorations(value) || "第一章")}`;
+  if (match.special) return `chapter:special:${normalizeScopeValue(match.special)}`;
+  const numeric = parseChapterNumber(match.number);
+  return `chapter:number:${numeric ?? normalizeScopeValue(match.number)}`;
+};
+
+const isDocumentMetadataLine = (line = "") => {
+  const text = stripHeadingDecorations(line);
+  return /^(?:ボイスドラマ\s*)?(?:脚本|台本|原稿)(?:全文)?(?:$|[\s　:：])/i.test(text) ||
+    /^(?:作品名|タイトル|原作|原案|作者|監督|演出|出演|キャスト|登場人物)(?:$|[\s　:：])/i.test(text);
+};
+
+const isScriptCueLine = (line = "") => {
+  const text = stripHeadingDecorations(line).normalize("NFKC");
+  return /^(?:SE|SFX|BGM|ME)(?:\s*\d+)?(?:$|[\s　:：\-‐‑–—])/i.test(text) ||
+    /^(?:効果音|音楽|主題歌)(?:\s*\d+)?(?:$|[\s　:：\-‐‑–—])/i.test(text);
 };
 
 const isSceneHeading = (line = "") => {
   const text = headingText(line);
-  if (isChapterHeading(text)) return false;
+  const unwrapped = unwrapHeadingWrapper(text);
+  if (isChapterHeading(text) || isScriptCueLine(text) || isDocumentMetadataLine(text)) return false;
   return (
-    /^(?:scene|sc\.?|シーン)\s*[0-9０-９一二三四五六七八九十百]+/i.test(text) ||
-    /^第\s*[0-9０-９一二三四五六七八九十百]+\s*(?:場|幕)/.test(text) ||
-    /^[〇○●■◆◇]\s*\S+/.test(text) ||
-    /^【\s*(?:scene|シーン|第[^】]+(?:場|幕))[^】]*】$/i.test(text)
+    new RegExp(`^(?:scene|sc\\.?|シーン)\\s*${CHAPTER_NUMBER_PATTERN}(?:$|[\\s　:：\\-‐‑–—])`, "i").test(stripHeadingDecorations(unwrapped)) ||
+    new RegExp(`^第\\s*${CHAPTER_NUMBER_PATTERN}\\s*(?:場|幕)(?:$|[\\s　:：\\-‐‑–—])`).test(stripHeadingDecorations(unwrapped)) ||
+    /^[〇○●■◆◇]\s*\S+/.test(text)
   );
 };
 
-const normalizeSceneHeading = (line = "") => headingText(line);
-const normalizeChapterHeading = (line = "") => headingText(line);
+const normalizeSceneHeading = (line = "") => {
+  const text = unwrapHeadingWrapper(line);
+  const undecorated = stripHeadingDecorations(text);
+  if (/^(?:scene|sc\.?|シーン)\s*/i.test(undecorated) || /^第\s*.+\s*(?:場|幕)/.test(undecorated)) return undecorated;
+  return text;
+};
+
+export const getScriptSceneKey = (value = "") => {
+  const text = stripHeadingDecorations(normalizeSceneHeading(value));
+  const explicit = text.match(new RegExp(`^(?:scene|sc\\.?|シーン)\\s*(${CHAPTER_NUMBER_PATTERN})`, "i")) ||
+    text.match(new RegExp(`^第\\s*(${CHAPTER_NUMBER_PATTERN})\\s*(?:場|幕)`));
+  if (explicit) {
+    const numeric = parseChapterNumber(explicit[1]);
+    return `scene:number:${numeric ?? normalizeScopeValue(explicit[1])}`;
+  }
+  return `scene:label:${normalizeScopeValue(text || "Scene 1")}`;
+};
 
 const cleanSpeakerLabel = (value = "") =>
   normalizeDocumentLine(value)
@@ -851,9 +955,21 @@ const cleanSpeakerLabel = (value = "") =>
     .replace(/^[【\[]|[】\]]$/g, "")
     .trim();
 
+const normalizeCharacterNameKey = (value = "") => normalizeScopeValue(cleanSpeakerLabel(value));
+
+export const isScriptStructureLabel = (value = "") => {
+  const text = cleanSpeakerLabel(value);
+  if (!text) return false;
+  return text === "ト書き" || isChapterHeading(text) || isSceneHeading(text) || isScriptCueLine(text) || isDocumentMetadataLine(text);
+};
+
 const isPlausibleSpeaker = (value = "") => {
   const speaker = cleanSpeakerLabel(value);
-  return Boolean(speaker) && speaker.length <= 30 && !/[。！？!?、,「」『』：:\/\\]/.test(speaker);
+  return Boolean(speaker) &&
+    speaker.length <= 24 &&
+    !isScriptStructureLabel(speaker) &&
+    !/^(?:※|注|備考|場面|場所|時刻|日時)(?:$|[\s　:：])/.test(speaker) &&
+    !/[。！？!?、,「」『』：:\/\\]/.test(speaker);
 };
 
 const getParentheticalDirection = (line = "") => {
@@ -924,7 +1040,12 @@ const parseInlineDialogue = (line = "") => {
 
 export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
   const sourceLines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
-  const knownSpeakerSet = new Set((knownSpeakers || []).map((speaker) => cleanSpeakerLabel(speaker)).filter(Boolean));
+  const knownSpeakerSet = new Set(
+    (knownSpeakers || [])
+      .map((speaker) => cleanSpeakerLabel(speaker))
+      .filter((speaker) => speaker && !isScriptStructureLabel(speaker))
+      .map(normalizeCharacterNameKey)
+  );
   const rows = [];
   let currentChapter = "第一章";
   let currentScene = "Scene 1";
@@ -988,6 +1109,19 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
       currentScene = normalizeSceneHeading(line);
       pendingSpeaker = "";
       pendingDirection = "";
+      return;
+    }
+
+    if (isDocumentMetadataLine(line)) {
+      pendingSpeaker = "";
+      pendingDirection = "";
+      return;
+    }
+
+    if (isScriptCueLine(line)) {
+      pendingSpeaker = "";
+      pendingDirection = "";
+      pushRow({ speaker: "ト書き", lineText: line, sourceKind: "direction" });
       return;
     }
 
@@ -1058,7 +1192,12 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
     const nextLine = nextNonEmptyLine(index);
     const standaloneSpeaker = cleanSpeakerLabel(line);
     const nextStartsWithQuote = /^[「『]/.test(nextLine);
-    if (isPlausibleSpeaker(standaloneSpeaker) && (knownSpeakerSet.has(standaloneSpeaker) || nextStartsWithQuote)) {
+    const isKnownSpeaker = knownSpeakerSet.has(normalizeCharacterNameKey(standaloneSpeaker));
+    const nextSpeaker = cleanSpeakerLabel(nextLine);
+    const nextIsKnownSpeaker = knownSpeakerSet.has(normalizeCharacterNameKey(nextSpeaker));
+    const nextIsStructure = isScriptStructureLabel(nextLine);
+    const knownSpeakerHasPlainDialogue = isKnownSpeaker && nextLine && !nextIsKnownSpeaker && !nextIsStructure && !parseInlineDialogue(nextLine);
+    if (isPlausibleSpeaker(standaloneSpeaker) && (nextStartsWithQuote || knownSpeakerHasPlainDialogue)) {
       pendingSpeaker = standaloneSpeaker;
       return;
     }
@@ -1078,6 +1217,18 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
   }
 
   return rows;
+};
+
+const normalizeParsedTableRow = (row = {}) => {
+  const originalSpeaker = cleanSpeakerLabel(row.speaker);
+  const isDirection = !originalSpeaker || isScriptStructureLabel(originalSpeaker);
+  const text = String(row.text || "").trim() || (isDirection && originalSpeaker !== "ト書き" ? originalSpeaker : "");
+  return {
+    ...row,
+    speaker: isDirection ? "ト書き" : originalSpeaker,
+    text,
+    sourceKind: isDirection ? "direction" : "dialogue"
+  };
 };
 
 export const parseScriptTable = (text = "", parseCsv) => {
@@ -1113,7 +1264,8 @@ export const parseScriptTable = (text = "", parseCsv) => {
           sourceOrder: index
         };
       })
-      .filter((row) => row.speaker || row.text);
+      .map(normalizeParsedTableRow)
+      .filter((row) => row.speaker !== "ト書き" || row.text);
   }
 
   const rows = trimmed.split(/\r?\n/).map((line) => line.split("\t"));
@@ -1139,5 +1291,6 @@ export const parseScriptTable = (text = "", parseCsv) => {
         sourceOrder: index
       };
     })
-    .filter((row) => row.speaker || row.text);
+    .map(normalizeParsedTableRow)
+    .filter((row) => row.speaker !== "ト書き" || row.text);
 };
