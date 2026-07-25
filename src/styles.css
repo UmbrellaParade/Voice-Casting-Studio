@@ -6019,6 +6019,22 @@ textarea {
   max-height: 320px;
 }
 
+.transfer-link-fallback {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  color: #51495a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.transfer-url-output {
+  min-height: 96px;
+  max-height: 150px;
+  margin-top: 0;
+  overflow-wrap: anywhere;
+}
+
 .social-promo-panel .form-grid {
   align-items: start;
 }

@@ -451,6 +451,7 @@ function App() {
   const [fullPackCopied, setFullPackCopied] = useState(false);
   const [thumbnailTransferText, setThumbnailTransferText] = useState("");
   const [transferCopied, setTransferCopied] = useState(false);
+  const [transferLinkText, setTransferLinkText] = useState("");
   const [sharedPayload, setSharedPayload] = useState(readSharedFormPayload);
   const [restorePayload, setRestorePayload] = useState(readRestorePayload);
   const [recordingShareReference, setRecordingShareReference] = useState(readRecordingShareReference);
@@ -1629,9 +1630,15 @@ ${socialRows || "-"}
   };
 
   const copyTransferLink = async () => {
-    await navigator.clipboard.writeText(makeRestoreUrl(data));
-    setTransferCopied(true);
-    window.setTimeout(() => setTransferCopied(false), 1800);
+    const transferUrl = makeRestoreUrl(data);
+    setTransferLinkText(transferUrl);
+    try {
+      await navigator.clipboard.writeText(transferUrl);
+      setTransferCopied(true);
+      window.setTimeout(() => setTransferCopied(false), 1800);
+    } catch {
+      setTransferCopied(false);
+    }
   };
 
   const exportJson = () => {
@@ -2038,6 +2045,7 @@ ${socialRows || "-"}
               resetSample={resetSample}
               copyTransferLink={copyTransferLink}
               transferCopied={transferCopied}
+              transferLinkText={transferLinkText}
               setActive={setActive}
               canEditScript={canEditScript}
             />
@@ -3867,6 +3875,7 @@ function SettingsPanel({
   resetSample,
   copyTransferLink,
   transferCopied,
+  transferLinkText,
   setActive,
   canEditScript = true
 }) {
@@ -4109,6 +4118,12 @@ function SettingsPanel({
             <button className="danger" onClick={resetSample}><Trash2 size={16} />サンプルに戻す</button>
           </>}
         </div>
+        {!WORDPRESS_RUNTIME && transferLinkText && (
+          <label className="transfer-link-fallback">
+            <span>引き継ぎURL</span>
+            <textarea className="pack-output transfer-url-output" value={transferLinkText} readOnly />
+          </label>
+        )}
         {WORDPRESS_RUNTIME && !canEditScript && <p className="hint-text">JSONの読み込みと全データの初期化は制作オーナーだけが実行できます。</p>}
         <p className="hint-text">{WORDPRESS_RUNTIME ? "録音ファイル本体はJSONへ含めず、Google Drive URLだけを書き出します。" : "スマホへ一度だけ移す場合は、PCで引き継ぎリンクをコピーしてスマホで開きます。画像や音源を多く含む場合はJSON書き出し/読み込みを使ってください。"}</p>
       </article>
