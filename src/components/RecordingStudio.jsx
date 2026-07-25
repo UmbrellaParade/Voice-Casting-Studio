@@ -1,9 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  ArrowDown,
-  ArrowUp,
   BookOpenText,
-  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -49,6 +46,7 @@ import {
   getCharacterName,
   getFilteredRecordingLines,
   getRecordingProgress,
+  getScriptImportPlan,
   makeRecordingShareUrl,
   mergeRemoteRecordingProject,
   normalizeRecordingProject,
@@ -190,6 +188,66 @@ const getSceneGroups = (lines = []) => {
   return groups;
 };
 
+const makeCharacterTint = (color = "#5f6d7a", alpha = 0.1) => {
+  const hex = String(color || "").trim().replace(/^#/, "");
+  const normalized = hex.length === 3 ? hex.split("").map((part) => `${part}${part}`).join("") : hex;
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) return `rgba(95, 109, 122, ${alpha})`;
+  const value = Number.parseInt(normalized, 16);
+  return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
+};
+
+function ChapterSelector({ scenes, selectedSceneId, setSelectedSceneId }) {
+  return (
+    <div className="script-scope-picker">
+      <div className="script-scope-heading">
+        <BookOpenText size={19} />
+        <span>表示する範囲</span>
+      </div>
+      <div className="script-chapter-options" role="tablist" aria-label="台本の章">
+        <button
+          type="button"
+          className={selectedSceneId ? "" : "active"}
+          onClick={() => setSelectedSceneId("")}
+        >
+          <strong>ボイスドラマ脚本全文</strong>
+          <small>{scenes.length}章</small>
+        </button>
+        {scenes.map((scene) => (
+          <button
+            type="button"
+            key={scene.sceneId}
+            className={selectedSceneId === scene.sceneId ? "active" : ""}
+            onClick={() => setSelectedSceneId(scene.sceneId)}
+          >
+            <strong>{scene.title}</strong>
+            <small>{scene.lines.filter((line) => line.kind !== "direction").length}セリフ</small>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ScriptSceneSection({ scene, open, onToggle, children }) {
+  return (
+    <section className={`script-scene${open ? " open" : ""}`}>
+      <button
+        type="button"
+        className="script-scene-heading"
+        onClick={onToggle}
+        aria-expanded={open}
+      >
+        <span className="script-scene-title">
+          {open ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          <span>{scene.title}</span>
+        </span>
+        <small>{scene.lines.filter((line) => !line.isContext && line.kind !== "direction").length}セリフ</small>
+      </button>
+      {open && children}
+    </section>
+  );
+}
+
 function ProgressSummary({ project, compact = false }) {
   const progress = getRecordingProgress(project);
   return (
@@ -227,7 +285,8 @@ function CharacterFilters({
   query,
   setQuery,
   statusFilter,
-  setStatusFilter
+  setStatusFilter,
+  allLabel = "全文"
 }) {
   const toggleCharacter = (characterId) => {
     setSelectedCharacterIds((current) =>
@@ -239,27 +298,30 @@ function CharacterFilters({
 
   return (
     <div className="recording-filter-bar">
-      <div className="recording-filter-row">
-        <button
-          type="button"
-          className={selectedCharacterIds.length === 0 ? "character-filter active" : "character-filter"}
-          onClick={() => setSelectedCharacterIds([])}
-        >
-          <Users size={16} />全文
-        </button>
-        {project.characters
-          .filter((character) => project.lines.some((line) => line.kind !== "direction" && line.characterId === character.id))
-          .map((character) => (
-            <button
-              type="button"
-              key={character.id}
-              className={selectedCharacterIds.includes(character.id) ? "character-filter active" : "character-filter"}
-              style={{ "--character-color": character.color }}
-              onClick={() => toggleCharacter(character.id)}
-            >
-              <span className="character-dot" />{character.name}
-            </button>
-          ))}
+      <div className="recording-character-filters">
+        <span className="recording-filter-label">登場人物</span>
+        <div className="recording-filter-row">
+          <button
+            type="button"
+            className={selectedCharacterIds.length === 0 ? "character-filter active" : "character-filter"}
+            onClick={() => setSelectedCharacterIds([])}
+          >
+            <Users size={16} />{allLabel}
+          </button>
+          {project.characters
+            .filter((character) => project.lines.some((line) => line.kind !== "direction" && line.characterId === character.id))
+            .map((character) => (
+              <button
+                type="button"
+                key={character.id}
+                className={selectedCharacterIds.includes(character.id) ? "character-filter active" : "character-filter"}
+                style={{ "--character-color": character.color }}
+                onClick={() => toggleCharacter(character.id)}
+              >
+                <span className="character-dot" />{character.name}
+              </button>
+            ))}
+        </div>
       </div>
       <div className="recording-filter-options">
         <div className="segmented-control" aria-label="セリフ抽出方法">
@@ -317,17 +379,24 @@ function StatusBadge({ status, type }) {
   return <span className={`recording-status-badge ${type} status-${status}`}>{status}</span>;
 }
 
-function AdminLineCard({ project, line, patchLine, removeLine, moveLine }) {
+function AdminLineCard({ project, line, patchLine, removeLine }) {
   const character = project.characters.find((item) => item.id === line.characterId);
   const isDirection = line.kind === "direction";
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const characterColor = character?.color || "#5f6d7a";
 
   return (
-    <article className={`script-line-card${line.isContext ? " context-line" : ""}${isDirection ? " stage-direction-line" : ""}`}>
+    <article
+      className={`script-line-card${line.isContext ? " context-line" : ""}${isDirection ? " stage-direction-line" : ""}`}
+      style={{
+        "--character-color": characterColor,
+        "--character-background": makeCharacterTint(characterColor, line.isContext ? 0.055 : 0.11)
+      }}
+    >
       <div className="script-line-main">
         <div className="script-line-sequence">
           <span>{String(line.order).padStart(3, "0")}</span>
-          <b style={{ "--character-color": character?.color || "#5f6d7a" }}>
+          <b>
             <i />{isDirection ? "ト書き" : character?.name || "話者未設定"}
           </b>
         </div>
@@ -345,37 +414,21 @@ function AdminLineCard({ project, line, patchLine, removeLine, moveLine }) {
       </div>
       {!line.isContext && !isDirection && (
         <>
-          <RecordingPlayer url={line.recordingUrl} fileName={line.recordingFileName} />
-          <div className="line-status-editor">
-            <div>
-              <span>声優さん</span>
-              <div className="status-button-row">
-                {ACTOR_RECORDING_STATUSES.map((status) => (
-                  <button
-                    type="button"
-                    key={status}
-                    className={line.actorStatus === status ? "active" : ""}
-                    onClick={() => patchLine(line.id, { actorStatus: status })}
-                  >
-                    {status === "収録済み" && <Check size={14} />}{status}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <span>確認状況</span>
-              <div className="status-button-row review">
-                {DIRECTOR_REVIEW_STATUSES.map((status) => (
-                  <button
-                    type="button"
-                    key={status}
-                    className={line.reviewStatus === status ? "active" : ""}
-                    onClick={() => patchLine(line.id, { reviewStatus: status })}
-                  >
-                    {status}
-                  </button>
-                ))}
-              </div>
+          <div className={`line-operation-row${line.recordingUrl ? " has-recording" : ""}`}>
+            <RecordingPlayer url={line.recordingUrl} fileName={line.recordingFileName} />
+            <div className="line-status-selects">
+              <label>
+                <span>収録</span>
+                <select value={line.actorStatus} onChange={(event) => patchLine(line.id, { actorStatus: event.target.value })}>
+                  {ACTOR_RECORDING_STATUSES.map((status) => <option key={status}>{status}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>確認</span>
+                <select value={line.reviewStatus} onChange={(event) => patchLine(line.id, { reviewStatus: event.target.value })}>
+                  {DIRECTOR_REVIEW_STATUSES.map((status) => <option key={status}>{status}</option>)}
+                </select>
+              </label>
             </div>
           </div>
           {(line.actorNote || line.directorNote) && (
@@ -387,8 +440,6 @@ function AdminLineCard({ project, line, patchLine, removeLine, moveLine }) {
           <div className="line-card-footer">
             <span><Clock3 size={14} />{formatUpdatedAt(line.updatedAt)}</span>
             <div>
-              <button type="button" className="icon-button" title="上へ移動" onClick={() => moveLine(line.id, -1)}><ArrowUp size={15} /></button>
-              <button type="button" className="icon-button" title="下へ移動" onClick={() => moveLine(line.id, 1)}><ArrowDown size={15} /></button>
               <button type="button" className="secondary compact" onClick={() => setDetailsOpen((current) => !current)}>
                 {detailsOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}詳細編集
               </button>
@@ -422,8 +473,6 @@ function AdminLineCard({ project, line, patchLine, removeLine, moveLine }) {
           <div className="line-card-footer stage-direction-footer">
             <span>録音対象外</span>
             <div>
-              <button type="button" className="icon-button" title="上へ移動" onClick={() => moveLine(line.id, -1)}><ArrowUp size={15} /></button>
-              <button type="button" className="icon-button" title="下へ移動" onClick={() => moveLine(line.id, 1)}><ArrowDown size={15} /></button>
               <button type="button" className="secondary compact" onClick={() => setDetailsOpen((current) => !current)}>
                 {detailsOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}詳細編集
               </button>
@@ -445,30 +494,74 @@ function AdminLineCard({ project, line, patchLine, removeLine, moveLine }) {
   );
 }
 
-function RecordingBoardView({ project, patchLine, removeLine, moveLine }) {
+function RecordingBoardView({ project, patchLine, removeLine }) {
+  const allScenes = useMemo(() => getSceneGroups(project.lines), [project.lines]);
+  const [selectedSceneId, setSelectedSceneId] = useState("");
   const [selectedCharacterIds, setSelectedCharacterIds] = useState([]);
   const [mode, setMode] = useState("assignment");
   const [includeContext, setIncludeContext] = useState(true);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("すべて");
+  const [openSceneIds, setOpenSceneIds] = useState(() => new Set(project.lines[0]?.sceneId ? [project.lines[0].sceneId] : []));
+  const scopedProject = useMemo(() => ({
+    ...project,
+    lines: selectedSceneId ? project.lines.filter((line) => line.sceneId === selectedSceneId) : project.lines
+  }), [project, selectedSceneId]);
+  const sceneSignature = allScenes.map((scene) => scene.sceneId).join("|");
+  const characterScopeSignature = scopedProject.lines
+    .map((line) => `${line.id}:${line.kind}:${line.characterId}`)
+    .join("|");
+
+  useEffect(() => {
+    if (selectedSceneId && !allScenes.some((scene) => scene.sceneId === selectedSceneId)) setSelectedSceneId("");
+  }, [selectedSceneId, sceneSignature]);
+
+  useEffect(() => {
+    const available = new Set(scopedProject.lines.filter((line) => line.kind !== "direction").map((line) => line.characterId));
+    setSelectedCharacterIds((current) => {
+      const next = current.filter((id) => available.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [selectedSceneId, characterScopeSignature]);
+
+  useEffect(() => {
+    setOpenSceneIds(new Set(
+      selectedSceneId ? [selectedSceneId] : allScenes.map((scene) => scene.sceneId)
+    ));
+  }, [project.id, selectedSceneId, sceneSignature]);
+
   const visibleLines = useMemo(
     () => getFilteredRecordingLines({
-      project,
+      project: scopedProject,
       selectedCharacterIds,
       mode,
       includeContext,
       query,
       statusFilter
     }),
-    [project, selectedCharacterIds, mode, includeContext, query, statusFilter]
+    [scopedProject, selectedCharacterIds, mode, includeContext, query, statusFilter]
   );
   const scenes = getSceneGroups(visibleLines);
 
+  const toggleScene = (sceneId) => {
+    setOpenSceneIds((current) => {
+      const next = new Set(current);
+      if (next.has(sceneId)) next.delete(sceneId);
+      else next.add(sceneId);
+      return next;
+    });
+  };
+  const selectScene = (sceneId) => {
+    setSelectedSceneId(sceneId);
+    setSelectedCharacterIds([]);
+  };
+
   return (
     <>
-      <ProgressSummary project={project} />
+      <ChapterSelector scenes={allScenes} selectedSceneId={selectedSceneId} setSelectedSceneId={selectScene} />
+      <ProgressSummary project={scopedProject} />
       <CharacterFilters
-        project={project}
+        project={scopedProject}
         selectedCharacterIds={selectedCharacterIds}
         setSelectedCharacterIds={setSelectedCharacterIds}
         mode={mode}
@@ -479,14 +572,16 @@ function RecordingBoardView({ project, patchLine, removeLine, moveLine }) {
         setQuery={setQuery}
         statusFilter={statusFilter}
         setStatusFilter={setStatusFilter}
+        allLabel={selectedSceneId ? "章の全文" : "全文"}
       />
       <div className="script-scenes">
         {scenes.map((scene) => (
-          <section className="script-scene" key={scene.sceneId}>
-            <div className="script-scene-heading">
-              <span>{scene.title}</span>
-              <small>{scene.lines.filter((line) => !line.isContext && line.kind !== "direction").length}セリフ</small>
-            </div>
+          <ScriptSceneSection
+            key={scene.sceneId}
+            scene={scene}
+            open={openSceneIds.has(scene.sceneId)}
+            onToggle={() => toggleScene(scene.sceneId)}
+          >
             <div className="script-line-list">
               {scene.lines.map((line) => (
                 <AdminLineCard
@@ -495,11 +590,10 @@ function RecordingBoardView({ project, patchLine, removeLine, moveLine }) {
                   line={line}
                   patchLine={patchLine}
                   removeLine={removeLine}
-                  moveLine={moveLine}
                 />
               ))}
             </div>
-          </section>
+          </ScriptSceneSection>
         ))}
         {!visibleLines.length && (
           <div className="recording-empty-state">
@@ -539,17 +633,31 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
       dialogue: parsedImportRows.filter((row) => row.sourceKind !== "direction" && row.speaker !== "ト書き").length
     };
   }, [parsedImportRows]);
+  const importPlan = useMemo(
+    () => getScriptImportPlan(project, parsedImportRows),
+    [project, parsedImportRows]
+  );
 
   const applyImport = () => {
     if (!parsedImportRows.length) {
       setImportMessage("読み込める文章がありません。貼り付けた内容を確認してください。");
       return;
     }
-    if (importAction === "replace" && project.lines.length && !confirm(`現在の${project.lines.length}件を、プレビュー中の${parsedImportRows.length}件に入れ替えますか？`)) return;
+    if (
+      importAction === "replace" &&
+      project.lines.length &&
+      !confirm(
+        `台本を更新しますか？\n\n進捗を引き継ぐ行: ${importPlan.retained}件\n新規・本文変更: ${importPlan.added}件\n削除: ${importPlan.removed}件\n\n同じ話者・本文の行は、録音済みや確認状況をそのまま引き継ぎます。`
+      )
+    ) return;
     importScriptRows(parsedImportRows, { replace: importAction === "replace" });
     if (importMode === "docs") setDocsImportText("");
     else setTableImportText("");
-    setImportMessage(`${importStats.dialogue}セリフと${importStats.directions}件のト書きを台本へ反映しました。`);
+    setImportMessage(
+      importAction === "replace"
+        ? `${importStats.dialogue}セリフと${importStats.directions}件のト書きを反映し、${importPlan.retained}件の録音・確認状況を引き継ぎました。`
+        : `${importStats.dialogue}セリフと${importStats.directions}件のト書きを台本へ追加しました。`
+    );
   };
 
   return (
@@ -617,6 +725,13 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
                 {importStats.speakers.slice(0, 8).map((speaker) => <span key={speaker}>{speaker}</span>)}
               </div>
             </div>
+            {importAction === "replace" && project.lines.length > 0 && parsedImportRows.length > 0 && (
+              <div className="script-import-diff" aria-label="台本更新の差分">
+                <span className="retained"><b>{importPlan.retained}</b> 進捗を保持</span>
+                <span><b>{importPlan.added}</b> 新規・本文変更</span>
+                <span className="removed"><b>{importPlan.removed}</b> 削除</span>
+              </div>
+            )}
             <div className="document-preview-list">
               {parsedImportRows.slice(0, 8).map((row, index) => (
                 <div className={row.speaker === "ト書き" ? "direction" : ""} key={`${row.sceneTitle}-${row.speaker}-${index}`}>
@@ -995,30 +1110,21 @@ export function RecordingStudio({
     }));
   };
 
-  const moveLine = (lineId, direction) => {
-    if (!project) return;
-    updateProject(project.id, (current) => {
-      const lines = [...current.lines];
-      const index = lines.findIndex((line) => line.id === lineId);
-      const target = index + direction;
-      if (index < 0 || target < 0 || target >= lines.length) return current;
-      const [line] = lines.splice(index, 1);
-      lines.splice(target, 0, line);
-      return { ...current, lines: lines.map((item, itemIndex) => ({ ...item, order: itemIndex + 1 })) };
-    });
-  };
-
   const importScriptRows = (rows, { replace = false } = {}) => {
     if (!project) return;
     updateProject(project.id, (current) => {
       const characters = [...current.characters];
       const characterByName = new Map(characters.map((character) => [character.name, character]));
       const baseLines = replace ? [] : current.lines;
-      const sceneByTitle = new Map(baseLines.map((line) => [line.sceneTitle, line.sceneId]));
+      const sceneByTitle = new Map(current.lines.map((line) => [line.sceneTitle, line.sceneId]));
+      const importPlan = replace ? getScriptImportPlan(current, rows) : { matches: [] };
       const nextLines = rows.map((row, index) => {
         const isDirection = row.sourceKind === "direction" || row.speaker === "ト書き";
-        let character = isDirection ? characters[0] : characterByName.get(row.speaker);
-        if (!character) {
+        const matchedLine = importPlan.matches[index];
+        let character = isDirection
+          ? characters.find((item) => item.id === matchedLine?.characterId) || characters[0]
+          : characterByName.get(row.speaker) || characters.find((item) => item.id === matchedLine?.characterId);
+        if (!character && !isDirection) {
           character = {
             id: newId("character"),
             name: row.speaker || "話者未設定",
@@ -1033,22 +1139,22 @@ export function RecordingStudio({
           sceneByTitle.set(row.sceneTitle, sceneId);
         }
         return {
-          id: newId("line"),
+          id: matchedLine?.id || newId("line"),
           sceneId,
           sceneTitle: row.sceneTitle,
           order: baseLines.length + index + 1,
-          characterId: character.id,
+          characterId: character?.id || "",
           kind: isDirection ? "direction" : "dialogue",
           text: row.text,
           direction: row.direction,
           fileName: row.fileName,
-          actorStatus: "未収録",
-          reviewStatus: "未確認",
-          recordingUrl: "",
-          recordingFileName: "",
-          actorNote: "",
-          directorNote: "",
-          updatedAt: ""
+          actorStatus: matchedLine?.actorStatus || "未収録",
+          reviewStatus: matchedLine?.reviewStatus || "未確認",
+          recordingUrl: matchedLine?.recordingUrl || "",
+          recordingFileName: matchedLine?.recordingFileName || "",
+          actorNote: matchedLine?.actorNote || "",
+          directorNote: matchedLine?.directorNote || "",
+          updatedAt: matchedLine?.updatedAt || ""
         };
       });
       return { ...current, characters, lines: [...baseLines, ...nextLines] };
@@ -1214,7 +1320,7 @@ export function RecordingStudio({
         <button type="button" className={tab === "cast" ? "active" : ""} onClick={() => setTab("cast")}><Users size={16} />配役・共有</button>
       </div>
       {tab === "board" && (
-        <RecordingBoardView project={project} patchLine={patchLine} removeLine={removeLine} moveLine={moveLine} />
+        <RecordingBoardView project={project} patchLine={patchLine} removeLine={removeLine} />
       )}
       {tab === "script" && (
         <ScriptEditor
@@ -1252,12 +1358,19 @@ function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, 
   const character = project.characters.find((item) => item.id === line.characterId);
   const isDirection = line.kind === "direction";
   const [editorOpen, setEditorOpen] = useState(false);
+  const characterColor = character?.color || "#5f6d7a";
   return (
-    <article className={`script-line-card shared${line.isContext ? " context-line" : ""}${isDirection ? " stage-direction-line" : ""}`}>
+    <article
+      className={`script-line-card shared${line.isContext ? " context-line" : ""}${isDirection ? " stage-direction-line" : ""}`}
+      style={{
+        "--character-color": characterColor,
+        "--character-background": makeCharacterTint(characterColor, line.isContext ? 0.055 : 0.11)
+      }}
+    >
       <div className="script-line-main">
         <div className="script-line-sequence">
           <span>{String(line.order).padStart(3, "0")}</span>
-          <b style={{ "--character-color": character?.color || "#5f6d7a" }}><i />{isDirection ? "ト書き" : character?.name || "話者未設定"}</b>
+          <b><i />{isDirection ? "ト書き" : character?.name || "話者未設定"}</b>
         </div>
         <div className="script-line-copy">
           <p><RubyText text={line.text} /></p>
@@ -1353,6 +1466,7 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
   const [project, setProject] = useState(null);
   const [viewer, setViewer] = useState(null);
   const [endpointUrl, setEndpointUrl] = useState(reference.endpointUrl || "");
+  const [selectedSceneId, setSelectedSceneId] = useState("");
   const [selectedCharacterIds, setSelectedCharacterIds] = useState([]);
   const [mode, setMode] = useState("assignment");
   const [includeContext, setIncludeContext] = useState(true);
@@ -1360,6 +1474,16 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
   const [statusFilter, setStatusFilter] = useState("すべて");
   const [state, setState] = useState({ busy: true, message: "共有台本を読み込んでいます…", error: false, busyLineId: "" });
   const [drafts, setDrafts] = useState({});
+  const [openSceneIds, setOpenSceneIds] = useState(new Set());
+  const allScenes = useMemo(() => getSceneGroups(project?.lines || []), [project?.lines]);
+  const scopedProject = useMemo(() => project ? ({
+    ...project,
+    lines: selectedSceneId ? project.lines.filter((line) => line.sceneId === selectedSceneId) : project.lines
+  }) : null, [project, selectedSceneId]);
+  const sceneSignature = allScenes.map((scene) => scene.sceneId).join("|");
+  const characterScopeSignature = (scopedProject?.lines || [])
+    .map((line) => `${line.id}:${line.kind}:${line.characterId}`)
+    .join("|");
 
   const loadProject = async ({ silent = false, resolvedEndpoint = endpointUrl } = {}) => {
     if (!resolvedEndpoint) {
@@ -1400,6 +1524,25 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
     if (!project || selectedCharacterIds.length) return;
     setSelectedCharacterIds(viewer?.characterIds?.length ? viewer.characterIds : []);
   }, [project?.id, viewer?.id]);
+
+  useEffect(() => {
+    if (selectedSceneId && !allScenes.some((scene) => scene.sceneId === selectedSceneId)) setSelectedSceneId("");
+  }, [selectedSceneId, sceneSignature]);
+
+  useEffect(() => {
+    if (!scopedProject) return;
+    const available = new Set(scopedProject.lines.filter((line) => line.kind !== "direction").map((line) => line.characterId));
+    setSelectedCharacterIds((current) => {
+      const next = current.filter((id) => available.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [selectedSceneId, characterScopeSignature]);
+
+  useEffect(() => {
+    setOpenSceneIds(new Set(
+      selectedSceneId ? [selectedSceneId] : allScenes.map((scene) => scene.sceneId)
+    ));
+  }, [project?.id, selectedSceneId, sceneSignature]);
 
   useEffect(() => {
     if (!project || !endpointUrl) return undefined;
@@ -1482,7 +1625,7 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
   }
 
   const visibleLines = getFilteredRecordingLines({
-    project,
+    project: scopedProject,
     selectedCharacterIds,
     mode,
     includeContext,
@@ -1491,6 +1634,18 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
   });
   const scenes = getSceneGroups(visibleLines);
   const editableCharacters = new Set(viewer?.characterIds || []);
+  const toggleScene = (sceneId) => {
+    setOpenSceneIds((current) => {
+      const next = new Set(current);
+      if (next.has(sceneId)) next.delete(sceneId);
+      else next.add(sceneId);
+      return next;
+    });
+  };
+  const selectScene = (sceneId) => {
+    setSelectedSceneId(sceneId);
+    setSelectedCharacterIds([]);
+  };
 
   return (
     <main className="shared-recording-shell">
@@ -1512,10 +1667,11 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
           </button>
         </div>
       </section>
-      <ProgressSummary project={project} compact />
+      <ChapterSelector scenes={allScenes} selectedSceneId={selectedSceneId} setSelectedSceneId={selectScene} />
+      <ProgressSummary project={scopedProject} compact />
       {state.message && <p className={`shared-sync-message${state.error ? " error" : ""}`}>{state.message}</p>}
       <CharacterFilters
-        project={project}
+        project={scopedProject}
         selectedCharacterIds={selectedCharacterIds}
         setSelectedCharacterIds={setSelectedCharacterIds}
         mode={mode}
@@ -1526,14 +1682,16 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
         setQuery={setQuery}
         statusFilter={statusFilter}
         setStatusFilter={setStatusFilter}
+        allLabel={selectedSceneId ? "章の全文" : "全文"}
       />
       <div className="script-scenes shared-scenes">
         {scenes.map((scene) => (
-          <section className="script-scene" key={scene.sceneId}>
-            <div className="script-scene-heading">
-              <span>{scene.title}</span>
-              <small>{scene.lines.filter((line) => !line.isContext && line.kind !== "direction").length}セリフ</small>
-            </div>
+          <ScriptSceneSection
+            key={scene.sceneId}
+            scene={scene}
+            open={openSceneIds.has(scene.sceneId)}
+            onToggle={() => toggleScene(scene.sceneId)}
+          >
             <div className="script-line-list">
               {scene.lines.map((line) => {
                 const draft = drafts[line.id] || { recordingUrl: line.recordingUrl, actorNote: line.actorNote };
@@ -1552,8 +1710,15 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
                 );
               })}
             </div>
-          </section>
+          </ScriptSceneSection>
         ))}
+        {!visibleLines.length && (
+          <div className="recording-empty-state">
+            <Search size={28} />
+            <b>条件に合うセリフがありません</b>
+            <span>章または登場人物の選択を変更してください。</span>
+          </div>
+        )}
       </div>
       <footer className="shared-recording-footer">
         <span>このページの進捗は管理者と共有されています。</span>

@@ -15,6 +15,7 @@ import {
   Link,
   Mic2,
   Music,
+  Palette,
   Plus,
   Radio,
   RotateCcw,
@@ -1850,6 +1851,8 @@ ${socialRows || "-"}
             <SettingsPanel
               settings={data.settings}
               updateSettings={updateSettings}
+              recordingProjects={data.recordingProjects ?? []}
+              updateRecordingProjects={(updater) => updateData("recordingProjects", updater)}
               exportJson={exportJson}
               importJson={importJson}
               resetSample={resetSample}
@@ -3673,9 +3676,36 @@ function CodexPack({
   );
 }
 
-function SettingsPanel({ settings, updateSettings, exportJson, importJson, resetSample, copyTransferLink, transferCopied, setActive }) {
+function SettingsPanel({
+  settings,
+  updateSettings,
+  recordingProjects,
+  updateRecordingProjects,
+  exportJson,
+  importJson,
+  resetSample,
+  copyTransferLink,
+  transferCopied,
+  setActive
+}) {
   const [folderMessage, setFolderMessage] = useState("");
+  const [colorProjectId, setColorProjectId] = useState(() => recordingProjects[0]?.id || "");
   const additionalXAccounts = Array.isArray(settings.additionalXAccounts) ? settings.additionalXAccounts : [];
+  const colorProject = recordingProjects.find((project) => project.id === colorProjectId) || recordingProjects[0];
+
+  useEffect(() => {
+    if (recordingProjects.some((project) => project.id === colorProjectId)) return;
+    setColorProjectId(recordingProjects[0]?.id || "");
+  }, [recordingProjects, colorProjectId]);
+
+  const updateCharacterColor = (characterId, color) => {
+    if (!colorProject) return;
+    updateRecordingProjects((current) => current.map((project) => project.id === colorProject.id ? {
+      ...project,
+      characters: project.characters.map((character) => character.id === characterId ? { ...character, color } : character),
+      updatedAt: new Date().toISOString()
+    } : project));
+  };
 
   const chooseFolder = async () => {
     if (!window.showDirectoryPicker) {
@@ -3745,6 +3775,46 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
             <span>声優さんの収録済み、録音提出、確認OK、リテイクを共有URLで同期します。</span>
           </div>
         </div>
+      </article>
+      <article className="panel character-color-settings">
+        <div className="record-head">
+          <div>
+            <h2>登場人物の表示色</h2>
+            <p className="muted">セリフの背景色と人物マークに反映されます。</p>
+          </div>
+          <label className="color-project-picker">
+            <span>作品</span>
+            <select value={colorProject?.id || ""} onChange={(event) => setColorProjectId(event.target.value)}>
+              {recordingProjects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+            </select>
+          </label>
+        </div>
+        {colorProject ? (
+          <div className="character-color-settings-list">
+            {colorProject.characters.map((character) => (
+              <label className="character-color-setting" key={character.id}>
+                <input
+                  type="color"
+                  value={character.color || "#5f6d7a"}
+                  onChange={(event) => updateCharacterColor(character.id, event.target.value)}
+                  aria-label={`${character.name}の表示色`}
+                />
+                <span style={{ "--character-color": character.color || "#5f6d7a" }}>
+                  <i />
+                  <b>{character.name}</b>
+                </span>
+                <code>{character.color || "#5f6d7a"}</code>
+              </label>
+            ))}
+            {!colorProject.characters.length && <p className="muted">台本を取り込むと、ここに登場人物が表示されます。</p>}
+          </div>
+        ) : (
+          <div className="recording-empty-state compact">
+            <Palette size={24} />
+            <b>収録プロジェクトがありません</b>
+          </div>
+        )}
+        {colorProject?.sharedAt && <p className="hint-text">変更後は「配役・共有」で共有内容を更新すると、声優さんの画面にも反映されます。</p>}
       </article>
       <article className="panel">
         <div className="record-head">

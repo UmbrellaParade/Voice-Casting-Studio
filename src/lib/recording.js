@@ -323,6 +323,49 @@ export const mergeRemoteRecordingProject = (localProject, remoteProject) => {
 export const getCharacterName = (project, characterId) =>
   project?.characters?.find((character) => character.id === characterId)?.name || "話者未設定";
 
+const normalizeScriptMatchValue = (value = "") =>
+  stripRubyNotation(value)
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("ja");
+
+export const getScriptLineMatchKey = ({ speaker = "", text = "", kind = "", sourceKind = "" } = {}) => {
+  const isDirection = kind === "direction" || sourceKind === "direction" || speaker === "ト書き";
+  return [
+    isDirection ? "direction" : "dialogue",
+    normalizeScriptMatchValue(isDirection ? "ト書き" : speaker),
+    normalizeScriptMatchValue(text)
+  ].join("\u0000");
+};
+
+export const getScriptImportPlan = (project, rows = []) => {
+  const queues = new Map();
+  (project?.lines || []).forEach((line) => {
+    const key = getScriptLineMatchKey({
+      speaker: line.kind === "direction" ? "ト書き" : getCharacterName(project, line.characterId),
+      text: line.text,
+      kind: line.kind
+    });
+    if (!queues.has(key)) queues.set(key, []);
+    queues.get(key).push(line);
+  });
+
+  const matches = rows.map((row) => {
+    const key = getScriptLineMatchKey(row);
+    const queue = queues.get(key);
+    return queue?.length ? queue.shift() : null;
+  });
+  const retained = matches.filter(Boolean).length;
+
+  return {
+    matches,
+    retained,
+    added: rows.length - retained,
+    removed: Math.max(0, (project?.lines?.length || 0) - retained)
+  };
+};
+
 export const getRecordingProgress = (project) => {
   const lines = (project?.lines || []).filter((line) => line.kind !== "direction");
   const total = lines.length;

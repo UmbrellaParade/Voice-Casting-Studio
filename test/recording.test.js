@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   getRecordingProgress,
+  getScriptImportPlan,
   normalizeRecordingProject,
   parseGoogleDocsScript
 } from "../src/lib/recording.js";
@@ -62,4 +63,58 @@ test("excludes stage directions from recording progress", () => {
     recordedPercent: 100,
     approvedPercent: 100
   });
+});
+
+test("keeps recording progress for unchanged lines when a script is re-imported", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "character_vel", name: "ヴェル" }],
+    lines: [
+      {
+        id: "line_kept",
+        sceneId: "scene_01",
+        sceneTitle: "第一章",
+        characterId: "character_vel",
+        text: "もう｜決めた《きめた》んだ。",
+        actorStatus: "収録済み",
+        reviewStatus: "OK"
+      },
+      {
+        id: "line_changed",
+        sceneId: "scene_01",
+        sceneTitle: "第一章",
+        characterId: "character_vel",
+        text: "古いセリフ"
+      }
+    ]
+  });
+
+  const plan = getScriptImportPlan(project, [
+    { sceneTitle: "第二章", speaker: "ヴェル", text: "もう決めたんだ。", sourceKind: "dialogue" },
+    { sceneTitle: "第二章", speaker: "ヴェル", text: "新しいセリフ", sourceKind: "dialogue" }
+  ]);
+
+  assert.equal(plan.retained, 1);
+  assert.equal(plan.added, 1);
+  assert.equal(plan.removed, 1);
+  assert.equal(plan.matches[0].id, "line_kept");
+  assert.equal(plan.matches[1], null);
+});
+
+test("matches duplicate dialogue one line at a time", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "character_vel", name: "ヴェル" }],
+    lines: [
+      { id: "line_one", characterId: "character_vel", text: "はい。" },
+      { id: "line_two", characterId: "character_vel", text: "はい。" }
+    ]
+  });
+
+  const plan = getScriptImportPlan(project, [
+    { speaker: "ヴェル", text: "はい。" },
+    { speaker: "ヴェル", text: "はい。" },
+    { speaker: "ヴェル", text: "はい。" }
+  ]);
+
+  assert.deepEqual(plan.matches.map((line) => line?.id || null), ["line_one", "line_two", null]);
+  assert.deepEqual({ retained: plan.retained, added: plan.added, removed: plan.removed }, { retained: 2, added: 1, removed: 0 });
 });
