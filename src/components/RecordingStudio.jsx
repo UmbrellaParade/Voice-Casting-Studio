@@ -13,6 +13,7 @@ import {
   Eye,
   Eraser,
   FileAudio,
+  FileText,
   FilePlus2,
   KeyRound,
   Link,
@@ -24,6 +25,7 @@ import {
   Save,
   Search,
   Send,
+  Table2,
   Trash2,
   Upload,
   UserRound,
@@ -50,6 +52,7 @@ import {
   makeRecordingShareUrl,
   mergeRemoteRecordingProject,
   normalizeRecordingProject,
+  parseGoogleDocsScript,
   parseRubyText,
   parseScriptTable,
   hasRubyNotation,
@@ -244,17 +247,19 @@ function CharacterFilters({
         >
           <Users size={16} />全文
         </button>
-        {project.characters.map((character) => (
-          <button
-            type="button"
-            key={character.id}
-            className={selectedCharacterIds.includes(character.id) ? "character-filter active" : "character-filter"}
-            style={{ "--character-color": character.color }}
-            onClick={() => toggleCharacter(character.id)}
-          >
-            <span className="character-dot" />{character.name}
-          </button>
-        ))}
+        {project.characters
+          .filter((character) => project.lines.some((line) => line.kind !== "direction" && line.characterId === character.id))
+          .map((character) => (
+            <button
+              type="button"
+              key={character.id}
+              className={selectedCharacterIds.includes(character.id) ? "character-filter active" : "character-filter"}
+              style={{ "--character-color": character.color }}
+              onClick={() => toggleCharacter(character.id)}
+            >
+              <span className="character-dot" />{character.name}
+            </button>
+          ))}
       </div>
       <div className="recording-filter-options">
         <div className="segmented-control" aria-label="セリフ抽出方法">
@@ -314,15 +319,16 @@ function StatusBadge({ status, type }) {
 
 function AdminLineCard({ project, line, patchLine, removeLine, moveLine }) {
   const character = project.characters.find((item) => item.id === line.characterId);
+  const isDirection = line.kind === "direction";
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   return (
-    <article className={`script-line-card${line.isContext ? " context-line" : ""}`}>
+    <article className={`script-line-card${line.isContext ? " context-line" : ""}${isDirection ? " stage-direction-line" : ""}`}>
       <div className="script-line-main">
         <div className="script-line-sequence">
           <span>{String(line.order).padStart(3, "0")}</span>
           <b style={{ "--character-color": character?.color || "#5f6d7a" }}>
-            <i />{character?.name || "話者未設定"}
+            <i />{isDirection ? "ト書き" : character?.name || "話者未設定"}
           </b>
         </div>
         <div className="script-line-copy">
@@ -330,12 +336,14 @@ function AdminLineCard({ project, line, patchLine, removeLine, moveLine }) {
           {line.direction && <small><MessageSquareText size={14} />{line.direction}</small>}
           {line.fileName && <code>{line.fileName}</code>}
         </div>
-        <div className="script-line-states">
-          <StatusBadge status={line.actorStatus} type="actor" />
-          <StatusBadge status={line.reviewStatus} type="review" />
-        </div>
+        {!isDirection && (
+          <div className="script-line-states">
+            <StatusBadge status={line.actorStatus} type="actor" />
+            <StatusBadge status={line.reviewStatus} type="review" />
+          </div>
+        )}
       </div>
-      {!line.isContext && (
+      {!line.isContext && !isDirection && (
         <>
           <RecordingPlayer url={line.recordingUrl} fileName={line.recordingFileName} />
           <div className="line-status-editor">
@@ -409,6 +417,30 @@ function AdminLineCard({ project, line, patchLine, removeLine, moveLine }) {
           )}
         </>
       )}
+      {!line.isContext && isDirection && (
+        <>
+          <div className="line-card-footer stage-direction-footer">
+            <span>録音対象外</span>
+            <div>
+              <button type="button" className="icon-button" title="上へ移動" onClick={() => moveLine(line.id, -1)}><ArrowUp size={15} /></button>
+              <button type="button" className="icon-button" title="下へ移動" onClick={() => moveLine(line.id, 1)}><ArrowDown size={15} /></button>
+              <button type="button" className="secondary compact" onClick={() => setDetailsOpen((current) => !current)}>
+                {detailsOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}詳細編集
+              </button>
+            </div>
+          </div>
+          {detailsOpen && (
+            <div className="line-detail-editor">
+              <Field label="シーン名" value={line.sceneTitle} onChange={(value) => patchLine(line.id, { sceneTitle: value })} />
+              <TextArea label="ト書き" value={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
+              <RubyEditor text={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
+              <button type="button" className="danger compact" onClick={() => removeLine(line.id)}>
+                <Trash2 size={15} />このト書きを削除
+              </button>
+            </div>
+          )}
+        </>
+      )}
     </article>
   );
 }
@@ -453,7 +485,7 @@ function RecordingBoardView({ project, patchLine, removeLine, moveLine }) {
           <section className="script-scene" key={scene.sceneId}>
             <div className="script-scene-heading">
               <span>{scene.title}</span>
-              <small>{scene.lines.filter((line) => !line.isContext).length}セリフ</small>
+              <small>{scene.lines.filter((line) => !line.isContext && line.kind !== "direction").length}セリフ</small>
             </div>
             <div className="script-line-list">
               {scene.lines.map((line) => (
@@ -482,20 +514,42 @@ function RecordingBoardView({ project, patchLine, removeLine, moveLine }) {
 }
 
 function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, importScriptRows }) {
-  const [importText, setImportText] = useState("");
+  const [importMode, setImportMode] = useState("docs");
+  const [docsImportText, setDocsImportText] = useState("");
+  const [tableImportText, setTableImportText] = useState("");
+  const [importAction, setImportAction] = useState("replace");
   const [importMessage, setImportMessage] = useState("");
   const [showAllLines, setShowAllLines] = useState(false);
   const [rubyLineId, setRubyLineId] = useState("");
 
+  const importText = importMode === "docs" ? docsImportText : tableImportText;
+  const parsedImportRows = useMemo(
+    () => importMode === "docs"
+      ? parseGoogleDocsScript(importText, project.characters.map((character) => character.name))
+      : parseScriptTable(importText, parseCsv),
+    [importMode, importText, project.characters]
+  );
+  const importStats = useMemo(() => {
+    const scenes = new Set(parsedImportRows.map((row) => row.sceneTitle));
+    const speakers = new Set(parsedImportRows.map((row) => row.speaker).filter((speaker) => speaker && speaker !== "ト書き"));
+    return {
+      scenes: scenes.size,
+      speakers: [...speakers],
+      directions: parsedImportRows.filter((row) => row.sourceKind === "direction" || row.speaker === "ト書き").length,
+      dialogue: parsedImportRows.filter((row) => row.sourceKind !== "direction" && row.speaker !== "ト書き").length
+    };
+  }, [parsedImportRows]);
+
   const applyImport = () => {
-    const rows = parseScriptTable(importText, parseCsv);
-    if (!rows.length) {
-      setImportMessage("読み込めるセリフがありません。列名と内容を確認してください。");
+    if (!parsedImportRows.length) {
+      setImportMessage("読み込める文章がありません。貼り付けた内容を確認してください。");
       return;
     }
-    importScriptRows(rows);
-    setImportText("");
-    setImportMessage(`${rows.length}件のセリフを追加しました。`);
+    if (importAction === "replace" && project.lines.length && !confirm(`現在の${project.lines.length}件を、プレビュー中の${parsedImportRows.length}件に入れ替えますか？`)) return;
+    importScriptRows(parsedImportRows, { replace: importAction === "replace" });
+    if (importMode === "docs") setDocsImportText("");
+    else setTableImportText("");
+    setImportMessage(`${importStats.dialogue}セリフと${importStats.directions}件のト書きを台本へ反映しました。`);
   };
 
   return (
@@ -518,26 +572,72 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
       <article className="panel script-import-panel">
         <div className="record-head">
           <div>
-            <h2>台本をまとめて追加</h2>
-            <p className="muted">GoogleスプレッドシートやExcelから、そのまま貼り付けられます。</p>
+            <h2>台本をまとめて取り込む</h2>
+            <p className="muted">原稿を貼り付け、判定結果を確認してから台本へ反映します。</p>
           </div>
         </div>
-        <div className="script-import-example">
-          <code>シーン</code><code>話者</code><code>セリフ</code><code>演技指示</code><code>ファイル名</code>
+        <div className="script-import-mode segmented-control" aria-label="台本の取り込み元">
+          <button type="button" className={importMode === "docs" ? "active" : ""} onClick={() => { setImportMode("docs"); setImportMessage(""); }}>
+            <FileText size={15} />Google Docs
+          </button>
+          <button type="button" className={importMode === "table" ? "active" : ""} onClick={() => { setImportMode("table"); setImportMessage(""); }}>
+            <Table2 size={15} />表・CSV
+          </button>
         </div>
+        {importMode === "table" && (
+          <div className="script-import-example">
+            <code>シーン</code><code>話者</code><code>セリフ</code><code>演技指示</code><code>ファイル名</code>
+          </div>
+        )}
         <p className="ruby-import-hint">
           <BookOpenText size={15} />
-          スプレッドシート側でルビを入れる場合は、セリフ欄へ <code>｜覚悟《かくご》</code> と入力します。
+          ルビを含める場合は、原稿内へ <code>｜覚悟《かくご》</code> と入力します。
         </p>
         <textarea
           className="script-import-textarea"
           value={importText}
-          onChange={(event) => setImportText(event.target.value)}
-          placeholder={"シーン\t話者\tセリフ\t演技指示\tファイル名\nScene 01\tヴェル\tうん。もう決めたんだ。\t静かな決意で\tS01_003_VEL"}
+          onChange={(event) => {
+            if (importMode === "docs") setDocsImportText(event.target.value);
+            else setTableImportText(event.target.value);
+            setImportMessage("");
+          }}
+          aria-label={importMode === "docs" ? "Googleドキュメントの脚本を貼り付け" : "表またはCSVの台本を貼り付け"}
+          placeholder={importMode === "docs"
+            ? "〇雨上がり\nアマモリ「本当に行くつもりなの？」\nヴェル\n「うん。もう｜決めた《きめた》んだ。」\n（静かな決意で）"
+            : "シーン\t話者\tセリフ\t演技指示\tファイル名\nScene 01\tヴェル\tうん。もう決めたんだ。\t静かな決意で\tS01_003_VEL"}
         />
+        {importText.trim() && (
+          <div className={`document-script-preview${parsedImportRows.length ? "" : " empty"}`}>
+            <div className="document-preview-heading">
+              <div>
+                <strong>取り込みプレビュー</strong>
+                <span>{importStats.dialogue}セリフ / {importStats.directions}件のト書き / {importStats.scenes}シーン</span>
+              </div>
+              <div className="document-speaker-list">
+                {importStats.speakers.slice(0, 8).map((speaker) => <span key={speaker}>{speaker}</span>)}
+              </div>
+            </div>
+            <div className="document-preview-list">
+              {parsedImportRows.slice(0, 8).map((row, index) => (
+                <div className={row.speaker === "ト書き" ? "direction" : ""} key={`${row.sceneTitle}-${row.speaker}-${index}`}>
+                  <span>{row.sceneTitle}</span>
+                  <b>{row.speaker || "話者未設定"}</b>
+                  <p><RubyText text={row.text} /></p>
+                  {row.direction && <small>{row.direction}</small>}
+                </div>
+              ))}
+              {parsedImportRows.length > 8 && <p className="document-preview-more">ほか {parsedImportRows.length - 8}件</p>}
+              {!parsedImportRows.length && <p className="document-preview-more">シーン見出しだけでなく、セリフや本文も貼り付けてください。</p>}
+            </div>
+          </div>
+        )}
+        <div className="script-import-action segmented-control" aria-label="台本への反映方法">
+          <button type="button" className={importAction === "replace" ? "active" : ""} onClick={() => setImportAction("replace")}>現在の台本と入れ替え</button>
+          <button type="button" className={importAction === "append" ? "active" : ""} onClick={() => setImportAction("append")}>末尾へ追加</button>
+        </div>
         <div className="button-row">
-          <button type="button" className="primary" onClick={applyImport} disabled={!importText.trim()}>
-            <Upload size={16} />台本へ追加
+          <button type="button" className="primary" onClick={applyImport} disabled={!parsedImportRows.length}>
+            <Upload size={16} />{parsedImportRows.length ? `${parsedImportRows.length}件を台本へ反映` : "台本へ反映"}
           </button>
           <button type="button" className="secondary" onClick={addLine}>
             <FilePlus2 size={16} />1セリフ追加
@@ -550,7 +650,11 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
         <div className="record-head">
           <div>
             <h2>セリフ一覧</h2>
-            <p className="muted">{project.lines.length}件。詳細な進捗操作は「進行ボード」で行えます。</p>
+            <p className="muted">
+              {project.lines.filter((line) => line.kind !== "direction").length}セリフ
+              {project.lines.some((line) => line.kind === "direction") && `・${project.lines.filter((line) => line.kind === "direction").length}件のト書き`}。
+              詳細な進捗操作は「進行ボード」で行えます。
+            </p>
           </div>
           <button type="button" className="secondary" onClick={() => setShowAllLines((current) => !current)}>
             {showAllLines ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -562,16 +666,20 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
             {project.lines.map((line) => (
               <div className="script-editor-row" key={line.id}>
                 <span>{String(line.order).padStart(3, "0")}</span>
-                <select value={line.characterId} onChange={(event) => patchLine(line.id, { characterId: event.target.value })}>
-                  {project.characters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}
-                </select>
+                {line.kind === "direction"
+                  ? <span className="script-editor-kind">ト書き</span>
+                  : (
+                    <select value={line.characterId} onChange={(event) => patchLine(line.id, { characterId: event.target.value })}>
+                      {project.characters.map((character) => <option key={character.id} value={character.id}>{character.name}</option>)}
+                    </select>
+                  )}
                 <input value={line.sceneTitle} onChange={(event) => patchLine(line.id, { sceneTitle: event.target.value })} aria-label="シーン" />
-                <textarea value={line.text} onChange={(event) => patchLine(line.id, { text: event.target.value })} aria-label="セリフ" />
+                <textarea value={line.text} onChange={(event) => patchLine(line.id, { text: event.target.value })} aria-label={line.kind === "direction" ? "ト書き" : "セリフ"} />
                 <button
                   type="button"
                   className={rubyLineId === line.id ? "icon-button active" : "icon-button"}
                   title="ルビを設定"
-                  aria-label={`${getCharacterName(project, line.characterId)} ${line.order}番のルビを設定`}
+                  aria-label={`${line.kind === "direction" ? "ト書き" : getCharacterName(project, line.characterId)} ${line.order}番のルビを設定`}
                   onClick={() => setRubyLineId((current) => current === line.id ? "" : line.id)}
                 >
                   <BookOpenText size={16} />
@@ -659,7 +767,7 @@ function CastAndSharing({
                 aria-label={`${character.name}の色`}
               />
               <input value={character.name} onChange={(event) => patchCharacter(character.id, { name: event.target.value })} />
-              <span>{project.lines.filter((line) => line.characterId === character.id).length}セリフ</span>
+              <span>{project.lines.filter((line) => line.kind !== "direction" && line.characterId === character.id).length}セリフ</span>
               <button
                 type="button"
                 className="icon-button danger-icon"
@@ -863,6 +971,7 @@ export function RecordingStudio({
           sceneTitle: current.lines.at(-1)?.sceneTitle || "Scene 1",
           order: current.lines.length + 1,
           characterId: firstCharacter.id,
+          kind: "dialogue",
           text: "",
           direction: "",
           fileName: "",
@@ -899,14 +1008,16 @@ export function RecordingStudio({
     });
   };
 
-  const importScriptRows = (rows) => {
+  const importScriptRows = (rows, { replace = false } = {}) => {
     if (!project) return;
     updateProject(project.id, (current) => {
       const characters = [...current.characters];
       const characterByName = new Map(characters.map((character) => [character.name, character]));
-      const sceneByTitle = new Map(current.lines.map((line) => [line.sceneTitle, line.sceneId]));
+      const baseLines = replace ? [] : current.lines;
+      const sceneByTitle = new Map(baseLines.map((line) => [line.sceneTitle, line.sceneId]));
       const nextLines = rows.map((row, index) => {
-        let character = characterByName.get(row.speaker);
+        const isDirection = row.sourceKind === "direction" || row.speaker === "ト書き";
+        let character = isDirection ? characters[0] : characterByName.get(row.speaker);
         if (!character) {
           character = {
             id: newId("character"),
@@ -925,8 +1036,9 @@ export function RecordingStudio({
           id: newId("line"),
           sceneId,
           sceneTitle: row.sceneTitle,
-          order: current.lines.length + index + 1,
+          order: baseLines.length + index + 1,
           characterId: character.id,
+          kind: isDirection ? "direction" : "dialogue",
           text: row.text,
           direction: row.direction,
           fileName: row.fileName,
@@ -939,7 +1051,7 @@ export function RecordingStudio({
           updatedAt: ""
         };
       });
-      return { ...current, characters, lines: [...current.lines, ...nextLines] };
+      return { ...current, characters, lines: [...baseLines, ...nextLines] };
     });
   };
 
@@ -1138,25 +1250,28 @@ export function RecordingStudio({
 
 function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, uploadRecording, busy }) {
   const character = project.characters.find((item) => item.id === line.characterId);
+  const isDirection = line.kind === "direction";
   const [editorOpen, setEditorOpen] = useState(false);
   return (
-    <article className={`script-line-card shared${line.isContext ? " context-line" : ""}`}>
+    <article className={`script-line-card shared${line.isContext ? " context-line" : ""}${isDirection ? " stage-direction-line" : ""}`}>
       <div className="script-line-main">
         <div className="script-line-sequence">
           <span>{String(line.order).padStart(3, "0")}</span>
-          <b style={{ "--character-color": character?.color || "#5f6d7a" }}><i />{character?.name || "話者未設定"}</b>
+          <b style={{ "--character-color": character?.color || "#5f6d7a" }}><i />{isDirection ? "ト書き" : character?.name || "話者未設定"}</b>
         </div>
         <div className="script-line-copy">
           <p><RubyText text={line.text} /></p>
           {line.direction && <small><MessageSquareText size={14} />{line.direction}</small>}
           {line.fileName && <code>{line.fileName}</code>}
         </div>
-        <div className="script-line-states">
-          <StatusBadge status={line.actorStatus} type="actor" />
-          <StatusBadge status={line.reviewStatus} type="review" />
-        </div>
+        {!isDirection && (
+          <div className="script-line-states">
+            <StatusBadge status={line.actorStatus} type="actor" />
+            <StatusBadge status={line.reviewStatus} type="review" />
+          </div>
+        )}
       </div>
-      {!line.isContext && (
+      {!line.isContext && !isDirection && (
         <>
           <RecordingPlayer url={line.recordingUrl} fileName={line.recordingFileName} />
           {line.directorNote && (
@@ -1417,7 +1532,7 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
           <section className="script-scene" key={scene.sceneId}>
             <div className="script-scene-heading">
               <span>{scene.title}</span>
-              <small>{scene.lines.filter((line) => !line.isContext).length}セリフ</small>
+              <small>{scene.lines.filter((line) => !line.isContext && line.kind !== "direction").length}セリフ</small>
             </div>
             <div className="script-line-list">
               {scene.lines.map((line) => {

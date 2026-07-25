@@ -1172,6 +1172,26 @@ h1 {
   font-size: 15px;
 }
 
+.script-line-card.stage-direction-line {
+  border-color: #d6d0c9;
+  border-left-color: #7a727d;
+  background: #f7f5f1;
+}
+
+.stage-direction-line .script-line-sequence b i {
+  background: #7a727d;
+}
+
+.stage-direction-line .script-line-copy p {
+  color: #5f5864;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.stage-direction-footer > span {
+  font-weight: 900;
+}
+
 .script-line-main {
   display: grid;
   grid-template-columns: 120px minmax(0, 1fr) auto;
@@ -1584,6 +1604,7 @@ h1 {
 .ruby-import-hint {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 7px;
   margin: 9px 0;
   color: #695f72;
@@ -1591,11 +1612,13 @@ h1 {
 }
 
 .ruby-import-hint code {
+  flex: 0 0 auto;
   padding: 3px 6px;
   border-radius: 4px;
   background: #fff0f5;
   color: #9b3159;
   font-weight: 900;
+  white-space: nowrap;
 }
 
 .recording-management-stack {
@@ -1618,6 +1641,24 @@ h1 {
   border-radius: 6px;
 }
 
+.script-import-mode,
+.script-import-action {
+  width: min(520px, 100%);
+  margin: 14px 0 10px;
+}
+
+.script-import-mode button,
+.script-import-action button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.script-import-action {
+  margin-top: 12px;
+}
+
 .script-import-example code {
   padding: 7px;
   background: #eee8df;
@@ -1635,6 +1676,114 @@ h1 {
   background: #fff;
   line-height: 1.65;
   resize: vertical;
+}
+
+.document-script-preview {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #cfc4b5;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.document-script-preview.empty {
+  border-color: #d8b06b;
+  background: #fff9ed;
+}
+
+.document-preview-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #e5ddd2;
+}
+
+.document-preview-heading > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.document-preview-heading strong {
+  color: #2d2635;
+  font-size: 13px;
+}
+
+.document-preview-heading span {
+  color: #746a7b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.document-speaker-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.document-speaker-list span {
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: #e8f5f4;
+  color: #16717b;
+}
+
+.document-preview-list {
+  display: grid;
+  gap: 2px;
+}
+
+.document-preview-list > div {
+  display: grid;
+  grid-template-columns: minmax(90px, 140px) minmax(80px, 120px) minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 8px 5px;
+  border-bottom: 1px solid #eee7de;
+}
+
+.document-preview-list > div.direction {
+  background: #f4f1ec;
+}
+
+.document-preview-list span,
+.document-preview-list b {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.document-preview-list span {
+  color: #776d7d;
+}
+
+.document-preview-list b {
+  color: #3a3243;
+}
+
+.document-preview-list p {
+  margin: 0;
+  color: #2e2736;
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.document-preview-list small {
+  grid-column: 3;
+  color: #9a4564;
+  line-height: 1.5;
+}
+
+.document-preview-more {
+  margin: 7px 0 0;
+  color: #756b7d;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
 }
 
 .script-editor-list {
@@ -1659,6 +1808,18 @@ h1 {
   font-size: 11px;
   font-weight: 900;
   text-align: center;
+}
+
+.script-editor-row > .script-editor-kind {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 7px;
+  border: 1px solid #d7ccbf;
+  border-radius: 5px;
+  background: #f2efeb;
+  color: #655e68;
 }
 
 .script-editor-row input,
@@ -2256,6 +2417,30 @@ h1 {
 
   .script-import-example {
     display: none;
+  }
+
+  .document-preview-heading {
+    flex-direction: column;
+  }
+
+  .document-speaker-list {
+    justify-content: flex-start;
+  }
+
+  .document-preview-list > div {
+    grid-template-columns: minmax(74px, 100px) minmax(0, 1fr);
+  }
+
+  .document-preview-list p,
+  .document-preview-list small {
+    grid-column: 1 / -1;
+  }
+
+  .script-import-mode button {
+    min-width: 0;
+    padding-right: 8px;
+    padding-left: 8px;
+    white-space: nowrap;
   }
 
   .script-editor-row {
@@ -3796,6 +3981,11 @@ textarea {
     border-left: 0;
     border-radius: 14px 14px 0 0;
     box-shadow: 0 -14px 38px -30px rgba(36, 31, 47, .9);
+    scrollbar-width: none;
+  }
+
+  .app-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .app-nav button {
@@ -3813,9 +4003,7 @@ textarea {
   }
 
   .floating-nav {
-    left: auto;
-    right: 10px;
-    bottom: calc(78px + env(safe-area-inset-bottom));
+    display: none;
   }
 
   .floating-top-button {

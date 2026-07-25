@@ -259,6 +259,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       sceneTitle: line.sceneTitle || line.scene || `Scene ${line.sceneNo || 1}`,
       order: Number.isFinite(Number(line.order)) ? Number(line.order) : lineIndex + 1,
       characterId,
+      kind: line.kind === "direction" ? "direction" : "dialogue",
       text: String(line.text || line.line || ""),
       direction: String(line.direction || line.note || ""),
       fileName: String(line.fileName || ""),
@@ -323,7 +324,7 @@ export const getCharacterName = (project, characterId) =>
   project?.characters?.find((character) => character.id === characterId)?.name || "話者未設定";
 
 export const getRecordingProgress = (project) => {
-  const lines = project?.lines || [];
+  const lines = (project?.lines || []).filter((line) => line.kind !== "direction");
   const total = lines.length;
   const recorded = lines.filter((line) => line.actorStatus !== "未収録").length;
   const approved = lines.filter((line) => line.reviewStatus === "OK").length;
@@ -354,6 +355,7 @@ export const getFilteredRecordingLines = ({
   if (mode === "dialogue" && selected.size > 1) {
     const sceneCharacters = new Map();
     lines.forEach((line) => {
+      if (line.kind === "direction") return;
       if (!sceneCharacters.has(line.sceneId)) sceneCharacters.set(line.sceneId, new Set());
       sceneCharacters.get(line.sceneId).add(line.characterId);
     });
@@ -364,12 +366,12 @@ export const getFilteredRecordingLines = ({
 
   const directIndexes = new Set();
   lines.forEach((line, index) => {
-    const selectedMatch = selected.size === 0 || selected.has(line.characterId);
+    const isDirection = line.kind === "direction";
+    const selectedMatch = selected.size === 0 || (!isDirection && selected.has(line.characterId));
     const dialogueMatch = mode !== "dialogue" || selected.size < 2 || matchingScenes.has(line.sceneId);
     const statusMatch =
       statusFilter === "すべて" ||
-      line.actorStatus === statusFilter ||
-      line.reviewStatus === statusFilter;
+      (!isDirection && (line.actorStatus === statusFilter || line.reviewStatus === statusFilter));
     const haystack = `${line.sceneTitle} ${getCharacterName(project, line.characterId)} ${line.text} ${line.direction} ${line.fileName}`.toLocaleLowerCase("ja");
     const queryMatch = !normalizedQuery || haystack.includes(normalizedQuery);
     if (selectedMatch && dialogueMatch && statusMatch && queryMatch) directIndexes.add(index);
@@ -419,6 +421,245 @@ export const makeRecordingShareUrl = ({
   if (driveFolderUrl) params.set("folder", driveFolderUrl);
   const query = params.toString();
   return `${base}#/recording/${encodeURIComponent(projectId)}/${encodeURIComponent(memberId)}/${encodeURIComponent(accessKey)}${query ? `?${query}` : ""}`;
+};
+
+const normalizeDocumentLine = (value = "") =>
+  String(value || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[\t ]+$/g, "")
+    .trim();
+
+const isSceneHeading = (line = "") => {
+  const text = normalizeDocumentLine(line).replace(/^#{1,6}\s*/, "");
+  return (
+    /^(?:scene|sc\.?|シーン)\s*[0-9０-９一二三四五六七八九十百]+/i.test(text) ||
+    /^第\s*[0-9０-９一二三四五六七八九十百]+\s*(?:場|幕|章)/.test(text) ||
+    /^[〇○●■◆◇]\s*\S+/.test(text) ||
+    /^【\s*(?:scene|シーン|第[^】]+(?:場|幕|章))[^】]*】$/i.test(text)
+  );
+};
+
+const normalizeSceneHeading = (line = "") => normalizeDocumentLine(line).replace(/^#{1,6}\s*/, "");
+
+const cleanSpeakerLabel = (value = "") =>
+  normalizeDocumentLine(value)
+    .replace(/^[\-–—・●■◆◇]+\s*/, "")
+    .replace(/^[【\[]|[】\]]$/g, "")
+    .trim();
+
+const isPlausibleSpeaker = (value = "") => {
+  const speaker = cleanSpeakerLabel(value);
+  return Boolean(speaker) && speaker.length <= 30 && !/[。！？!?、,「」『』：:\/\\]/.test(speaker);
+};
+
+const getParentheticalDirection = (line = "") => {
+  const match = normalizeDocumentLine(line).match(/^[（(]([\s\S]+)[）)]$/);
+  return match ? match[1].trim() : "";
+};
+
+const splitQuotedText = (value = "", openingQuote = "「") => {
+  const closingQuote = openingQuote === "『" ? "』" : "」";
+  const closeIndex = value.indexOf(closingQuote);
+  if (closeIndex < 0) {
+    return { text: value.trim(), direction: "", complete: false, closingQuote };
+  }
+  const suffix = value.slice(closeIndex + 1).trim();
+  return {
+    text: value.slice(0, closeIndex).trim(),
+    direction: getParentheticalDirection(suffix) || suffix,
+    complete: true,
+    closingQuote
+  };
+};
+
+const parseInlineDialogue = (line = "") => {
+  const text = normalizeDocumentLine(line);
+  const bracketMatch = text.match(/^【([^】]{1,30})】\s*(.*)$/);
+  if (bracketMatch && isPlausibleSpeaker(bracketMatch[1])) {
+    const speaker = cleanSpeakerLabel(bracketMatch[1]);
+    const remainder = bracketMatch[2].trim();
+    if (!remainder) return { speaker, pending: true };
+    const quoteMatch = remainder.match(/^[「『]([\s\S]*)$/);
+    if (quoteMatch) {
+      const openingQuote = remainder[0];
+      return { speaker, openingQuote, ...splitQuotedText(quoteMatch[1], openingQuote) };
+    }
+    return { speaker, text: remainder, direction: "", complete: true };
+  }
+
+  const tabCells = text.split(/\t+/).map((cell) => cell.trim()).filter(Boolean);
+  if (tabCells.length >= 2 && isPlausibleSpeaker(tabCells[0])) {
+    return {
+      speaker: cleanSpeakerLabel(tabCells[0]),
+      text: tabCells[1],
+      direction: tabCells.slice(2).join(" / "),
+      complete: true
+    };
+  }
+
+  const quoteMatch = text.match(/^(.{1,30}?)\s*[：:]?\s*([「『])([\s\S]*)$/);
+  if (quoteMatch && isPlausibleSpeaker(quoteMatch[1])) {
+    return {
+      speaker: cleanSpeakerLabel(quoteMatch[1]),
+      openingQuote: quoteMatch[2],
+      ...splitQuotedText(quoteMatch[3], quoteMatch[2])
+    };
+  }
+
+  const colonMatch = text.match(/^([^：:]{1,30})[：:]\s*(.+)$/);
+  if (colonMatch && isPlausibleSpeaker(colonMatch[1])) {
+    return {
+      speaker: cleanSpeakerLabel(colonMatch[1]),
+      text: colonMatch[2].trim(),
+      direction: "",
+      complete: true
+    };
+  }
+  return null;
+};
+
+export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
+  const sourceLines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+  const knownSpeakerSet = new Set((knownSpeakers || []).map((speaker) => cleanSpeakerLabel(speaker)).filter(Boolean));
+  const rows = [];
+  let currentScene = "Scene 1";
+  let pendingSpeaker = "";
+  let pendingDirection = "";
+  let openDialogue = null;
+
+  const pushRow = ({ speaker, lineText, direction = "", sourceKind = "dialogue" }) => {
+    const normalizedText = normalizeDocumentLine(lineText);
+    const normalizedDirection = normalizeDocumentLine(direction);
+    if (!normalizedText && !normalizedDirection) return;
+    rows.push({
+      sceneTitle: currentScene,
+      speaker: cleanSpeakerLabel(speaker) || "ト書き",
+      text: normalizedText || normalizedDirection,
+      direction: normalizedText ? normalizedDirection : "",
+      fileName: "",
+      sourceKind,
+      sourceOrder: rows.length
+    });
+  };
+
+  const nextNonEmptyLine = (startIndex) => {
+    for (let index = startIndex + 1; index < sourceLines.length; index += 1) {
+      const candidate = normalizeDocumentLine(sourceLines[index]);
+      if (candidate) return candidate;
+    }
+    return "";
+  };
+
+  sourceLines.forEach((rawLine, index) => {
+    const line = normalizeDocumentLine(rawLine);
+    if (!line) return;
+
+    if (openDialogue) {
+      const closeIndex = line.indexOf(openDialogue.closingQuote);
+      if (closeIndex < 0) {
+        openDialogue.text = `${openDialogue.text}\n${line}`.trim();
+        return;
+      }
+      const suffix = line.slice(closeIndex + 1).trim();
+      pushRow({
+        speaker: openDialogue.speaker,
+        lineText: `${openDialogue.text}\n${line.slice(0, closeIndex)}`.trim(),
+        direction: [openDialogue.direction, getParentheticalDirection(suffix) || suffix].filter(Boolean).join(" / ")
+      });
+      openDialogue = null;
+      return;
+    }
+
+    if (isSceneHeading(line)) {
+      currentScene = normalizeSceneHeading(line);
+      pendingSpeaker = "";
+      pendingDirection = "";
+      return;
+    }
+
+    const parentheticalDirection = getParentheticalDirection(line);
+    if (parentheticalDirection) {
+      if (pendingSpeaker) {
+        pendingDirection = [pendingDirection, parentheticalDirection].filter(Boolean).join(" / ");
+      } else if (rows.length && rows[rows.length - 1].sceneTitle === currentScene) {
+        rows[rows.length - 1].direction = [rows[rows.length - 1].direction, parentheticalDirection].filter(Boolean).join(" / ");
+      } else {
+        pushRow({ speaker: "ト書き", lineText: parentheticalDirection, sourceKind: "direction" });
+      }
+      return;
+    }
+
+    if (pendingSpeaker) {
+      const quoteMatch = line.match(/^([「『])([\s\S]*)$/);
+      if (quoteMatch) {
+        const quoted = splitQuotedText(quoteMatch[2], quoteMatch[1]);
+        if (quoted.complete) {
+          pushRow({
+            speaker: pendingSpeaker,
+            lineText: quoted.text,
+            direction: [pendingDirection, quoted.direction].filter(Boolean).join(" / ")
+          });
+        } else {
+          openDialogue = {
+            speaker: pendingSpeaker,
+            text: quoted.text,
+            direction: pendingDirection,
+            closingQuote: quoted.closingQuote
+          };
+        }
+      } else {
+        pushRow({ speaker: pendingSpeaker, lineText: line, direction: pendingDirection });
+      }
+      pendingSpeaker = "";
+      pendingDirection = "";
+      return;
+    }
+
+    const inlineDialogue = parseInlineDialogue(line);
+    if (inlineDialogue) {
+      if (inlineDialogue.pending) {
+        pendingSpeaker = inlineDialogue.speaker;
+      } else if (inlineDialogue.complete === false) {
+        openDialogue = {
+          speaker: inlineDialogue.speaker,
+          text: inlineDialogue.text,
+          direction: inlineDialogue.direction,
+          closingQuote: inlineDialogue.closingQuote
+        };
+      } else {
+        pushRow({
+          speaker: inlineDialogue.speaker,
+          lineText: inlineDialogue.text,
+          direction: inlineDialogue.direction,
+          sourceKind: inlineDialogue.speaker === "ト書き" ? "direction" : "dialogue"
+        });
+      }
+      return;
+    }
+
+    const nextLine = nextNonEmptyLine(index);
+    const standaloneSpeaker = cleanSpeakerLabel(line);
+    const nextStartsWithQuote = /^[「『]/.test(nextLine);
+    if (isPlausibleSpeaker(standaloneSpeaker) && (knownSpeakerSet.has(standaloneSpeaker) || nextStartsWithQuote)) {
+      pendingSpeaker = standaloneSpeaker;
+      return;
+    }
+
+    pushRow({ speaker: "ト書き", lineText: line, sourceKind: "direction" });
+  });
+
+  if (openDialogue) {
+    pushRow({
+      speaker: openDialogue.speaker,
+      lineText: openDialogue.text,
+      direction: openDialogue.direction
+    });
+  }
+  if (pendingSpeaker) {
+    pushRow({ speaker: "ト書き", lineText: pendingSpeaker, sourceKind: "direction" });
+  }
+
+  return rows;
 };
 
 export const parseScriptTable = (text = "", parseCsv) => {

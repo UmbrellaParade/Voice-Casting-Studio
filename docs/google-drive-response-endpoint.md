@@ -65,3 +65,17 @@ The actor URL contains an access key. An actor can view the shared script and pr
 When `共同収録 Apps Script URL` or its Drive folder is blank, the response endpoint settings are reused.
 
 Script ruby readings are stored inside each line with Aozora Bunko-style notation such as `｜覚悟《かくご》`. The management and actor views render that notation as HTML ruby text. The same notation can be entered directly in a Google Sheets/CSV script source.
+
+## Google Docs Script Paste
+
+Open `収録ボード > 台本編集`, select `Google Docs`, and paste the full document text. The preview recognizes common screenplay forms such as:
+
+```text
+〇雨上がり
+アマモリ「本当に行くつもりなの？」
+ヴェル
+「うん。もう｜決めた《きめた》んだ。」
+（静かな決意で）
+```
+
+Scene headings, inline dialogue, speaker names on a separate line, and parenthetical directions are detected before import. Unrecognized prose is retained as `ト書き`, displayed to both sides, and excluded from recording progress. Choose whether to replace the current script or append to it before applying the preview.
