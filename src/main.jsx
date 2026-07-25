@@ -460,7 +460,8 @@ function App() {
     status: WORDPRESS_RUNTIME ? "loading" : "local",
     message: WORDPRESS_RUNTIME ? "WordPressから作品データを読み込んでいます…" : "",
     users: [],
-    version: 0
+    version: 0,
+    canEditScript: WORDPRESS_RUNTIME ? Boolean(WORDPRESS_RUNTIME.canEditScript) : true
   }));
   const [syncState, setSyncState] = useState({ busy: false, message: "" });
   const [packExportMessage, setPackExportMessage] = useState("");
@@ -480,7 +481,8 @@ function App() {
       status: "ready",
       message: result.data ? "WordPressと同期しています。" : "新しい制作ワークスペースを準備しました。",
       users: Array.isArray(result.users) ? result.users : [],
-      version: Number(result.version) || 0
+      version: Number(result.version) || 0,
+      canEditScript: Boolean(result.canEditScript ?? WORDPRESS_RUNTIME?.canEditScript)
     });
   };
 
@@ -529,7 +531,13 @@ function App() {
       })
       .catch((error) => {
         if (cancelled) return;
-        setWordpressState({ status: "error", message: error.message, users: [], version: 0 });
+        setWordpressState({
+          status: "error",
+          message: error.message,
+          users: [],
+          version: 0,
+          canEditScript: Boolean(WORDPRESS_RUNTIME?.canEditScript)
+        });
       });
     return () => {
       cancelled = true;
@@ -1807,6 +1815,8 @@ ${socialRows || "-"}
     return <PublicSubmissionForm logoSrc={logoSrc} payload={sharedPayload} operatorSettings={data.settings} />;
   }
 
+  const canEditScript = !WORDPRESS_RUNTIME || wordpressState.canEditScript;
+
   if (WORDPRESS_RUNTIME && !WORDPRESS_RUNTIME.canManage) {
     return (
       <WordPressMemberPortal
@@ -1843,7 +1853,10 @@ ${socialRows || "-"}
         <div className={`wordpress-sync-banner ${wordpressState.status}`} role={wordpressState.status === "error" ? "alert" : "status"}>
           <Database size={16} />
           <span>{wordpressState.message}</span>
-          <small>{WORDPRESS_RUNTIME.currentUser?.name || "ログイン中"}{WORDPRESS_RUNTIME.canManage ? " / 管理者" : " / 声優"}</small>
+          <small>
+            {WORDPRESS_RUNTIME.currentUser?.name || "ログイン中"}
+            {wordpressState.canEditScript ? " / 制作オーナー" : WORDPRESS_RUNTIME.canManage ? " / 制作管理者" : " / 声優"}
+          </small>
         </div>
       )}
 
@@ -1884,6 +1897,7 @@ ${socialRows || "-"}
               setSelectedRecordingProjectId={setSelectedRecordingProjectId}
               settings={data.settings}
               setActive={setActive}
+              canEditScript={canEditScript}
             />
           )}
           {PRODUCTION_HUB_KEYS.has(active) && (
@@ -1894,6 +1908,7 @@ ${socialRows || "-"}
               setSelectedProjectId={setSelectedRecordingProjectId}
               updateProject={(updater) => updateRecordingProject(selectedRecordingProjectId, updater)}
               siteUsers={wordpressState.users}
+              canEditScript={canEditScript}
               setActive={setActive}
             />
           )}
@@ -2022,6 +2037,7 @@ ${socialRows || "-"}
               copyTransferLink={copyTransferLink}
               transferCopied={transferCopied}
               setActive={setActive}
+              canEditScript={canEditScript}
             />
           )}
         </section>
@@ -3849,7 +3865,8 @@ function SettingsPanel({
   resetSample,
   copyTransferLink,
   transferCopied,
-  setActive
+  setActive,
+  canEditScript = true
 }) {
   const [folderMessage, setFolderMessage] = useState("");
   const [colorProjectId, setColorProjectId] = useState(() => recordingProjects[0]?.id || "");
@@ -4082,12 +4099,15 @@ function SettingsPanel({
         <div className="button-row">
           {!WORDPRESS_RUNTIME && <button className="secondary" onClick={copyTransferLink}><ClipboardCopy size={16} />{transferCopied ? "コピー済み" : "引き継ぎリンクをコピー"}</button>}
           <button className="secondary" onClick={exportJson}><Download size={16} />JSONを書き出し</button>
-          <label className="secondary file-button">
-            <Upload size={16} />JSONを読み込み
-            <input type="file" accept="application/json" onChange={importJson} />
-          </label>
-          <button className="danger" onClick={resetSample}><Trash2 size={16} />サンプルに戻す</button>
+          {canEditScript && <>
+            <label className="secondary file-button">
+              <Upload size={16} />JSONを読み込み
+              <input type="file" accept="application/json" onChange={importJson} />
+            </label>
+            <button className="danger" onClick={resetSample}><Trash2 size={16} />サンプルに戻す</button>
+          </>}
         </div>
+        {WORDPRESS_RUNTIME && !canEditScript && <p className="hint-text">JSONの読み込みと全データの初期化は制作オーナーだけが実行できます。</p>}
         <p className="hint-text">{WORDPRESS_RUNTIME ? "録音ファイル本体はJSONへ含めず、Google Drive URLだけを書き出します。" : "スマホへ一度だけ移す場合は、PCで引き継ぎリンクをコピーしてスマホで開きます。画像や音源を多く含む場合はJSON書き出し/読み込みを使ってください。"}</p>
       </article>
     </div>

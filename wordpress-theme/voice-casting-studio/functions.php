@@ -12,6 +12,8 @@ if (!defined('ABSPATH')) {
 const VCS_REST_NAMESPACE = 'voice-casting-studio/v1';
 const VCS_WORKSPACE_POST_TYPE = 'vcs_workspace';
 const VCS_MANAGER_CAPABILITY = 'manage_voice_casting_studio';
+const VCS_SCRIPT_CAPABILITY = 'edit_voice_casting_scripts';
+const VCS_ROLE_SCHEMA_VERSION = '2';
 
 function vcs_setup_theme(): void
 {
@@ -47,13 +49,44 @@ function vcs_activate_roles(): void
         'upload_files' => true,
         VCS_MANAGER_CAPABILITY => true,
     ]);
+    add_role('voice_script_owner', 'Voice Script Owner', [
+        'read' => true,
+        'upload_files' => true,
+        VCS_MANAGER_CAPABILITY => true,
+        VCS_SCRIPT_CAPABILITY => true,
+    ]);
+
+    $director = get_role('voice_director');
+    if ($director) {
+        $director->add_cap('read');
+        $director->add_cap('upload_files');
+        $director->add_cap(VCS_MANAGER_CAPABILITY);
+        $director->remove_cap(VCS_SCRIPT_CAPABILITY);
+    }
+    $owner = get_role('voice_script_owner');
+    if ($owner) {
+        $owner->add_cap('read');
+        $owner->add_cap('upload_files');
+        $owner->add_cap(VCS_MANAGER_CAPABILITY);
+        $owner->add_cap(VCS_SCRIPT_CAPABILITY);
+    }
 
     $administrator = get_role('administrator');
     if ($administrator) {
         $administrator->add_cap(VCS_MANAGER_CAPABILITY);
+        $administrator->add_cap(VCS_SCRIPT_CAPABILITY);
     }
+    update_option('_vcs_role_schema_version', VCS_ROLE_SCHEMA_VERSION, false);
 }
 add_action('after_switch_theme', 'vcs_activate_roles');
+
+function vcs_maybe_upgrade_roles(): void
+{
+    if (VCS_ROLE_SCHEMA_VERSION !== get_option('_vcs_role_schema_version')) {
+        vcs_activate_roles();
+    }
+}
+add_action('init', 'vcs_maybe_upgrade_roles', 1);
 
 function vcs_require_login(): void
 {
@@ -96,6 +129,7 @@ function vcs_enqueue_application(): void
             'name' => $user->display_name,
         ],
         'canManage' => current_user_can(VCS_MANAGER_CAPABILITY),
+        'canEditScript' => current_user_can(VCS_SCRIPT_CAPABILITY),
     ]);
 }
 add_action('wp_enqueue_scripts', 'vcs_enqueue_application');
@@ -121,7 +155,7 @@ function vcs_get_workspace_post(bool $create = false): ?WP_Post
     if ($posts) {
         return $posts[0];
     }
-    if (!$create || !current_user_can(VCS_MANAGER_CAPABILITY)) {
+    if (!$create || !current_user_can(VCS_SCRIPT_CAPABILITY)) {
         return null;
     }
     $post_id = wp_insert_post([
@@ -217,8 +251,74 @@ function vcs_rest_can_manage(): bool
     return is_user_logged_in() && current_user_can(VCS_MANAGER_CAPABILITY);
 }
 
+function vcs_canonicalize_value(mixed $value): mixed
+{
+    if (!is_array($value)) {
+        return $value;
+    }
+    $is_list = [] === $value || array_keys($value) === range(0, count($value) - 1);
+    if ($is_list) {
+        return array_map('vcs_canonicalize_value', $value);
+    }
+    ksort($value);
+    foreach ($value as $key => $child) {
+        $value[$key] = vcs_canonicalize_value($child);
+    }
+    return $value;
+}
+
+function vcs_extract_script_structure(array $data): array
+{
+    $projects = [];
+    foreach (($data['recordingProjects'] ?? []) as $project) {
+        if (!is_array($project)) {
+            continue;
+        }
+        $characters = [];
+        foreach (($project['characters'] ?? []) as $character) {
+            if (!is_array($character)) {
+                continue;
+            }
+            $characters[] = [
+                'id' => (string) ($character['id'] ?? ''),
+                'name' => (string) ($character['name'] ?? ''),
+            ];
+        }
+        $lines = [];
+        foreach (($project['lines'] ?? []) as $line) {
+            if (!is_array($line)) {
+                continue;
+            }
+            $lines[] = [
+                'id' => (string) ($line['id'] ?? ''),
+                'chapterId' => (string) ($line['chapterId'] ?? ''),
+                'chapterTitle' => (string) ($line['chapterTitle'] ?? '第一章'),
+                'sceneId' => (string) ($line['sceneId'] ?? ''),
+                'sceneTitle' => (string) ($line['sceneTitle'] ?? 'Scene 1'),
+                'order' => (int) ($line['order'] ?? 0),
+                'characterId' => (string) ($line['characterId'] ?? ''),
+                'kind' => (string) ($line['kind'] ?? 'dialogue'),
+                'text' => (string) ($line['text'] ?? ''),
+                'direction' => (string) ($line['direction'] ?? ''),
+                'fileName' => (string) ($line['fileName'] ?? ''),
+            ];
+        }
+        $projects[] = [
+            'id' => (string) ($project['id'] ?? ''),
+            'title' => (string) ($project['title'] ?? ''),
+            'scriptVersion' => (string) ($project['scriptVersion'] ?? '初稿'),
+            'sourceScriptText' => (string) ($project['sourceScriptText'] ?? ''),
+            'scriptSnapshots' => vcs_canonicalize_value($project['scriptSnapshots'] ?? []),
+            'characters' => $characters,
+            'lines' => $lines,
+        ];
+    }
+    return $projects;
+}
+
 function vcs_filter_project_for_actor(array $project, int $user_id, array $character_ids): array
 {
+    unset($project['scriptSnapshots'], $project['sourceScriptText']);
     $project['castMembers'] = array_values(array_map(
         static function (array $member): array {
             unset($member['contact'], $member['accessKey']);
@@ -266,6 +366,7 @@ function vcs_rest_get_workspace(): WP_REST_Response
     $post = vcs_get_workspace_post(false);
     $user = wp_get_current_user();
     $can_manage = current_user_can(VCS_MANAGER_CAPABILITY);
+    $can_edit_script = current_user_can(VCS_SCRIPT_CAPABILITY);
     $workspace = $post ? vcs_decode_workspace($post) : null;
     if (is_array($workspace) && !$can_manage) {
         $assigned_projects = [];
@@ -289,6 +390,7 @@ function vcs_rest_get_workspace(): WP_REST_Response
         'version' => $post ? (int) get_post_meta($post->ID, '_vcs_workspace_version', true) : 0,
         'currentUser' => ['id' => (int) $user->ID, 'name' => $user->display_name],
         'canManage' => $can_manage,
+        'canEditScript' => $can_edit_script,
         'users' => $users,
     ]);
 }
@@ -300,6 +402,17 @@ function vcs_rest_save_workspace(WP_REST_Request $request): WP_REST_Response|WP_
         return new WP_Error('vcs_invalid_workspace', 'A workspace data object is required.', ['status' => 400]);
     }
     $current = vcs_decode_workspace(vcs_get_workspace_post(false));
+    if (!current_user_can(VCS_SCRIPT_CAPABILITY)) {
+        $incoming_structure = vcs_extract_script_structure($params['data']);
+        $current_structure = vcs_extract_script_structure($current);
+        if ($incoming_structure !== $current_structure) {
+            return new WP_Error(
+                'vcs_script_edit_forbidden',
+                'Only the production owner can add, edit, delete, replace, or restore scripts.',
+                ['status' => 403]
+            );
+        }
+    }
     return vcs_write_workspace(vcs_merge_concurrent_actor_data($params['data'], $current));
 }
 

@@ -6,6 +6,8 @@ The current product is a voice drama production workspace shared by the director
 
 - track recording, review, questions, deadlines, and announcements from Home
 - paste a full script from Google Docs and preview detected chapters, scenes, speakers, dialogue, and stage directions
+- choose progress-preserving differential updates, a true full replacement, or an append import
+- automatically archive the script before updates, replacements, deletions, and restores, while retaining the pasted source text
 - navigate from the full script to a chapter, then to a scene without merging repeated scene names across chapters
 - import structured scripts from Google Sheets, Excel, TSV, or CSV
 - add ruby readings in the editor or import `｜漢字《かんじ》` notation from a sheet
@@ -14,6 +16,7 @@ The current product is a voice drama production workspace shared by the director
 - assign characters and issue a dedicated URL to each actor
 - share recorded, submitted, approved, retake, and hold progress
 - keep actor recordings in Google Drive and store only their Drive URLs in WordPress
+- separate WordPress access into production owner, production director, and voice actor permissions
 - manage character profiles, assigned actors, Drive folders, production materials, questions, schedules, and announcements
 - keep the former audition workflow dormant in the codebase for possible reuse
 - export/import local backups

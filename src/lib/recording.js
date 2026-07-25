@@ -8,10 +8,88 @@ export const PRODUCTION_SCHEDULE_STATUSES = ["予定", "進行中", "完了", "�
 const RUBY_SOURCE = "(?:[|｜]([^《\\n]+)《([^》\\n]+)》|\\{([^|{}\\n]+)\\|([^{}\\n]+)\\})";
 
 const CHARACTER_COLORS = ["#168b9a", "#d65285", "#7a63ad", "#b57024", "#2f7d4a", "#5f6d7a"];
+export const MAX_SCRIPT_SNAPSHOTS = 30;
 
 const createLocalId = (prefix) => {
   if (globalThis.crypto?.randomUUID) return `${prefix}_${globalThis.crypto.randomUUID().slice(0, 8)}`;
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
+};
+
+const cloneScriptCharacters = (characters = []) => (Array.isArray(characters) ? characters : [])
+  .filter((character) => character && typeof character === "object")
+  .map((character, index) => ({
+    id: String(character.id || createLocalId("character")),
+    name: String(character.name || `登場人物${index + 1}`).trim(),
+    color: String(character.color || CHARACTER_COLORS[index % CHARACTER_COLORS.length]),
+    imageUrl: String(character.imageUrl || ""),
+    profile: String(character.profile || character.setting || ""),
+    background: String(character.background || character.backstory || ""),
+    recordingFolderUrl: String(character.recordingFolderUrl || character.driveFolderUrl || ""),
+    openChatUrl: String(character.openChatUrl || character.lineOpenChatUrl || "")
+  }));
+
+const cloneScriptLines = (lines = []) => (Array.isArray(lines) ? lines : [])
+  .filter((line) => line && typeof line === "object")
+  .map((line, index) => ({
+    id: String(line.id || createLocalId("line")),
+    chapterId: String(line.chapterId || ""),
+    chapterTitle: String(line.chapterTitle || line.chapter || "第一章"),
+    sceneId: String(line.sceneId || ""),
+    sceneTitle: String(line.sceneTitle || line.scene || "Scene 1"),
+    order: Number.isFinite(Number(line.order)) ? Number(line.order) : index + 1,
+    characterId: String(line.characterId || ""),
+    kind: line.kind === "direction" ? "direction" : "dialogue",
+    text: String(line.text || line.line || ""),
+    direction: String(line.direction || line.note || ""),
+    fileName: String(line.fileName || ""),
+    actorStatus: normalizeStatus(line.actorStatus, ACTOR_RECORDING_STATUSES, "未収録"),
+    reviewStatus: normalizeStatus(line.reviewStatus, DIRECTOR_REVIEW_STATUSES, "未確認"),
+    recordingUrl: String(line.recordingUrl || ""),
+    recordingFileName: String(line.recordingFileName || ""),
+    actorNote: String(line.actorNote || ""),
+    directorNote: String(line.directorNote || ""),
+    updatedAt: String(line.updatedAt || "")
+  }));
+
+const normalizeScriptSnapshot = (snapshot = {}, index = 0) => ({
+  id: String(snapshot.id || `script_snapshot_${index + 1}`),
+  label: String(snapshot.label || snapshot.scriptVersion || `保存版 ${index + 1}`),
+  reason: String(snapshot.reason || "手動保存"),
+  createdAt: String(snapshot.createdAt || new Date().toISOString()),
+  scriptVersion: String(snapshot.scriptVersion || "初稿"),
+  sourceScriptText: String(snapshot.sourceScriptText || ""),
+  characters: cloneScriptCharacters(snapshot.characters),
+  lines: cloneScriptLines(snapshot.lines)
+});
+
+export const createScriptSnapshot = (project = {}, {
+  label = "",
+  reason = "手動保存",
+  createdAt = new Date().toISOString()
+} = {}) => ({
+  id: createLocalId("script_snapshot"),
+  label: String(label || project.scriptVersion || "保存版"),
+  reason: String(reason || "手動保存"),
+  createdAt,
+  scriptVersion: String(project.scriptVersion || "初稿"),
+  sourceScriptText: String(project.sourceScriptText || ""),
+  characters: cloneScriptCharacters(project.characters),
+  lines: cloneScriptLines(project.lines)
+});
+
+export const archiveScriptVersion = (project = {}, options = {}) => ({
+  ...project,
+  scriptSnapshots: [
+    createScriptSnapshot(project, options),
+    ...(Array.isArray(project.scriptSnapshots) ? project.scriptSnapshots : [])
+  ].slice(0, MAX_SCRIPT_SNAPSHOTS)
+});
+
+export const getShareableRecordingProject = (project = {}) => {
+  const sharedProject = { ...project };
+  delete sharedProject.scriptSnapshots;
+  delete sharedProject.sourceScriptText;
+  return sharedProject;
 };
 
 export const createRecordingAccessKey = () => {
@@ -92,6 +170,8 @@ export const createRecordingProject = ({ episodeId = "", title = "新しい収�
   title,
   description: "",
   scriptVersion: "初稿",
+  sourceScriptText: "",
+  scriptSnapshots: [],
   status: "準備中",
   recordingDeadline: "",
   releaseDate: "",
@@ -114,6 +194,8 @@ export const sampleRecordingProjects = [
     title: "サンプル収録台本",
     description: "登場人物を選ぶと、担当セリフや掛け合いだけに絞り込めます。",
     scriptVersion: "初稿",
+    sourceScriptText: "",
+    scriptSnapshots: [],
     status: "収録準備中",
     characters: [
       {
@@ -332,7 +414,9 @@ export const sampleRecordingProjects = [
   }
 ];
 
-const normalizeStatus = (value, options, fallback) => (options.includes(value) ? value : fallback);
+function normalizeStatus(value, options, fallback) {
+  return options.includes(value) ? value : fallback;
+}
 
 const makeStableScopeId = (prefix, value) => {
   let hash = 2166136261;
@@ -446,6 +530,10 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
     title: project.title || `収録プロジェクト${index + 1}`,
     description: project.description || "",
     scriptVersion: project.scriptVersion || "初稿",
+    sourceScriptText: String(project.sourceScriptText || ""),
+    scriptSnapshots: (Array.isArray(project.scriptSnapshots) ? project.scriptSnapshots : [])
+      .slice(0, MAX_SCRIPT_SNAPSHOTS)
+      .map(normalizeScriptSnapshot),
     status: project.status || "準備中",
     recordingDeadline: String(project.recordingDeadline || ""),
     releaseDate: String(project.releaseDate || ""),
@@ -505,6 +593,33 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
 
 export const normalizeRecordingProjects = (projects) =>
   (Array.isArray(projects) ? projects : sampleRecordingProjects).map(normalizeRecordingProject);
+
+export const restoreScriptSnapshot = (project = {}, snapshotId = "") => {
+  const snapshots = Array.isArray(project.scriptSnapshots) ? project.scriptSnapshots : [];
+  const snapshot = snapshots.find((item) => item.id === snapshotId);
+  if (!snapshot) return normalizeRecordingProject(project);
+  const archived = archiveScriptVersion(project, {
+    label: `${project.scriptVersion || "現在版"}（復元前）`,
+    reason: `「${snapshot.label || snapshot.scriptVersion || "保存版"}」を復元する直前`
+  });
+  const currentCharacters = Array.isArray(project.characters) ? project.characters : [];
+  const currentCharacterById = new Map(currentCharacters.map((character) => [character.id, character]));
+  const restoredCharacterIds = new Set(snapshot.characters.map((character) => character.id));
+  const restoredCharacters = [
+    ...snapshot.characters.map((character) => ({
+      ...character,
+      ...(currentCharacterById.get(character.id) || {})
+    })),
+    ...currentCharacters.filter((character) => !restoredCharacterIds.has(character.id))
+  ];
+  return normalizeRecordingProject({
+    ...archived,
+    scriptVersion: snapshot.scriptVersion,
+    sourceScriptText: snapshot.sourceScriptText,
+    characters: restoredCharacters,
+    lines: snapshot.lines
+  });
+};
 
 export const mergeRemoteRecordingProject = (localProject, remoteProject) => {
   const remoteLines = new Map((remoteProject?.lines || []).map((line) => [line.id, line]));

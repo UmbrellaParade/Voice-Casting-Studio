@@ -12,13 +12,16 @@ import {
   FileAudio,
   FileText,
   FilePlus2,
+  History,
   KeyRound,
   Link,
   ListFilter,
+  LockKeyhole,
   MessageSquareText,
   Mic2,
   Plus,
   RefreshCw,
+  RotateCcw,
   Save,
   Search,
   Send,
@@ -40,12 +43,14 @@ import {
 import {
   ACTOR_RECORDING_STATUSES,
   DIRECTOR_REVIEW_STATUSES,
+  archiveScriptVersion,
   createRecordingAccessKey,
   createRecordingProject,
   addRubyNotation,
   getCharacterName,
   getFilteredRecordingLines,
   getRecordingProgress,
+  getShareableRecordingProject,
   getScriptImportPlan,
   makeRecordingShareUrl,
   mergeRemoteRecordingProject,
@@ -54,6 +59,7 @@ import {
   parseRubyText,
   parseScriptTable,
   hasRubyNotation,
+  restoreScriptSnapshot,
   stripRubyNotation
 } from "../lib/recording.js";
 import { Field, SectionTitle, TextArea } from "./ui.jsx";
@@ -447,7 +453,7 @@ function StatusBadge({ status, type }) {
   return <span className={`recording-status-badge ${type} status-${status}`}>{status}</span>;
 }
 
-function AdminLineCard({ project, line, patchLine, removeLine }) {
+function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) {
   const character = project.characters.find((item) => item.id === line.characterId);
   const isDirection = line.kind === "direction";
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -509,30 +515,34 @@ function AdminLineCard({ project, line, patchLine, removeLine }) {
             <span><Clock3 size={14} />{formatUpdatedAt(line.updatedAt)}</span>
             <div>
               <button type="button" className="secondary compact" onClick={() => setDetailsOpen((current) => !current)}>
-                {detailsOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}詳細編集
+                {detailsOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}{canEditScript ? "詳細編集" : "録音・確認メモ"}
               </button>
             </div>
           </div>
           {detailsOpen && (
             <div className="line-detail-editor">
-              <Field label="章名" value={line.chapterTitle} onChange={(value) => patchLine(line.id, { chapterTitle: value })} />
-              <Field label="シーン名" value={line.sceneTitle} onChange={(value) => patchLine(line.id, { sceneTitle: value })} />
-              <label>
-                <span>話者</span>
-                <select value={line.characterId} onChange={(event) => patchLine(line.id, { characterId: event.target.value })}>
-                  {project.characters.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-                </select>
-              </label>
-              <TextArea label="セリフ" value={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
-              <RubyEditor text={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
-              <TextArea label="演技指示" value={line.direction} onChange={(value) => patchLine(line.id, { direction: value })} />
-              <Field label="録音ファイル名" value={line.fileName} onChange={(value) => patchLine(line.id, { fileName: value })} />
+              {canEditScript && <>
+                <Field label="章名" value={line.chapterTitle} onChange={(value) => patchLine(line.id, { chapterTitle: value })} />
+                <Field label="シーン名" value={line.sceneTitle} onChange={(value) => patchLine(line.id, { sceneTitle: value })} />
+                <label>
+                  <span>話者</span>
+                  <select value={line.characterId} onChange={(event) => patchLine(line.id, { characterId: event.target.value })}>
+                    {project.characters.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
+                </label>
+                <TextArea label="セリフ" value={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
+                <RubyEditor text={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
+                <TextArea label="演技指示" value={line.direction} onChange={(value) => patchLine(line.id, { direction: value })} />
+                <Field label="録音ファイル名" value={line.fileName} onChange={(value) => patchLine(line.id, { fileName: value })} />
+              </>}
               <Field label="録音URL" value={line.recordingUrl} onChange={(value) => patchLine(line.id, { recordingUrl: value })} />
               <TextArea label="声優さんのメモ" value={line.actorNote} onChange={(value) => patchLine(line.id, { actorNote: value })} />
               <TextArea label="確認・リテイクメモ" value={line.directorNote} onChange={(value) => patchLine(line.id, { directorNote: value })} />
-              <button type="button" className="danger compact" onClick={() => removeLine(line.id)}>
-                <Trash2 size={15} />このセリフを削除
-              </button>
+              {canEditScript && (
+                <button type="button" className="danger compact" onClick={() => removeLine(line.id)}>
+                  <Trash2 size={15} />このセリフを削除
+                </button>
+              )}
             </div>
           )}
         </>
@@ -542,9 +552,11 @@ function AdminLineCard({ project, line, patchLine, removeLine }) {
           <div className="line-card-footer stage-direction-footer">
             <span>録音対象外</span>
             <div>
-              <button type="button" className="secondary compact" onClick={() => setDetailsOpen((current) => !current)}>
-                {detailsOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}詳細編集
-              </button>
+              {canEditScript && (
+                <button type="button" className="secondary compact" onClick={() => setDetailsOpen((current) => !current)}>
+                  {detailsOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}詳細編集
+                </button>
+              )}
             </div>
           </div>
           {detailsOpen && (
@@ -564,7 +576,7 @@ function AdminLineCard({ project, line, patchLine, removeLine }) {
   );
 }
 
-function RecordingBoardView({ project, patchLine, removeLine }) {
+function RecordingBoardView({ project, patchLine, removeLine, canEditScript }) {
   const allChapters = useMemo(() => getChapterGroups(project.lines), [project.lines]);
   const [selectedChapterId, setSelectedChapterId] = useState("");
   const [selectedSceneId, setSelectedSceneId] = useState("");
@@ -686,7 +698,7 @@ function RecordingBoardView({ project, patchLine, removeLine }) {
                 <ScriptSceneSection key={scene.sceneId} scene={scene} open={openSceneIds.has(scene.sceneId)} onToggle={() => toggleScene(scene.sceneId)}>
                   <div className="script-line-list">
                     {scene.lines.map((line) => (
-                      <AdminLineCard key={line.id} project={project} line={line} patchLine={patchLine} removeLine={removeLine} />
+                      <AdminLineCard key={line.id} project={project} line={line} patchLine={patchLine} removeLine={removeLine} canEditScript={canEditScript} />
                     ))}
                   </div>
                 </ScriptSceneSection>
@@ -706,11 +718,20 @@ function RecordingBoardView({ project, patchLine, removeLine }) {
   );
 }
 
-function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, importScriptRows }) {
+function ScriptEditor({
+  project,
+  patchProject,
+  addLine,
+  patchLine,
+  removeLine,
+  importScriptRows,
+  saveScriptSnapshot,
+  restoreSnapshot
+}) {
   const [importMode, setImportMode] = useState("docs");
   const [docsImportText, setDocsImportText] = useState("");
   const [tableImportText, setTableImportText] = useState("");
-  const [importAction, setImportAction] = useState("replace");
+  const [importAction, setImportAction] = useState("merge");
   const [importMessage, setImportMessage] = useState("");
   const [showAllLines, setShowAllLines] = useState(false);
   const [rubyLineId, setRubyLineId] = useState("");
@@ -744,19 +765,20 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
       setImportMessage("読み込める文章がありません。貼り付けた内容を確認してください。");
       return;
     }
-    if (
-      importAction === "replace" &&
-      project.lines.length &&
-      !confirm(
-        `台本を更新しますか？\n\n進捗を引き継ぐ行: ${importPlan.retained}件\n新規・本文変更: ${importPlan.added}件\n削除: ${importPlan.removed}件\n\n同じ話者・本文の行は、録音済みや確認状況をそのまま引き継ぎます。`
-      )
-    ) return;
-    importScriptRows(parsedImportRows, { replace: importAction === "replace" });
+    if (importAction === "merge" && project.lines.length && !confirm(
+      `台本を差分更新しますか？\n\n進捗を引き継ぐ行: ${importPlan.retained}件\n新規・本文変更: ${importPlan.added}件\n削除: ${importPlan.removed}件\n\n同じ話者・本文の行は録音・確認状況を引き継ぎ、更新前の台本は保存版へ残します。`
+    )) return;
+    if (importAction === "replace" && project.lines.length && !confirm(
+      `台本を完全に入れ替えますか？\n\n現在の${project.lines.length}件のセリフ・ト書きと録音・確認状況は、新しい台本へ引き継ぎません。\n\n現在の台本は先に保存版へ残すため、あとから復元できます。登場人物の画像や設定、配役は残ります。`
+    )) return;
+    importScriptRows(parsedImportRows, { mode: importAction, sourceText: importText });
     if (importMode === "docs") setDocsImportText("");
     else setTableImportText("");
     setImportMessage(
-      importAction === "replace"
+      importAction === "merge"
         ? `${importStats.dialogue}セリフと${importStats.directions}件のト書きを反映し、${importPlan.retained}件の録音・確認状況を引き継ぎました。`
+        : importAction === "replace"
+          ? `${importStats.dialogue}セリフと${importStats.directions}件のト書きへ完全に入れ替えました。入れ替え前の台本は保存版から復元できます。`
         : `${importStats.dialogue}セリフと${importStats.directions}件のト書きを台本へ追加しました。`
     );
   };
@@ -826,7 +848,7 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
                 {importStats.speakers.slice(0, 8).map((speaker) => <span key={speaker}>{speaker}</span>)}
               </div>
             </div>
-            {importAction === "replace" && project.lines.length > 0 && parsedImportRows.length > 0 && (
+            {importAction === "merge" && project.lines.length > 0 && parsedImportRows.length > 0 && (
               <div className="script-import-diff" aria-label="台本更新の差分">
                 <span className="retained"><b>{importPlan.retained}</b> 進捗を保持</span>
                 <span><b>{importPlan.added}</b> 新規・本文変更</span>
@@ -848,9 +870,16 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
           </div>
         )}
         <div className="script-import-action segmented-control" aria-label="台本への反映方法">
-          <button type="button" className={importAction === "replace" ? "active" : ""} onClick={() => setImportAction("replace")}>現在の台本と入れ替え</button>
+          <button type="button" className={importAction === "merge" ? "active" : ""} onClick={() => setImportAction("merge")}>差分更新</button>
+          <button type="button" className={importAction === "replace" ? "active danger-mode" : ""} onClick={() => setImportAction("replace")}>完全入れ替え</button>
           <button type="button" className={importAction === "append" ? "active" : ""} onClick={() => setImportAction("append")}>末尾へ追加</button>
         </div>
+        {importAction === "merge" && (
+          <p className="script-import-mode-note"><RefreshCw size={16} />一致するセリフの録音・確認状況を残し、変更箇所だけを反映します。</p>
+        )}
+        {importAction === "replace" && (
+          <p className="script-import-mode-note warning"><History size={16} />現在の進捗を引き継がず、台本全体を新しくします。実行前の状態は自動で保存版へ残ります。</p>
+        )}
         <div className="button-row">
           <button type="button" className="primary" onClick={applyImport} disabled={!parsedImportRows.length}>
             <Upload size={16} />{parsedImportRows.length ? `${parsedImportRows.length}件を台本へ反映` : "台本へ反映"}
@@ -860,6 +889,44 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
           </button>
         </div>
         {importMessage && <p className="hint-text">{importMessage}</p>}
+      </article>
+
+      <article className="panel script-history-panel">
+        <div className="record-head">
+          <div>
+            <h2>原文と保存版</h2>
+            <p className="muted">削除や入れ替えの前の台本を残し、必要なときに丸ごと復元できます。</p>
+          </div>
+          <button type="button" className="secondary" onClick={saveScriptSnapshot} disabled={!project.lines.length}>
+            <Save size={16} />現在版を保存
+          </button>
+        </div>
+        <details className="script-source-details">
+          <summary><FileText size={16} />最後に取り込んだ原文</summary>
+          {project.sourceScriptText ? (
+            <textarea className="script-source-preview" value={project.sourceScriptText} readOnly aria-label="最後に取り込んだ台本原文" />
+          ) : (
+            <p className="muted">次回の台本取り込みから、貼り付けた原文もここへ保存されます。</p>
+          )}
+        </details>
+        <div className="script-snapshot-list">
+          {(project.scriptSnapshots || []).map((snapshot) => (
+            <div className="script-snapshot-row" key={snapshot.id}>
+              <History size={18} />
+              <div>
+                <b>{snapshot.label}</b>
+                <span>{snapshot.reason}</span>
+              </div>
+              <span>{snapshot.lines.length}件 / {new Date(snapshot.createdAt).toLocaleString("ja-JP")}</span>
+              <button type="button" className="secondary compact" onClick={() => restoreSnapshot(snapshot.id)}>
+                <RotateCcw size={15} />この版を復元
+              </button>
+            </div>
+          ))}
+          {!project.scriptSnapshots?.length && (
+            <p className="script-history-empty"><History size={18} />保存版はまだありません。削除・差分更新・完全入れ替えの前には自動で作成されます。</p>
+          )}
+        </div>
       </article>
 
       <article className="panel">
@@ -922,6 +989,7 @@ function ScriptEditor({ project, patchProject, addLine, patchLine, removeLine, i
 
 function CastAndSharing({
   project,
+  canEditScript,
   settings,
   patchProject,
   addCharacter,
@@ -974,7 +1042,7 @@ function CastAndSharing({
             <h2>登場人物</h2>
             <p className="muted">台本の絞り込みと配役に使います。</p>
           </div>
-          <button type="button" className="secondary" onClick={addCharacter}><Plus size={16} />登場人物</button>
+          {canEditScript && <button type="button" className="secondary" onClick={addCharacter}><Plus size={16} />登場人物</button>}
         </div>
         <div className="character-management-list">
           {project.characters.map((character) => (
@@ -985,17 +1053,24 @@ function CastAndSharing({
                 onChange={(event) => patchCharacter(character.id, { color: event.target.value })}
                 aria-label={`${character.name}の色`}
               />
-              <input value={character.name} onChange={(event) => patchCharacter(character.id, { name: event.target.value })} />
+              <input
+                value={character.name}
+                onChange={(event) => patchCharacter(character.id, { name: event.target.value })}
+                readOnly={!canEditScript}
+                aria-label={`${character.name}の名前`}
+              />
               <span>{project.lines.filter((line) => line.kind !== "direction" && line.characterId === character.id).length}セリフ</span>
-              <button
-                type="button"
-                className="icon-button danger-icon"
-                title="登場人物を削除"
-                onClick={() => removeCharacter(character.id)}
-                disabled={project.lines.some((line) => line.characterId === character.id)}
-              >
-                <Trash2 size={16} />
-              </button>
+              {canEditScript && (
+                <button
+                  type="button"
+                  className="icon-button danger-icon"
+                  title="登場人物を削除"
+                  onClick={() => removeCharacter(character.id)}
+                  disabled={project.lines.some((line) => line.characterId === character.id)}
+                >
+                  <Trash2 size={16} />
+                </button>
+              )}
             </div>
           ))}
           {!project.characters.length && <p className="muted">台本を貼り付けると、話者から登場人物を自動作成します。</p>}
@@ -1099,7 +1174,8 @@ export function RecordingStudio({
   selectedRecordingProjectId,
   setSelectedRecordingProjectId,
   settings,
-  setActive
+  setActive,
+  canEditScript = true
 }) {
   const episodeProjects = projects.filter((project) => !selectedEpisodeId || project.episodeId === selectedEpisodeId);
   const [internalSelectedProjectId, setInternalSelectedProjectId] = useState(() => episodeProjects[0]?.id || projects[0]?.id || "");
@@ -1112,6 +1188,10 @@ export function RecordingStudio({
     if (projects.some((item) => item.id === selectedProjectId)) return;
     selectProjectId(episodeProjects[0]?.id || projects[0]?.id || "");
   }, [projects, episodeProjects, selectedProjectId, selectedEpisodeId]);
+
+  useEffect(() => {
+    if (!canEditScript && tab === "script") setTab("board");
+  }, [canEditScript, tab]);
 
   const project = projects.find((item) => item.id === selectedProjectId) || episodeProjects[0] || projects[0];
   const endpointUrl = String(settings.recordingEndpointUrl || settings.responseEndpointUrl || "").trim();
@@ -1135,12 +1215,16 @@ export function RecordingStudio({
 
   const patchLine = async (lineId, patch) => {
     if (!project) return;
-    const timestampedPatch = { ...patch, updatedAt: new Date().toISOString() };
+    const permittedPatch = canEditScript
+      ? patch
+      : Object.fromEntries(Object.entries(patch).filter(([key]) => COLLABORATIVE_LINE_FIELDS.has(key)));
+    if (!Object.keys(permittedPatch).length) return;
+    const timestampedPatch = { ...permittedPatch, updatedAt: new Date().toISOString() };
     updateProject(project.id, (current) => ({
       ...current,
       lines: current.lines.map((line) => line.id === lineId ? { ...line, ...timestampedPatch } : line)
     }));
-    const shouldSync = project.sharedAt && Object.keys(patch).some((key) => COLLABORATIVE_LINE_FIELDS.has(key));
+    const shouldSync = project.sharedAt && Object.keys(permittedPatch).some((key) => COLLABORATIVE_LINE_FIELDS.has(key));
     if (!shouldSync || !endpointUrl || !token) return;
     setSyncState({ busy: true, message: "変更を共有しています…", error: false });
     try {
@@ -1159,6 +1243,7 @@ export function RecordingStudio({
   };
 
   const addProject = () => {
+    if (!canEditScript) return;
     const episode = episodes.find((item) => item.id === selectedEpisodeId) || episodes[0];
     const next = createRecordingProject({
       episodeId: episode?.id || "",
@@ -1170,13 +1255,14 @@ export function RecordingStudio({
   };
 
   const removeProject = () => {
+    if (!canEditScript) return;
     if (!project || !confirm(`「${project.title}」を削除しますか？`)) return;
     updateProjects((current) => current.filter((item) => item.id !== project.id));
     selectProjectId("");
   };
 
   const addLine = () => {
-    if (!project) return;
+    if (!project || !canEditScript) return;
     const firstCharacter = project.characters[0] || {
       id: newId("character"),
       name: "話者",
@@ -1212,22 +1298,38 @@ export function RecordingStudio({
   };
 
   const removeLine = (lineId) => {
-    if (!project || !confirm("このセリフと進捗を削除しますか？")) return;
-    updateProject(project.id, (current) => ({
-      ...current,
-      lines: current.lines.filter((line) => line.id !== lineId).map((line, index) => ({ ...line, order: index + 1 }))
-    }));
+    if (!project || !canEditScript) return;
+    const target = project.lines.find((line) => line.id === lineId);
+    if (!target || !confirm(`この${target.kind === "direction" ? "ト書き" : "セリフ"}を台本から削除しますか？\n\n削除前の台本は保存版へ自動保存されるため、あとから復元できます。`)) return;
+    updateProject(project.id, (current) => {
+      const archived = archiveScriptVersion(current, {
+        label: `${current.scriptVersion || "現在版"}（削除前）`,
+        reason: `${target.chapterTitle} / ${target.sceneTitle} / ${String(target.order).padStart(3, "0")} を削除する直前`
+      });
+      return {
+        ...archived,
+        lines: archived.lines.filter((line) => line.id !== lineId).map((line, index) => ({ ...line, order: index + 1 }))
+      };
+    });
   };
 
-  const importScriptRows = (rows, { replace = false } = {}) => {
-    if (!project) return;
+  const importScriptRows = (rows, { mode = "merge", sourceText = "" } = {}) => {
+    if (!project || !canEditScript) return;
     updateProject(project.id, (current) => {
-      const characters = [...current.characters];
+      const replacesCurrentLines = mode === "merge" || mode === "replace";
+      const working = replacesCurrentLines && current.lines.length
+        ? archiveScriptVersion(current, {
+          label: `${current.scriptVersion || "現在版"}（更新前）`,
+          reason: mode === "replace" ? "台本を完全に入れ替える直前" : "台本を差分更新する直前"
+        })
+        : current;
+      const characters = [...working.characters];
       const characterByName = new Map(characters.map((character) => [character.name, character]));
-      const baseLines = replace ? [] : current.lines;
-      const chapterByTitle = new Map(current.lines.map((line) => [line.chapterTitle || "第一章", line.chapterId]));
-      const sceneByScope = new Map(current.lines.map((line) => [`${line.chapterTitle || "第一章"}\u0000${line.sceneTitle}`, line.sceneId]));
-      const importPlan = replace ? getScriptImportPlan(current, rows) : { matches: [] };
+      const baseLines = mode === "append" ? working.lines : [];
+      const locationSource = mode === "replace" ? [] : working.lines;
+      const chapterByTitle = new Map(locationSource.map((line) => [line.chapterTitle || "第一章", line.chapterId]));
+      const sceneByScope = new Map(locationSource.map((line) => [`${line.chapterTitle || "第一章"}\u0000${line.sceneTitle}`, line.sceneId]));
+      const importPlan = mode === "merge" ? getScriptImportPlan(current, rows) : { matches: [] };
       const nextLines = rows.map((row, index) => {
         const isDirection = row.sourceKind === "direction" || row.speaker === "ト書き";
         const matchedLine = importPlan.matches[index];
@@ -1276,12 +1378,30 @@ export function RecordingStudio({
           updatedAt: matchedLine?.updatedAt || ""
         };
       });
-      return { ...current, characters, lines: [...baseLines, ...nextLines] };
+      const nextSourceText = mode === "append"
+        ? [working.sourceScriptText, sourceText].filter((value) => String(value || "").trim()).join("\n\n")
+        : sourceText;
+      return { ...working, characters, lines: [...baseLines, ...nextLines], sourceScriptText: nextSourceText };
     });
   };
 
+  const saveScriptSnapshot = () => {
+    if (!project || !canEditScript || !project.lines.length) return;
+    updateProject(project.id, (current) => archiveScriptVersion(current, {
+      label: current.scriptVersion || "現在版",
+      reason: "手動で保存"
+    }));
+  };
+
+  const restoreSnapshot = (snapshotId) => {
+    if (!project || !canEditScript) return;
+    const snapshot = project.scriptSnapshots?.find((item) => item.id === snapshotId);
+    if (!snapshot || !confirm(`「${snapshot.label}」を復元しますか？\n\n現在の台本も復元前の保存版として残ります。`)) return;
+    updateProject(project.id, (current) => restoreScriptSnapshot(current, snapshotId));
+  };
+
   const addCharacter = () => {
-    if (!project) return;
+    if (!project || !canEditScript) return;
     updateProject(project.id, (current) => ({
       ...current,
       characters: [
@@ -1292,13 +1412,16 @@ export function RecordingStudio({
   };
 
   const patchCharacter = (characterId, patch) => {
+    const permittedPatch = canEditScript ? patch : Object.fromEntries(Object.entries(patch).filter(([key]) => key !== "name" && key !== "id"));
+    if (!Object.keys(permittedPatch).length) return;
     updateProject(project.id, (current) => ({
       ...current,
-      characters: current.characters.map((character) => character.id === characterId ? { ...character, ...patch } : character)
+      characters: current.characters.map((character) => character.id === characterId ? { ...character, ...permittedPatch } : character)
     }));
   };
 
   const removeCharacter = (characterId) => {
+    if (!canEditScript) return;
     if (project.lines.some((line) => line.characterId === characterId)) return;
     updateProject(project.id, (current) => ({
       ...current,
@@ -1346,11 +1469,12 @@ export function RecordingStudio({
     if (!project || !endpointUrl || !token) return;
     setSyncState({ busy: true, message: "共有データを更新しています…", error: false });
     try {
+      const sharedProject = getShareableRecordingProject(project);
       const result = await postToGasEndpoint(endpointUrl, {
         action: "publishRecordingProject",
         token,
         driveFolderUrl,
-        project
+        project: sharedProject
       });
       const sharedAt = result.now || new Date().toISOString();
       updateProject(project.id, { ...project, sharedAt });
@@ -1389,9 +1513,9 @@ export function RecordingStudio({
         <SectionTitle title="台本収録ボード" subtitle="台本、担当セリフ、提出録音、確認状況を声優さんと共有します。" />
         <div className="recording-empty-state large">
           <Mic2 size={34} />
-          <b>最初の収録プロジェクトを作成</b>
-          <span>全文台本を登録し、登場人物と声優さんを結びつけます。</span>
-          <button type="button" className="primary" onClick={addProject}><Plus size={16} />収録プロジェクトを作る</button>
+          <b>{canEditScript ? "最初の収録プロジェクトを作成" : "収録プロジェクトはまだありません"}</b>
+          <span>{canEditScript ? "全文台本を登録し、登場人物と声優さんを結びつけます。" : "制作オーナーが台本を登録すると、ここへ進行状況が表示されます。"}</span>
+          {canEditScript && <button type="button" className="primary" onClick={addProject}><Plus size={16} />収録プロジェクトを作る</button>}
         </div>
       </div>
     );
@@ -1402,11 +1526,11 @@ export function RecordingStudio({
       <SectionTitle
         title="台本収録ボード"
         subtitle="同じ台本と収録状況を、管理側と声優さん側で共有します。"
-        action={(
+        action={canEditScript ? (
           <button type="button" className="primary" onClick={addProject}>
             <Plus size={16} />プロジェクト
           </button>
-        )}
+        ) : null}
       />
       <div className="recording-project-bar">
         <div>
@@ -1425,9 +1549,11 @@ export function RecordingStudio({
               <RefreshCw size={16} />最新状況
             </button>
           )}
-          <button type="button" className="icon-button danger-icon" title="プロジェクトを削除" onClick={removeProject}>
-            <Trash2 size={17} />
-          </button>
+          {canEditScript && (
+            <button type="button" className="icon-button danger-icon" title="プロジェクトを削除" onClick={removeProject}>
+              <Trash2 size={17} />
+            </button>
+          )}
         </div>
       </div>
       {project.description && <p className="recording-project-description">{project.description}</p>}
@@ -1436,13 +1562,24 @@ export function RecordingStudio({
       )}
       <div className="recording-tabs" role="tablist">
         <button type="button" className={tab === "board" ? "active" : ""} onClick={() => setTab("board")}><Eye size={16} />進行ボード</button>
-        <button type="button" className={tab === "script" ? "active" : ""} onClick={() => setTab("script")}><FilePlus2 size={16} />台本編集</button>
+        <button
+          type="button"
+          className={tab === "script" ? "active" : ""}
+          onClick={() => setTab("script")}
+          disabled={!canEditScript}
+          title={canEditScript ? "台本を編集" : "制作オーナーのみ編集できます"}
+        >
+          {canEditScript ? <FilePlus2 size={16} /> : <LockKeyhole size={16} />}台本編集
+        </button>
         <button type="button" className={tab === "cast" ? "active" : ""} onClick={() => setTab("cast")}><Users size={16} />配役・共有</button>
       </div>
-      {tab === "board" && (
-        <RecordingBoardView project={project} patchLine={patchLine} removeLine={removeLine} />
+      {!canEditScript && (
+        <p className="script-permission-note"><LockKeyhole size={16} />制作管理者は録音・確認・配役・素材・予定を管理できます。台本本文の変更、削除、入れ替えは制作オーナーだけが行えます。</p>
       )}
-      {tab === "script" && (
+      {tab === "board" && (
+        <RecordingBoardView project={project} patchLine={patchLine} removeLine={removeLine} canEditScript={canEditScript} />
+      )}
+      {tab === "script" && canEditScript && (
         <ScriptEditor
           project={project}
           patchProject={patchProject}
@@ -1450,11 +1587,14 @@ export function RecordingStudio({
           patchLine={patchLine}
           removeLine={removeLine}
           importScriptRows={importScriptRows}
+          saveScriptSnapshot={saveScriptSnapshot}
+          restoreSnapshot={restoreSnapshot}
         />
       )}
       {tab === "cast" && (
         <CastAndSharing
           project={project}
+          canEditScript={canEditScript}
           settings={settings}
           patchProject={patchProject}
           addCharacter={addCharacter}

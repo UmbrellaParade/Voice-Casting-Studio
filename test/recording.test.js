@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  archiveScriptVersion,
   getRecordingProgress,
+  getShareableRecordingProject,
   getScriptImportPlan,
   normalizeRecordingProject,
-  parseGoogleDocsScript
+  parseGoogleDocsScript,
+  restoreScriptSnapshot
 } from "../src/lib/recording.js";
 
 test("parses a Google Docs voice drama script without losing ruby or stage directions", () => {
@@ -169,4 +172,75 @@ test("keeps the WordPress user id attached to private questions", () => {
   });
 
   assert.equal(project.questions[0].wpUserId, 42);
+});
+
+test("archives the imported source and recording progress before a destructive edit", () => {
+  const project = normalizeRecordingProject({
+    scriptVersion: "第二稿",
+    sourceScriptText: "第一章\nヴェル「行こう。」",
+    characters: [{ id: "character_vel", name: "ヴェル" }],
+    lines: [{
+      id: "line_to_delete",
+      characterId: "character_vel",
+      text: "行こう。",
+      actorStatus: "収録済み",
+      reviewStatus: "OK",
+      recordingUrl: "https://drive.google.com/file/d/example/view"
+    }]
+  });
+
+  const archived = archiveScriptVersion(project, { reason: "削除する直前" });
+  const snapshot = archived.scriptSnapshots[0];
+
+  assert.equal(snapshot.scriptVersion, "第二稿");
+  assert.equal(snapshot.sourceScriptText, "第一章\nヴェル「行こう。」");
+  assert.equal(snapshot.lines[0].actorStatus, "収録済み");
+  assert.equal(snapshot.lines[0].reviewStatus, "OK");
+  assert.equal(snapshot.lines[0].recordingUrl, "https://drive.google.com/file/d/example/view");
+});
+
+test("restores a deleted line and keeps the pre-restore state as another version", () => {
+  const original = normalizeRecordingProject({
+    scriptVersion: "初稿",
+    sourceScriptText: "ヴェル「戻して。」",
+    characters: [{ id: "character_vel", name: "ヴェル" }],
+    lines: [{ id: "line_original", characterId: "character_vel", text: "戻して。", actorStatus: "収録済み", reviewStatus: "OK" }]
+  });
+  const archived = archiveScriptVersion(original, { reason: "削除する直前" });
+  const snapshotId = archived.scriptSnapshots[0].id;
+  const afterDelete = normalizeRecordingProject({
+    ...archived,
+    lines: [],
+    sourceScriptText: "",
+    characters: archived.characters.map((character) => ({ ...character, profile: "復元時点の最新設定" }))
+  });
+  const restored = restoreScriptSnapshot(afterDelete, snapshotId);
+
+  assert.equal(restored.lines.length, 1);
+  assert.equal(restored.lines[0].id, "line_original");
+  assert.equal(restored.lines[0].actorStatus, "収録済み");
+  assert.equal(restored.lines[0].reviewStatus, "OK");
+  assert.equal(restored.sourceScriptText, "ヴェル「戻して。」");
+  assert.equal(restored.characters[0].profile, "復元時点の最新設定");
+  assert.equal(restored.scriptSnapshots[0].reason.includes("復元する直前"), true);
+});
+
+test("adds empty script history fields when older projects are normalized", () => {
+  const project = normalizeRecordingProject({ title: "旧データ" });
+
+  assert.equal(project.sourceScriptText, "");
+  assert.deepEqual(project.scriptSnapshots, []);
+});
+
+test("omits private script history from actor share payloads", () => {
+  const project = normalizeRecordingProject({
+    sourceScriptText: "非公開の取り込み原文",
+    scriptSnapshots: [{ id: "private_version", lines: [{ id: "old_line", recordingUrl: "https://drive.google.com/file/d/private/view" }] }],
+    lines: [{ id: "current_line", text: "現在の台本" }]
+  });
+  const shared = getShareableRecordingProject(project);
+
+  assert.equal("sourceScriptText" in shared, false);
+  assert.equal("scriptSnapshots" in shared, false);
+  assert.equal(shared.lines[0].text, "現在の台本");
 });

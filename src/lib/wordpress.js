@@ -3,14 +3,20 @@ export const getWordPressRuntime = () => {
   if (runtime?.mode === "wordpress" && runtime.restUrl) return runtime;
   if (import.meta.env.DEV) {
     const previewRole = new URLSearchParams(globalThis.location?.search || "").get("wp-preview");
-    if (["manager", "actor"].includes(previewRole)) {
+    if (["manager", "director", "actor"].includes(previewRole)) {
+      const canManage = previewRole !== "actor";
+      const canEditScript = previewRole === "manager";
       return {
         mode: "wordpress",
         preview: true,
         restUrl: "preview/",
         nonce: "preview",
-        canManage: previewRole === "manager",
-        currentUser: { id: 0, name: previewRole === "manager" ? "制作管理者" : "ヴェル役 声優さん" },
+        canManage,
+        canEditScript,
+        currentUser: {
+          id: 0,
+          name: previewRole === "manager" ? "Umbrella Parade 制作担当" : previewRole === "director" ? "制作進行担当" : "ヴェル役 声優さん"
+        },
         logoutUrl: ""
       };
     }
@@ -29,6 +35,7 @@ const wordpressRequest = async (path, options = {}) => {
         version: 1,
         currentUser: runtime.currentUser,
         canManage: runtime.canManage,
+        canEditScript: runtime.canEditScript,
         users: runtime.canManage ? [{ id: 11, name: "ヴェル役 声優さん" }, { id: 12, name: "アマモリ役 声優さん" }] : []
       };
     }

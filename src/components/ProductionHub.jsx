@@ -273,10 +273,13 @@ function CharacterImage({ character, patchCharacter }) {
   );
 }
 
-function CharactersView({ project, updateProject, siteUsers = [] }) {
+function CharactersView({ project, updateProject, siteUsers = [], canEditScript = true }) {
   const patchCharacter = (characterId, patch) => updateProject((current) => ({
     ...current,
-    characters: current.characters.map((character) => character.id === characterId ? { ...character, ...patch } : character)
+    characters: current.characters.map((character) => character.id === characterId ? {
+      ...character,
+      ...Object.fromEntries(Object.entries(patch).filter(([key]) => canEditScript || (key !== "id" && key !== "name")))
+    } : character)
   }));
 
   const assignActor = (characterId, castMemberId) => updateProject((current) => ({
@@ -289,21 +292,25 @@ function CharactersView({ project, updateProject, siteUsers = [] }) {
     }))
   }));
 
-  const addCharacter = () => updateProject((current) => ({
-    ...current,
-    characters: [...current.characters, {
-      id: newId("character"),
-      name: `登場人物${current.characters.length + 1}`,
-      color: "#168b9a",
-      imageUrl: "",
-      profile: "",
-      background: "",
-      recordingFolderUrl: "",
-      openChatUrl: ""
-    }]
-  }));
+  const addCharacter = () => {
+    if (!canEditScript) return;
+    updateProject((current) => ({
+      ...current,
+      characters: [...current.characters, {
+        id: newId("character"),
+        name: `登場人物${current.characters.length + 1}`,
+        color: "#168b9a",
+        imageUrl: "",
+        profile: "",
+        background: "",
+        recordingFolderUrl: "",
+        openChatUrl: ""
+      }]
+    }));
+  };
 
   const removeCharacter = (characterId) => {
+    if (!canEditScript) return;
     if (project.lines.some((line) => line.characterId === characterId)) return;
     if (!confirm("この登場人物を削除しますか？")) return;
     updateProject((current) => ({
@@ -327,7 +334,7 @@ function CharactersView({ project, updateProject, siteUsers = [] }) {
     <div className="production-page-stack">
       <div className="production-section-toolbar">
         <div><Users size={19} /><span>{project.characters.length}人の登場人物</span></div>
-        <button type="button" className="primary" onClick={addCharacter}><Plus size={16} />登場人物</button>
+        {canEditScript && <button type="button" className="primary" onClick={addCharacter}><Plus size={16} />登場人物</button>}
       </div>
       <div className="character-editor-list">
         {project.characters.map((character) => {
@@ -339,7 +346,7 @@ function CharactersView({ project, updateProject, siteUsers = [] }) {
               <div className="character-editor-fields">
                 <header>
                   <div className="character-name-fields">
-                    <label><span>名前</span><input value={character.name} onChange={(event) => patchCharacter(character.id, { name: event.target.value })} /></label>
+                    <label><span>名前</span><input value={character.name} readOnly={!canEditScript} onChange={(event) => patchCharacter(character.id, { name: event.target.value })} /></label>
                     <label className="character-color-field"><span>セリフ色</span><input type="color" value={character.color} onChange={(event) => patchCharacter(character.id, { color: event.target.value })} /></label>
                   </div>
                   <div className="character-line-count"><strong>{lineCount}</strong><span>セリフ</span></div>
@@ -357,7 +364,7 @@ function CharactersView({ project, updateProject, siteUsers = [] }) {
                     <a className={!isWebUrl(character.recordingFolderUrl) ? "disabled" : ""} href={isWebUrl(character.recordingFolderUrl) ? character.recordingFolderUrl : undefined} target="_blank" rel="noreferrer"><FolderOpen size={16} />収録フォルダー</a>
                     <a className={!isWebUrl(character.openChatUrl) ? "disabled" : ""} href={isWebUrl(character.openChatUrl) ? character.openChatUrl : undefined} target="_blank" rel="noreferrer"><MessageSquareText size={16} />オープンチャット</a>
                   </div>
-                  <button type="button" className="icon-button danger-icon" title={lineCount ? "セリフがあるため削除できません" : "登場人物を削除"} disabled={Boolean(lineCount)} onClick={() => removeCharacter(character.id)}><Trash2 size={16} /></button>
+                  {canEditScript && <button type="button" className="icon-button danger-icon" title={lineCount ? "セリフがあるため削除できません" : "登場人物を削除"} disabled={Boolean(lineCount)} onClick={() => removeCharacter(character.id)}><Trash2 size={16} /></button>}
                 </footer>
               </div>
             </article>
@@ -629,6 +636,7 @@ export function ProductionWorkspace({
   setSelectedProjectId,
   updateProject,
   siteUsers = [],
+  canEditScript = true,
   setActive
 }) {
   const project = useMemo(
@@ -644,7 +652,7 @@ export function ProductionWorkspace({
       <SectionTitle title={title} subtitle={subtitle} />
       <ProjectBar projects={projects} project={project} selectedProjectId={project.id} setSelectedProjectId={setSelectedProjectId} />
       {view === "home" && <ProductionHome project={project} setActive={setActive} />}
-      {view === "characters" && <CharactersView project={project} updateProject={updateProject} siteUsers={siteUsers} />}
+      {view === "characters" && <CharactersView project={project} updateProject={updateProject} siteUsers={siteUsers} canEditScript={canEditScript} />}
       {view === "materials" && <MaterialsView project={project} updateProject={updateProject} />}
       {view === "questions" && <QuestionsView project={project} updateProject={updateProject} />}
       {view === "schedule" && <ScheduleView project={project} updateProject={updateProject} />}
