@@ -265,13 +265,17 @@ const moveArrayItem = (items = [], fromIndex, toIndex) => {
 
 const TRACK_FIELD_TYPE_LABELS = Object.fromEntries(TRACK_FIELD_TYPE_OPTIONS);
 
-const MAIN_NAV_ITEMS = [
-  ["recording", "収録ボード", Mic2],
+const SHOW_AUDITION_WORKFLOW = false;
+const AUDITION_NAV_ITEMS = [
   ["dashboard", "概要", Radio],
   ["episodes", "募集企画", CalendarDays],
   ["forms", "Googleフォーム", Send],
   ["imports", "回答取り込み", Upload],
-  ["responses", "応募一覧", ClipboardCopy],
+  ["responses", "応募一覧", ClipboardCopy]
+];
+const MAIN_NAV_ITEMS = [
+  ["recording", "収録ボード", Mic2],
+  ...(SHOW_AUDITION_WORKFLOW ? AUDITION_NAV_ITEMS : []),
   ["settings", "設定", Settings]
 ];
 
@@ -439,6 +443,10 @@ function App() {
     if (sharedPayload || restorePayload) return;
     saveUiState({ active, selectedEpisodeId, collapsibles: collapsibleState });
   }, [active, selectedEpisodeId, collapsibleState, sharedPayload, restorePayload]);
+
+  useEffect(() => {
+    if (!MAIN_NAV_KEYS.has(active)) setActive("recording");
+  }, [active]);
 
   useEffect(() => {
     if (!data.episodes.length) return;
@@ -1688,28 +1696,30 @@ ${socialRows || "-"}
         </div>
       )}
 
-      <div className="workspace">
-        <aside className="side-panel">
-          <div className="side-title">募集企画</div>
-          <select value={selectedEpisode?.id ?? ""} onChange={(event) => setSelectedEpisodeId(event.target.value)}>
-            {data.episodes.map((episode) => (
-              <option key={episode.id} value={episode.id}>
-                {episode.date} {episode.title}
-              </option>
-            ))}
-          </select>
-          <button className="primary full" onClick={addEpisode}>
-            <Plus size={16} /> 募集企画を追加
-          </button>
-          {selectedEpisode && (
-            <div className="episode-mini">
-              <b>{selectedEpisode.title}</b>
-              <span>{selectedEpisode.date} / {selectedEpisode.slot}</span>
-              <span>{selectedEpisode.status}</span>
-            </div>
-          )}
-          <SideNavigator active={active} setActive={setActive} forms={data.forms} />
-        </aside>
+      <div className={`workspace${SHOW_AUDITION_WORKFLOW ? "" : " recording-focused-workspace"}`}>
+        {SHOW_AUDITION_WORKFLOW && (
+          <aside className="side-panel">
+            <div className="side-title">募集企画</div>
+            <select value={selectedEpisode?.id ?? ""} onChange={(event) => setSelectedEpisodeId(event.target.value)}>
+              {data.episodes.map((episode) => (
+                <option key={episode.id} value={episode.id}>
+                  {episode.date} {episode.title}
+                </option>
+              ))}
+            </select>
+            <button className="primary full" onClick={addEpisode}>
+              <Plus size={16} /> 募集企画を追加
+            </button>
+            {selectedEpisode && (
+              <div className="episode-mini">
+                <b>{selectedEpisode.title}</b>
+                <span>{selectedEpisode.date} / {selectedEpisode.slot}</span>
+                <span>{selectedEpisode.status}</span>
+              </div>
+            )}
+            <SideNavigator active={active} setActive={setActive} forms={data.forms} />
+          </aside>
+        )}
 
         <section className="content-panel">
           {active === "recording" && (
@@ -3728,7 +3738,7 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
         <div className="sync-status-grid">
           <div>
             <b>端末内データ</b>
-            <span>募集企画、応募一覧、台本編集内容。JSON書き出しでも引き継げます。</span>
+            <span>台本、登場人物、配役、素材設定。JSON書き出しでも引き継げます。</span>
           </div>
           <div>
             <b>共同収録データ</b>
@@ -3759,38 +3769,51 @@ function SettingsPanel({ settings, updateSettings, exportJson, importJson, reset
             placeholder="https://drive.google.com/drive/folders/..."
             wide
           />
-          <p className="hint-text wide">
-            空欄の場合は下の回答保存Webhook URL・回答保存先Driveを共用します。同期トークンは回答同期トークンと共通です。
-          </p>
+          <Field
+            label="共同収録 同期トークン"
+            value={settings.responseSyncToken || ""}
+            onChange={(value) => updateSettings({ responseSyncToken: value })}
+            placeholder="Apps ScriptのSECRET_TOKENと同じ文字列"
+            wide
+          />
         </div>
       </article>
-      <article className="panel">
-        <div className="record-head">
-          <div>
-            <h2>詳細設定</h2>
-            <p className="muted">Googleフォーム管理、回答取り込み、応募一覧は上部ナビからも開けます。</p>
+      {SHOW_AUDITION_WORKFLOW && (
+        <article className="panel">
+          <div className="record-head">
+            <div>
+              <h2>応募管理</h2>
+              <p className="muted">Googleフォーム、回答取り込み、応募一覧を開きます。</p>
+            </div>
           </div>
-        </div>
-        <div className="advanced-actions">
-          <button className="secondary" onClick={() => setActive("recording")}><Mic2 size={16} />台本収録ボード</button>
-          <button className="secondary" onClick={() => setActive("forms")}><FileText size={16} />Googleフォーム管理</button>
-          <button className="secondary" onClick={() => setActive("imports")}><Upload size={16} />回答取り込み</button>
-          <button className="secondary" onClick={() => setActive("responses")}><ClipboardCopy size={16} />回答管理</button>
-        </div>
-      </article>
+          <div className="advanced-actions">
+            <button className="secondary" onClick={() => setActive("recording")}><Mic2 size={16} />台本収録ボード</button>
+            <button className="secondary" onClick={() => setActive("forms")}><FileText size={16} />Googleフォーム管理</button>
+            <button className="secondary" onClick={() => setActive("imports")}><Upload size={16} />回答取り込み</button>
+            <button className="secondary" onClick={() => setActive("responses")}><ClipboardCopy size={16} />回答管理</button>
+          </div>
+        </article>
+      )}
       <article className="panel">
         <div className="form-grid">
           <Field label="Obsidian格納庫パス" value={settings.obsidianPath} onChange={(value) => updateSettings({ obsidianPath: value })} />
           <p className="hint-text wide">ここはCodex用バックアップを置く場所です。オンラインフォームの回答保存先ではありません。</p>
           <Field label="選択したフォルダー名" value={settings.obsidianFolderName || ""} readOnly />
-          <Field label="回答保存Webhook URL" value={settings.responseEndpointUrl || ""} onChange={(value) => updateSettings({ responseEndpointUrl: value })} placeholder="Google Apps ScriptのWebアプリURL" wide />
-          <p className="hint-text wide">自前フォームを使う場合だけ必要です。Googleフォーム運用では、回答先スプレッドシートURLをGoogleフォーム管理に貼り、回答取り込みから読み込みます。</p>
-          <Field label="回答同期トークン" value={settings.responseSyncToken || ""} onChange={(value) => updateSettings({ responseSyncToken: value })} placeholder="Apps ScriptのSECRET_TOKENと同じ文字列" wide />
-          <Field label="回答保存先Google DriveフォルダーURL" value={settings.responseDriveFolderUrl || ""} onChange={(value) => updateSettings({ responseDriveFolderUrl: value })} placeholder="DriveフォルダーのURL" wide />
-          <p className="hint-text wide">自前フォーム/GAS受信口を使う場合の保存先です。Googleフォーム運用ではGoogleフォーム側の回答先Drive/スプレッドシートを正本として扱います。</p>
-          <TextArea label="音源保存先メモ" value={settings.audioSaveMemo || ""} onChange={(value) => updateSettings({ audioSaveMemo: value })} />
-          <Field label="べるぼ Xアカウント" value={settings.bellboXHandle || ""} onChange={(value) => updateSettings({ bellboXHandle: normalizeXHandle(value) })} />
-          <TextArea label="X連絡ブロック説明文" value={settings.xContactMessage || DEFAULT_X_CONTACT_MESSAGE} onChange={(value) => updateSettings({ xContactMessage: value })} />
+          {SHOW_AUDITION_WORKFLOW && (
+            <>
+              <Field label="回答保存Webhook URL" value={settings.responseEndpointUrl || ""} onChange={(value) => updateSettings({ responseEndpointUrl: value })} placeholder="Google Apps ScriptのWebアプリURL" wide />
+              <p className="hint-text wide">自前フォームを使う場合だけ必要です。Googleフォーム運用では、回答先スプレッドシートURLをGoogleフォーム管理に貼り、回答取り込みから読み込みます。</p>
+              <Field label="回答保存先Google DriveフォルダーURL" value={settings.responseDriveFolderUrl || ""} onChange={(value) => updateSettings({ responseDriveFolderUrl: value })} placeholder="DriveフォルダーのURL" wide />
+              <p className="hint-text wide">自前フォーム/GAS受信口を使う場合の保存先です。Googleフォーム運用ではGoogleフォーム側の回答先Drive/スプレッドシートを正本として扱います。</p>
+            </>
+          )}
+          {SHOW_AUDITION_WORKFLOW && (
+            <>
+              <TextArea label="音源保存先メモ" value={settings.audioSaveMemo || ""} onChange={(value) => updateSettings({ audioSaveMemo: value })} />
+              <Field label="べるぼ Xアカウント" value={settings.bellboXHandle || ""} onChange={(value) => updateSettings({ bellboXHandle: normalizeXHandle(value) })} />
+              <TextArea label="X連絡ブロック説明文" value={settings.xContactMessage || DEFAULT_X_CONTACT_MESSAGE} onChange={(value) => updateSettings({ xContactMessage: value })} />
+            </>
+          )}
         </div>
         <div className="button-row">
           <button className="secondary" onClick={() => updateSettings({ obsidianPath: DEFAULT_OBSIDIAN_PATH, obsidianFolderName: "Voice-Casting-Studio" })}>
