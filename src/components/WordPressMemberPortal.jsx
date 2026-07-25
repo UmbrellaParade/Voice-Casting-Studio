@@ -9,6 +9,7 @@ import {
   FileText,
   FolderOpen,
   Home,
+  Link,
   LogOut,
   Megaphone,
   MessageSquareText,
@@ -17,7 +18,7 @@ import {
   Save,
   Users
 } from "lucide-react";
-import { getGoogleDriveFileId, makeDirectAudioDownloadUrl, makeImagePreviewUrl } from "../lib/core.js";
+import { getGoogleDriveFileId, isWebUrl, makeDirectAudioDownloadUrl, makeImagePreviewUrl } from "../lib/core.js";
 import { getCharacterName, getRecordingProgress, parseRubyText } from "../lib/recording.js";
 import { Header, SectionTitle } from "./ui.jsx";
 import { getScriptSceneAnchorId, ScriptSceneToc } from "./ScriptSceneToc.jsx";
@@ -26,6 +27,7 @@ const MEMBER_NAV = [
   ["home", "ホーム", Home],
   ["script", "台本", FileText],
   ["characters", "キャラクター", Users],
+  ["links", "共有リンク", Link],
   ["materials", "素材", Music2],
   ["questions", "質問", MessageSquareText],
   ["schedule", "予定", CalendarDays]
@@ -215,7 +217,58 @@ function MemberScript({ project, assignedCharacterIds, onUpdateLine }) {
 }
 
 function MemberCharacters({ project, assignedCharacterIds }) {
-  return <div className="member-character-grid">{project.characters.map((character) => <article key={character.id} style={{ "--character-color": character.color }}><div className="member-character-image">{character.imageUrl ? <img src={makeImagePreviewUrl(character.imageUrl) || character.imageUrl} alt={character.name} /> : <Users size={32} />}</div><div><header><h3>{character.name}</h3>{assignedCharacterIds.has(character.id) && <span>担当</span>}</header>{character.profile && <p>{character.profile}</p>}{character.background && <details><summary>バックグラウンド</summary><p>{character.background}</p></details>}{assignedCharacterIds.has(character.id) && <footer>{character.recordingFolderUrl && <a href={character.recordingFolderUrl} target="_blank" rel="noreferrer"><FolderOpen size={16} />収録フォルダー</a>}{character.openChatUrl && <a href={character.openChatUrl} target="_blank" rel="noreferrer"><MessageSquareText size={16} />オープンチャット</a>}</footer>}</div></article>)}</div>;
+  return (
+    <div className="member-character-grid">
+      {project.characters.map((character) => (
+        <article key={character.id} style={{ "--character-color": character.color }}>
+          <div className="member-character-image">{character.imageUrl ? <img src={makeImagePreviewUrl(character.imageUrl) || character.imageUrl} alt={character.name} /> : <Users size={32} />}</div>
+          <div>
+            <header><h3>{character.name}</h3>{assignedCharacterIds.has(character.id) && <span>担当</span>}</header>
+            {character.profile && <p>{character.profile}</p>}
+            {character.background && <details><summary>バックグラウンド</summary><p>{character.background}</p></details>}
+            {assignedCharacterIds.has(character.id) && character.recordingFolderUrl && (
+              <footer><a href={character.recordingFolderUrl} target="_blank" rel="noreferrer"><FolderOpen size={16} />収録フォルダー</a></footer>
+            )}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function MemberSharedLink({ icon: Icon, label, detail, url }) {
+  const canOpen = isWebUrl(url);
+  const body = <><Icon size={19} /><span><b>{label}</b><small>{detail}</small></span></>;
+  return canOpen ? (
+    <a className="member-shared-link" href={url} target="_blank" rel="noreferrer">
+      {body}<ExternalLink size={16} />
+    </a>
+  ) : (
+    <div className="member-shared-link unavailable">
+      {body}<em>未登録</em>
+    </div>
+  );
+}
+
+function MemberLinks({ project, assignedCharacterIds }) {
+  const characters = project.characters.filter((character) => assignedCharacterIds.has(character.id));
+  return (
+    <div className="production-link-list member-link-list">
+      {characters.map((character) => (
+        <article className="production-link-row" key={character.id} style={{ "--character-color": character.color }}>
+          <header className="production-link-character">
+            <i />
+            <div><h3>{character.name}</h3><span>担当キャラクター</span></div>
+          </header>
+          <div className="member-shared-link-list">
+            <MemberSharedLink icon={FolderOpen} label="収録フォルダー" detail="Google Drive" url={character.recordingFolderUrl} />
+            <MemberSharedLink icon={MessageSquareText} label="LINEオープンチャット" detail="連絡・相談" url={character.openChatUrl} />
+          </div>
+        </article>
+      ))}
+      {!characters.length && <div className="production-empty-state"><Link size={30} /><b>担当キャラクターの共有先はまだありません</b></div>}
+    </div>
+  );
 }
 
 function MemberMaterials({ project }) {
@@ -266,6 +319,7 @@ export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voic
         {active === "home" && <MemberHome project={project} assignedCharacterIds={assignedCharacterIds} setActive={setActive} />}
         {active === "script" && <MemberScript project={project} assignedCharacterIds={assignedCharacterIds} onUpdateLine={onUpdateLine} />}
         {active === "characters" && <MemberCharacters project={project} assignedCharacterIds={assignedCharacterIds} />}
+        {active === "links" && <MemberLinks project={project} assignedCharacterIds={assignedCharacterIds} />}
         {active === "materials" && <MemberMaterials project={project} />}
         {active === "questions" && <MemberQuestions project={project} assignedCharacterIds={assignedCharacterIds} currentUser={runtime.currentUser || {}} onCreateQuestion={onCreateQuestion} />}
         {active === "schedule" && <MemberSchedule project={project} />}

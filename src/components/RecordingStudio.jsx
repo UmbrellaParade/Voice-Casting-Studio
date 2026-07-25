@@ -405,16 +405,17 @@ function CharacterFilters({
       </div>
       <div className="recording-filter-options">
         <div className="segmented-control" aria-label="セリフ抽出方法">
-          <button type="button" className={mode === "assignment" ? "active" : ""} onClick={() => setMode("assignment")}>
-            担当セリフ
+          <button type="button" className={mode === "assignment" ? "active" : ""} title="選択した人物のセリフを表示" onClick={() => setMode("assignment")}>
+            選んだ人物のセリフ
           </button>
           <button
             type="button"
             className={mode === "dialogue" ? "active" : ""}
             onClick={() => setMode("dialogue")}
             disabled={selectedCharacterIds.length < 2}
+            title="選択した全員が登場するシーンだけを表示"
           >
-            掛け合い
+            共演シーンだけ
           </button>
         </div>
         <label className="recording-context-toggle">
@@ -434,7 +435,7 @@ function CharacterFilters({
       </div>
       {mode === "dialogue" && selectedCharacterIds.length >= 2 && (
         <p className="recording-filter-note">
-          選択した人物がそろって登場するシーンから、二人の掛け合いを抽出しています。
+          選択した人物全員が登場するシーンに絞り込んでいます。
         </p>
       )}
     </div>

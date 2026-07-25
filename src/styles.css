@@ -369,6 +369,7 @@ h1 {
 .character-editor input,
 .character-editor select,
 .character-editor textarea,
+.production-link-control input,
 .material-editor input,
 .material-editor select,
 .material-editor textarea,
@@ -907,6 +908,122 @@ h1 {
   opacity: .42;
 }
 
+.production-link-list {
+  display: grid;
+  gap: 10px;
+}
+
+.production-link-row {
+  display: grid;
+  grid-template-columns: minmax(150px, .38fr) minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid #d8cec1;
+  border-left: 5px solid var(--character-color);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.production-link-character {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border-right: 1px solid #e6ddd2;
+  background: color-mix(in srgb, var(--character-color) 6%, #fff);
+}
+
+.production-link-character > i {
+  width: 11px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  background: var(--character-color);
+}
+
+.production-link-character > div {
+  min-width: 0;
+}
+
+.production-link-character h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #302936;
+  font-size: 15px;
+}
+
+.production-link-character span {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: #756c7b;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.production-link-fields {
+  display: grid;
+  min-width: 0;
+  padding: 4px 14px;
+}
+
+.production-link-field {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid #eee6dc;
+}
+
+.production-link-field:last-child {
+  border-bottom: 0;
+}
+
+.production-link-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #216e75;
+}
+
+.production-link-label > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.production-link-label b {
+  overflow-wrap: anywhere;
+  color: #413947;
+  font-size: 12px;
+}
+
+.production-link-label span {
+  color: #7a707e;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.production-link-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  gap: 7px;
+  min-width: 0;
+}
+
+.production-link-open {
+  color: #167680;
+  text-decoration: none;
+}
+
+.production-link-open.disabled {
+  pointer-events: none;
+  opacity: .35;
+}
+
 .cast-roster-panel {
   display: grid;
   gap: 14px;
@@ -1323,6 +1440,10 @@ h1 {
     grid-template-columns: 140px minmax(0, 1fr);
   }
 
+  .production-link-row {
+    grid-template-columns: minmax(135px, .32fr) minmax(0, 1fr);
+  }
+
   .cast-roster-list > div {
     grid-template-columns: 1fr 1fr 36px;
   }
@@ -1390,6 +1511,7 @@ h1 {
 
   .production-audio-player,
   .character-editor,
+  .production-link-row,
   .character-field-grid,
   .material-library-grid,
   .material-fields,
@@ -1400,6 +1522,16 @@ h1 {
 
   .character-editor {
     gap: 12px;
+  }
+
+  .production-link-character {
+    border-right: 0;
+    border-bottom: 1px solid #e6ddd2;
+  }
+
+  .production-link-field {
+    grid-template-columns: 1fr;
+    gap: 7px;
   }
 
   .character-image-editor {

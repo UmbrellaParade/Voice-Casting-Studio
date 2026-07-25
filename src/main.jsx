@@ -292,6 +292,7 @@ const MAIN_NAV_ITEMS = [
   ["home", "ホーム", LayoutDashboard],
   ["recording", "台本", FileText],
   ["characters", "キャラクター", Users],
+  ["links", "共有リンク", Link],
   ["materials", "素材", Music],
   ["questions", "質問", MessageSquareText],
   ["schedule", "予定", CalendarDays],
@@ -300,7 +301,7 @@ const MAIN_NAV_ITEMS = [
 ];
 
 const MAIN_NAV_KEYS = new Set(MAIN_NAV_ITEMS.map(([key]) => key));
-const PRODUCTION_HUB_KEYS = new Set(["home", "characters", "materials", "questions", "schedule"]);
+const PRODUCTION_HUB_KEYS = new Set(["home", "characters", "links", "materials", "questions", "schedule"]);
 const UI_STATE_KEY = `${STORAGE_KEY}:ui:v2`;
 const formAnchorId = (formId) => `form-section-${formId}`;
 

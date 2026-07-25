@@ -154,13 +154,19 @@ test("repairs high-confidence script labels that were previously stored as chara
   const project = normalizeRecordingProject({
     characters: [
       { id: "character_chapter", name: "第一章" },
+      { id: "character_episode", name: "第1話" },
+      { id: "character_episode_kanji", name: "第六話" },
+      { id: "character_music", name: "M" },
       { id: "character_se", name: "SE" },
       { id: "character_script", name: "脚本全文" },
       { id: "character_vel", name: "ヴェル" }
     ],
-    castMembers: [{ id: "cast_one", characterIds: ["character_chapter", "character_vel"] }],
+    castMembers: [{ id: "cast_one", characterIds: ["character_chapter", "character_episode", "character_music", "character_vel"] }],
     lines: [
       { id: "line_chapter", characterId: "character_chapter", text: "章見出し" },
+      { id: "line_episode", characterId: "character_episode", text: "話数見出し" },
+      { id: "line_episode_kanji", characterId: "character_episode_kanji", text: "話数見出し" },
+      { id: "line_music", characterId: "character_music", text: "音楽開始" },
       { id: "line_se", characterId: "character_se", text: "扉が開く" },
       { id: "line_script", characterId: "character_script", text: "作品タイトル" },
       { id: "line_vel", characterId: "character_vel", text: "入ってもいい？" }
@@ -168,7 +174,7 @@ test("repairs high-confidence script labels that were previously stored as chara
   });
 
   assert.deepEqual(project.characters.map((character) => character.name), ["ヴェル"]);
-  assert.deepEqual(project.lines.map((line) => line.kind), ["direction", "direction", "direction", "dialogue"]);
+  assert.deepEqual(project.lines.map((line) => line.kind), ["direction", "direction", "direction", "direction", "direction", "direction", "dialogue"]);
   assert.deepEqual(project.castMembers[0].characterIds, ["character_vel"]);
 });
 

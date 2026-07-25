@@ -10,6 +10,7 @@ import {
   FolderOpen,
   ImagePlus,
   LayoutDashboard,
+  Link,
   Megaphone,
   MessageSquareText,
   Music2,
@@ -357,12 +358,10 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
                   <label className="wide"><span>設定・人物像</span><textarea value={character.profile} onChange={(event) => patchCharacter(character.id, { profile: event.target.value })} /></label>
                   <label className="wide"><span>バックグラウンド</span><textarea value={character.background} onChange={(event) => patchCharacter(character.id, { background: event.target.value })} /></label>
                   <label><span>収録フォルダー</span><input value={character.recordingFolderUrl} placeholder="Google DriveフォルダーURL" onChange={(event) => patchCharacter(character.id, { recordingFolderUrl: event.target.value })} /></label>
-                  <label><span>LINEオープンチャット</span><input value={character.openChatUrl} placeholder="https://line.me/..." onChange={(event) => patchCharacter(character.id, { openChatUrl: event.target.value })} /></label>
                 </div>
                 <footer>
                   <div className="character-link-actions">
                     <a className={!isWebUrl(character.recordingFolderUrl) ? "disabled" : ""} href={isWebUrl(character.recordingFolderUrl) ? character.recordingFolderUrl : undefined} target="_blank" rel="noreferrer"><FolderOpen size={16} />収録フォルダー</a>
-                    <a className={!isWebUrl(character.openChatUrl) ? "disabled" : ""} href={isWebUrl(character.openChatUrl) ? character.openChatUrl : undefined} target="_blank" rel="noreferrer"><MessageSquareText size={16} />オープンチャット</a>
                   </div>
                   {canEditScript && <button type="button" className="icon-button danger-icon" title={lineCount ? "セリフがあるため削除できません" : "登場人物を削除"} disabled={Boolean(lineCount)} onClick={() => removeCharacter(character.id)}><Trash2 size={16} /></button>}
                 </footer>
@@ -392,6 +391,82 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
           {!project.castMembers.length && <p className="production-list-empty">担当声優はまだ登録されていません。</p>}
         </div>
       </section>
+    </div>
+  );
+}
+
+function CharacterLinkField({ icon: Icon, label, service, value = "", placeholder, onChange }) {
+  const canOpen = isWebUrl(value);
+  return (
+    <div className="production-link-field">
+      <div className="production-link-label">
+        <Icon size={18} />
+        <div><b>{label}</b><span>{service}</span></div>
+      </div>
+      <div className="production-link-control">
+        <input type="url" aria-label={label} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
+        <a
+          className={`icon-button production-link-open${canOpen ? "" : " disabled"}`}
+          href={canOpen ? value : undefined}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`${label}を開く`}
+          aria-disabled={!canOpen}
+          tabIndex={canOpen ? undefined : -1}
+          title={canOpen ? `${label}を開く` : `${label}のURLが未登録です`}
+        >
+          <ExternalLink size={16} />
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function LinksView({ project, updateProject }) {
+  const patchCharacterLink = (characterId, key, value) => updateProject((current) => ({
+    ...current,
+    characters: current.characters.map((character) => character.id === characterId
+      ? { ...character, [key]: value }
+      : character)
+  }));
+
+  return (
+    <div className="production-page-stack">
+      <div className="production-section-toolbar">
+        <div><Link size={19} /><span>{project.characters.length}人の連絡・共有先</span></div>
+      </div>
+      <div className="production-link-list">
+        {project.characters.map((character) => {
+          const assignedMember = project.castMembers.find((member) => member.characterIds.includes(character.id));
+          return (
+            <article className="production-link-row" key={character.id} style={{ "--character-color": character.color }}>
+              <header className="production-link-character">
+                <i />
+                <div><h3>{character.name}</h3><span>{assignedMember?.actorName || "担当声優未設定"}</span></div>
+              </header>
+              <div className="production-link-fields">
+                <CharacterLinkField
+                  icon={FolderOpen}
+                  label="収録フォルダー"
+                  service="Google Drive"
+                  value={character.recordingFolderUrl}
+                  placeholder="https://drive.google.com/..."
+                  onChange={(value) => patchCharacterLink(character.id, "recordingFolderUrl", value)}
+                />
+                <CharacterLinkField
+                  icon={MessageSquareText}
+                  label="LINEオープンチャット"
+                  service="連絡・相談"
+                  value={character.openChatUrl}
+                  placeholder="https://line.me/..."
+                  onChange={(value) => patchCharacterLink(character.id, "openChatUrl", value)}
+                />
+              </div>
+            </article>
+          );
+        })}
+        {!project.characters.length && <div className="production-empty-state"><Link size={30} /><b>共有先を設定するキャラクターがいません</b></div>}
+      </div>
     </div>
   );
 }
@@ -623,7 +698,8 @@ function ScheduleView({ project, updateProject }) {
 
 const PAGE_COPY = {
   home: ["ホーム", "収録、確認、質問、締切を作品単位でまとめて確認します。"],
-  characters: ["キャラクター", "人物設定、担当声優、収録フォルダーと連絡先を管理します。"],
+  characters: ["キャラクター", "人物設定、担当声優、セリフ色と収録フォルダーを管理します。"],
+  links: ["連絡・共有リンク", "キャラクターごとの収録フォルダーと連絡先をまとめて管理します。"],
   materials: ["素材", "音源とサムネイルを種類別に登録し、その場で確認します。"],
   questions: ["質問", "作品やセリフに紐づく質問と回答状況を共有します。"],
   schedule: ["予定", "収録締切、公開予定、編集状況と全体連絡を管理します。"]
@@ -653,6 +729,7 @@ export function ProductionWorkspace({
       <ProjectBar projects={projects} project={project} selectedProjectId={project.id} setSelectedProjectId={setSelectedProjectId} />
       {view === "home" && <ProductionHome project={project} setActive={setActive} />}
       {view === "characters" && <CharactersView project={project} updateProject={updateProject} siteUsers={siteUsers} canEditScript={canEditScript} />}
+      {view === "links" && <LinksView project={project} updateProject={updateProject} />}
       {view === "materials" && <MaterialsView project={project} updateProject={updateProject} />}
       {view === "questions" && <QuestionsView project={project} updateProject={updateProject} />}
       {view === "schedule" && <ScheduleView project={project} updateProject={updateProject} />}

@@ -926,8 +926,13 @@ const isStandaloneDocumentTitleLine = (line = "") => {
 
 const isScriptCueLine = (line = "") => {
   const text = stripHeadingDecorations(line).normalize("NFKC");
-  return /^(?:SE|SFX|BGM|ME)(?:\s*\d+)?(?:$|[\s　:：\-‐‑–—])/i.test(text) ||
+  return /^(?:SE|SFX|BGM|ME|M)(?:\s*\d+)?(?:$|[\s　:：\-‐‑–—])/i.test(text) ||
     /^(?:効果音|音楽|主題歌)(?:\s*\d+)?(?:$|[\s　:：\-‐‑–—])/i.test(text);
+};
+
+const isEpisodeHeading = (line = "") => {
+  const text = stripHeadingDecorations(line);
+  return new RegExp(`^第\\s*${CHAPTER_NUMBER_PATTERN}\\s*話(?:$|[\\s　:：\\-‐‑–—・「『（(【])`).test(text);
 };
 
 const isSceneHeading = (line = "") => {
@@ -1063,7 +1068,7 @@ const normalizeCharacterNameKey = (value = "") => normalizeScopeValue(cleanSpeak
 export const isScriptStructureLabel = (value = "") => {
   const text = cleanSpeakerLabel(value);
   if (!text) return false;
-  return text === "ト書き" || isChapterHeading(text) || isSceneHeading(text) || isScriptCueLine(text) || isDocumentMetadataLine(text);
+  return text === "ト書き" || isChapterHeading(text) || isEpisodeHeading(text) || isSceneHeading(text) || isScriptCueLine(text) || isDocumentMetadataLine(text);
 };
 
 const isPlausibleSpeaker = (value = "") => {
