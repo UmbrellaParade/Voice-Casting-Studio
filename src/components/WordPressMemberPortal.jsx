@@ -18,7 +18,7 @@ import {
   Save,
   Users
 } from "lucide-react";
-import { getGoogleDriveFileId, isWebUrl, makeDirectAudioDownloadUrl, makeImagePreviewUrl } from "../lib/core.js";
+import { getGoogleDriveFileId, isWebUrl, makeDirectAudioDownloadUrl, makeGoogleDrivePreviewUrl, makeImagePreviewUrl } from "../lib/core.js";
 import { getCharacterName, getRecordingProgress, parseRubyText } from "../lib/recording.js";
 import { Header, SectionTitle } from "./ui.jsx";
 import { getScriptSceneAnchorId, ScriptSceneToc } from "./ScriptSceneToc.jsx";
@@ -65,6 +65,15 @@ function RubyText({ text = "" }) {
 
 function AudioPlayer({ url, label = "録音" }) {
   if (!url) return <span className="member-audio-empty"><FileAudio size={15} />未提出</span>;
+  const drivePreviewUrl = makeGoogleDrivePreviewUrl(url);
+  if (drivePreviewUrl) {
+    return (
+      <div className="member-drive-audio-player">
+        <iframe title={`${label}を再生`} src={drivePreviewUrl} loading="lazy" allow="autoplay" />
+        <a href={url} target="_blank" rel="noreferrer" title={`${label}をGoogle Driveで開く`}><ExternalLink size={15} /></a>
+      </div>
+    );
+  }
   return (
     <div className="member-audio-player">
       <audio controls preload="none" src={getPlaybackUrl(url)} />

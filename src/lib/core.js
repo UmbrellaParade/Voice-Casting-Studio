@@ -3,6 +3,8 @@ import LZString from "lz-string";
 import { postToGasEndpoint, getFromGasEndpoint, loadAppConfig } from "./gas.js";
 import { normalizeRecordingProjects, sampleRecordingProjects } from "./recording.js";
 
+const VITE_ENV = import.meta.env || {};
+
 export const STORAGE_KEY = "voice-casting-studio:v2";
 export const STORAGE_COMPRESSED_PREFIX = "lz16:";
 export const THUMBNAIL_IMAGE_DB_NAME = "voice-casting-studio-thumbnails";
@@ -24,12 +26,12 @@ export const DEFAULT_THUMBNAIL_DRIVE_FOLDER_URL = "";
 export const DEFAULT_AUDIO_SAVE_MEMO = "Drive: 回答保存先フォルダー内の応募フォーム/募集企画別フォルダー";
 export const publicAsset = (path) => {
   const runtimeBase = globalThis.VoiceCastingStudio?.assetBaseUrl;
-  const base = runtimeBase || import.meta.env.BASE_URL;
+  const base = runtimeBase || VITE_ENV.BASE_URL || "/";
   return `${String(base).replace(/\/?$/, "/")}${path.replace(/^\/+/, "")}`;
 };
 export const GUEST_BADGE_ASSET_URL = publicAsset("thumbnail-overlays/guest-in-badge.png");
 
-if ("serviceWorker" in navigator && import.meta.env.PROD && globalThis.VoiceCastingStudio?.mode !== "wordpress") {
+if (typeof navigator !== "undefined" && "serviceWorker" in navigator && VITE_ENV.PROD && globalThis.VoiceCastingStudio?.mode !== "wordpress") {
   let refreshingForServiceWorkerUpdate = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
     if (refreshingForServiceWorkerUpdate) return;
@@ -39,7 +41,7 @@ if ("serviceWorker" in navigator && import.meta.env.PROD && globalThis.VoiceCast
 
   window.addEventListener("load", () => {
     navigator.serviceWorker
-      .register(publicAsset("sw.js"), { scope: import.meta.env.BASE_URL })
+      .register(publicAsset("sw.js"), { scope: VITE_ENV.BASE_URL || "/" })
       .then((registration) => registration.update())
       .catch(() => {
         console.warn("Voice Casting Studio: service worker registration failed.");
@@ -422,6 +424,11 @@ export const getGoogleDriveFileId = (url = "") => {
   }
 };
 
+export const makeGoogleDrivePreviewUrl = (url = "") => {
+  const driveFileId = getGoogleDriveFileId(url);
+  return driveFileId ? `https://drive.google.com/file/d/${encodeURIComponent(driveFileId)}/preview` : "";
+};
+
 export const makeDirectAudioDownloadUrl = (url = "") => {
   const trimmed = String(url).trim();
   if (!isWebUrl(trimmed)) return "";
@@ -512,6 +519,7 @@ export const downloadTrackAudioFromUrl = (track) => {
 export const isSupportedTrackUrl = (url = "") => {
   const trimmed = String(url).trim();
   if (!trimmed) return true;
+  if (getGoogleDriveFileId(trimmed)) return true;
   try {
     const host = new URL(trimmed).hostname.toLowerCase().replace(/^www\./, "");
     return host === "youtu.be" || host === "youtube.com" || host.endsWith(".youtube.com") || host === "suno.com" || host.endsWith(".suno.com");
@@ -522,6 +530,8 @@ export const isSupportedTrackUrl = (url = "") => {
 
 export const makePlayableEmbedUrl = (url = "") => {
   const trimmed = String(url).trim();
+  const drivePreview = makeGoogleDrivePreviewUrl(trimmed);
+  if (drivePreview) return drivePreview;
   const youtube = trimmed.match(/(?:youtu\.be\/|youtube\.com\/watch\?v=|youtube\.com\/shorts\/)([A-Za-z0-9_-]+)/);
   if (youtube) return `https://www.youtube.com/embed/${youtube[1]}`;
   const suno = trimmed.match(/suno\.com\/(?:song|embed)\/([a-f0-9-]{36})/i);
@@ -2095,7 +2105,7 @@ export const isValidSharePayload = (payload) =>
 export const loadPublishedSharePayload = async (slug) => {
   // まずGAS受信口からフォーム定義を取得する（ツールから即時公開できる主経路）。
   // 受信口URLはリポジトリのapp-config.jsonに一度だけ設定する。
-  const config = await loadAppConfig(import.meta.env.BASE_URL);
+  const config = await loadAppConfig(VITE_ENV.BASE_URL || "/");
   const endpointUrl = String(config.formEndpointUrl || "").trim();
   if (endpointUrl) {
     try {

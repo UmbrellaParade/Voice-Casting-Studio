@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   CalendarClock,
@@ -8,6 +8,7 @@ import {
   FileAudio,
   FileImage,
   FolderOpen,
+  GripVertical,
   ImagePlus,
   LayoutDashboard,
   Link,
@@ -24,6 +25,7 @@ import {
   getGoogleDriveFileId,
   isWebUrl,
   makeDirectAudioDownloadUrl,
+  makeGoogleDrivePreviewUrl,
   makeImagePreviewUrl,
   newId
 } from "../lib/core.js";
@@ -35,7 +37,8 @@ import {
   PRODUCTION_SCHEDULE_TYPES,
   getCharacterName,
   getRecordingProgress,
-  parseRubyText
+  parseRubyText,
+  reorderProductionMaterials
 } from "../lib/recording.js";
 import { getWordPressRuntime, uploadWordPressImage } from "../lib/wordpress.js";
 import { SectionTitle } from "./ui.jsx";
@@ -121,8 +124,17 @@ function EmptyWorkspace({ setActive }) {
 }
 
 function MiniAudioPlayer({ url, fileName = "" }) {
+  const drivePreviewUrl = makeGoogleDrivePreviewUrl(url);
   const playbackUrl = getPlaybackUrl(url);
-  if (!playbackUrl) return <span className="production-empty-media"><FileAudio size={16} />録音URL未登録</span>;
+  if (!playbackUrl) return <span className="production-empty-media"><FileAudio size={16} />音声URL未登録</span>;
+  if (drivePreviewUrl) {
+    return (
+      <div className="production-drive-audio-player">
+        <iframe title={`${fileName || "Google Drive音声"}を再生`} src={drivePreviewUrl} loading="lazy" allow="autoplay" />
+        <a href={url} target="_blank" rel="noreferrer" title="Google Driveで開く"><ExternalLink size={15} /><span>Driveで開く</span></a>
+      </div>
+    );
+  }
   return (
     <div className="production-audio-player">
       <audio controls preload="none" src={playbackUrl} />
@@ -482,6 +494,9 @@ function MaterialPreview({ material }) {
 function MaterialsView({ project, updateProject }) {
   const [filter, setFilter] = useState("すべて");
   const [message, setMessage] = useState("");
+  const [draggingMaterialId, setDraggingMaterialId] = useState("");
+  const [dragOverMaterialId, setDragOverMaterialId] = useState("");
+  const pointerDragRef = useRef(null);
   const visibleMaterials = filter === "すべて" ? project.materials : project.materials.filter((material) => material.category === filter);
 
   const addMaterial = (category = filter === "すべて" ? "主題歌" : filter) => updateProject((current) => ({
@@ -496,6 +511,56 @@ function MaterialsView({ project, updateProject }) {
     ...current,
     materials: current.materials.map((material) => material.id === materialId ? { ...material, ...patch, updatedAt: new Date().toISOString() } : material)
   }));
+
+  const moveMaterial = (sourceId, targetId) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const movedMaterial = project.materials.find((material) => material.id === sourceId);
+    updateProject((current) => ({
+      ...current,
+      materials: reorderProductionMaterials(current.materials, sourceId, targetId)
+    }));
+    setMessage(`「${movedMaterial?.title || "素材"}」の並び順を保存しました。`);
+  };
+
+  const resetMaterialDrag = () => {
+    pointerDragRef.current = null;
+    setDraggingMaterialId("");
+    setDragOverMaterialId("");
+  };
+
+  const beginMaterialDrag = (event, materialId) => {
+    if (event.button !== 0) return;
+    pointerDragRef.current = {
+      sourceId: materialId,
+      startX: event.clientX,
+      startY: event.clientY,
+      targetId: "",
+      moved: false
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const trackMaterialDrag = (event) => {
+    const drag = pointerDragRef.current;
+    if (!drag) return;
+    if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
+    event.preventDefault();
+    drag.moved = true;
+    setDraggingMaterialId(drag.sourceId);
+    if (event.clientY < 72) window.scrollBy({ top: -18 });
+    if (event.clientY > window.innerHeight - 72) window.scrollBy({ top: 18 });
+    const targetId = document.elementFromPoint(event.clientX, event.clientY)?.closest?.("[data-material-id]")?.dataset.materialId || "";
+    drag.targetId = targetId && targetId !== drag.sourceId ? targetId : "";
+    setDragOverMaterialId(drag.targetId);
+  };
+
+  const finishMaterialDrag = (event) => {
+    const drag = pointerDragRef.current;
+    if (!drag) return;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (drag.moved && drag.targetId) moveMaterial(drag.sourceId, drag.targetId);
+    resetMaterialDrag();
+  };
 
   const uploadMaterial = async (material, file) => {
     if (material.category !== "サムネイル") return;
@@ -528,8 +593,29 @@ function MaterialsView({ project, updateProject }) {
       {message && <p className="production-inline-message">{message}</p>}
       <div className="material-library-grid">
         {visibleMaterials.map((material) => (
-          <article className="material-editor" key={material.id}>
+          <article
+            className={`material-editor${draggingMaterialId === material.id ? " dragging" : ""}${dragOverMaterialId === material.id ? " drag-over" : ""}`}
+            data-material-id={material.id}
+            key={material.id}
+          >
             <header>
+              <button
+                type="button"
+                className="icon-button material-drag-handle"
+                aria-label={`「${material.title}」を並べ替え`}
+                title="ドラッグして並べ替え"
+                onPointerDown={(event) => beginMaterialDrag(event, material.id)}
+                onPointerMove={trackMaterialDrag}
+                onPointerUp={finishMaterialDrag}
+                onPointerCancel={resetMaterialDrag}
+                onKeyDown={(event) => {
+                  if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+                  event.preventDefault();
+                  const visibleIndex = visibleMaterials.findIndex((item) => item.id === material.id);
+                  const target = visibleMaterials[visibleIndex + (event.key === "ArrowUp" ? -1 : 1)];
+                  if (target) moveMaterial(material.id, target.id);
+                }}
+              ><GripVertical size={17} /></button>
               <span className={`material-category category-${material.category}`}>{material.category}</span>
               <select aria-label="素材の状態" value={material.status} onChange={(event) => patchMaterial(material.id, { status: event.target.value })}>{PRODUCTION_MATERIAL_STATUSES.map((status) => <option key={status}>{status}</option>)}</select>
               <button type="button" className="icon-button danger-icon" title="素材を削除" onClick={() => {

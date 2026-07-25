@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { makeGoogleDrivePreviewUrl, makePlayableEmbedUrl } from "../src/lib/core.js";
+
 import {
   archiveScriptVersion,
   getRecordingProgress,
@@ -9,9 +11,29 @@ import {
   getScriptImportPlan,
   normalizeRecordingProject,
   parseGoogleDocsScript,
+  reorderProductionMaterials,
   repairScriptHierarchy,
   restoreScriptSnapshot
 } from "../src/lib/recording.js";
+
+test("builds an embeddable Google Drive audio preview URL", () => {
+  const sharedUrl = "https://drive.google.com/file/d/abc_DEF-123/view?usp=sharing";
+  const previewUrl = "https://drive.google.com/file/d/abc_DEF-123/preview";
+  assert.equal(makeGoogleDrivePreviewUrl(sharedUrl), previewUrl);
+  assert.equal(makePlayableEmbedUrl(sharedUrl), previewUrl);
+});
+
+test("reorders production materials without changing their contents", () => {
+  const materials = [
+    { id: "theme", title: "主題歌" },
+    { id: "se", title: "SE" },
+    { id: "complete", title: "完成音源" }
+  ];
+  const reordered = reorderProductionMaterials(materials, "complete", "theme");
+  assert.deepEqual(reordered.map((material) => material.id), ["complete", "theme", "se"]);
+  assert.equal(reordered[0], materials[2]);
+  assert.deepEqual(materials.map((material) => material.id), ["theme", "se", "complete"]);
+});
 
 test("parses a Google Docs voice drama script without losing ruby or stage directions", () => {
   const rows = parseGoogleDocsScript(`〇雨上がり

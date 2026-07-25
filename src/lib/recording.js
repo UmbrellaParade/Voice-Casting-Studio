@@ -5,6 +5,17 @@ export const PRODUCTION_MATERIAL_STATUSES = ["準備中", "制作中", "確認�
 export const PRODUCTION_QUESTION_STATUSES = ["未回答", "回答済み", "解決済み"];
 export const PRODUCTION_SCHEDULE_TYPES = ["収録締切", "公開予定", "編集", "収録", "その他"];
 export const PRODUCTION_SCHEDULE_STATUSES = ["予定", "進行中", "完了", "延期"];
+
+export const reorderProductionMaterials = (materials = [], sourceId = "", targetId = "") => {
+  const sourceIndex = materials.findIndex((material) => material.id === sourceId);
+  const targetIndex = materials.findIndex((material) => material.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return materials;
+  const next = [...materials];
+  const [moved] = next.splice(sourceIndex, 1);
+  next.splice(targetIndex, 0, moved);
+  return next;
+};
+
 const RUBY_SOURCE = "(?:[|｜]([^《\\n]+)《([^》\\n]+)》|\\{([^|{}\\n]+)\\|([^{}\\n]+)\\})";
 
 const CHARACTER_COLORS = ["#168b9a", "#d65285", "#7a63ad", "#b57024", "#2f7d4a", "#5f6d7a"];
