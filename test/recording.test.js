@@ -5,9 +5,11 @@ import {
   archiveScriptVersion,
   getRecordingProgress,
   getShareableRecordingProject,
+  getScriptHierarchyRepairPlan,
   getScriptImportPlan,
   normalizeRecordingProject,
   parseGoogleDocsScript,
+  repairScriptHierarchy,
   restoreScriptSnapshot
 } from "../src/lib/recording.js";
 
@@ -62,6 +64,61 @@ test("separates chapters that reuse the same scene name", () => {
 
   assert.notEqual(project.lines[0].chapterId, project.lines[1].chapterId);
   assert.notEqual(project.lines[0].sceneId, project.lines[1].sceneId);
+});
+
+test("skips cast lists and keeps later structure after an unclosed quote", () => {
+  const rows = parseGoogleDocsScript(`ボイスドラマ脚本
+『Umbrella Parade：雨を晴らせない男の復活劇』
+第1章「宣告」
+【登場人物】
+ヴェル
+アマモリ
+SCENE 01 試験会場
+ヴェル「まだ閉じていない
+
+第2章「残響」
+【登場人物】
+ヴェル
+アマモリ
+SCENE 01 路地裏
+アマモリ「ここは第二章です。」`, ["ヴェル", "アマモリ"]);
+
+  assert.deepEqual(rows.map((row) => row.speaker), ["ヴェル", "アマモリ"]);
+  assert.equal(rows[0].chapterTitle, "第1章 宣告");
+  assert.equal(rows[0].sceneTitle, "SCENE 01 試験会場");
+  assert.equal(rows[1].chapterTitle, "第2章 残響");
+  assert.equal(rows[1].sceneTitle, "SCENE 01 路地裏");
+});
+
+test("repairs lines that an older import placed back in the first chapter", () => {
+  const project = normalizeRecordingProject({
+    scriptVersion: "初稿",
+    characters: [{ id: "character_vel", name: "ヴェル" }],
+    lines: [
+      { id: "chapter_one_intro", order: 1, chapterTitle: "第一章", sceneTitle: "章の冒頭", kind: "direction", text: "ヴェル", characterId: "character_vel" },
+      { id: "chapter_one_line", order: 2, chapterTitle: "第一章", sceneTitle: "SCENE 01", text: "第一章です。", characterId: "character_vel" },
+      { id: "chapter_two_intro", order: 3, chapterTitle: "第2章 残響", sceneTitle: "章の冒頭", kind: "direction", text: "ヴェル", characterId: "character_vel" },
+      { id: "chapter_two_line", order: 4, chapterTitle: "第一章", sceneTitle: "SCENE 01", text: "第二章です。", characterId: "character_vel", actorStatus: "収録済み", reviewStatus: "OK" },
+      { id: "chapter_three_intro", order: 5, chapterTitle: "第3章 逆鱗", sceneTitle: "章の冒頭", kind: "direction", text: "ヴェル", characterId: "character_vel" },
+      { id: "chapter_three_line", order: 6, chapterTitle: "第一章", sceneTitle: "SCENE 01", text: "第三章です。", characterId: "character_vel" }
+    ]
+  });
+
+  const plan = getScriptHierarchyRepairPlan(project);
+  assert.equal(plan.changed, 5);
+  assert.equal(plan.moved, 2);
+  assert.equal(plan.removed, 3);
+  assert.equal(plan.chapters, 3);
+
+  const repaired = repairScriptHierarchy(project);
+  assert.equal(repaired.lines.length, 3);
+  assert.deepEqual(
+    repaired.lines.filter((line) => line.id.endsWith("_line")).map((line) => line.chapterTitle),
+    ["第一章", "第2章 残響", "第3章 逆鱗"]
+  );
+  assert.equal(repaired.lines.find((line) => line.id === "chapter_two_line").actorStatus, "収録済み");
+  assert.equal(repaired.lines.find((line) => line.id === "chapter_two_line").reviewStatus, "OK");
+  assert.equal(repaired.scriptSnapshots.length, 1);
 });
 
 test("keeps script metadata and audio cues out of the character list", () => {

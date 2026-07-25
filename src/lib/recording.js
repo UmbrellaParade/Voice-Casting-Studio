@@ -908,10 +908,20 @@ export const getScriptChapterKey = (value = "") => {
   return `chapter:number:${numeric ?? normalizeScopeValue(match.number)}`;
 };
 
+const isCastListHeading = (line = "") => {
+  const text = stripHeadingDecorations(line);
+  return /^(?:登場人物|キャスト|出演)(?:$|[\s　:：])/i.test(text);
+};
+
 const isDocumentMetadataLine = (line = "") => {
   const text = stripHeadingDecorations(line);
   return /^(?:ボイスドラマ\s*)?(?:脚本|台本|原稿)(?:全文)?(?:$|[\s　:：])/i.test(text) ||
     /^(?:作品名|タイトル|原作|原案|作者|監督|演出|出演|キャスト|登場人物)(?:$|[\s　:：])/i.test(text);
+};
+
+const isStandaloneDocumentTitleLine = (line = "") => {
+  const text = normalizeDocumentLine(line);
+  return text.length <= 160 && /^(?:『[^』]+』|「[^」]+」|【[^】]+】)$/.test(text);
 };
 
 const isScriptCueLine = (line = "") => {
@@ -947,6 +957,99 @@ export const getScriptSceneKey = (value = "") => {
     return `scene:number:${numeric ?? normalizeScopeValue(explicit[1])}`;
   }
   return `scene:label:${normalizeScopeValue(text || "Scene 1")}`;
+};
+
+const isChapterIntroScene = (value = "") =>
+  normalizeScopeValue(value) === normalizeScopeValue("章の冒頭") || isChapterHeading(value);
+
+const isLikelyLegacyCastIntroBlock = (lines = [], characterNames = new Set()) => {
+  if (!lines.length || !characterNames.size) return false;
+  const entries = lines.map((line) => normalizeDocumentLine(line.text));
+  if (entries.some((text) => !text || text.length > 40 || /[。！？!?「」『』]/.test(text))) return false;
+
+  const matchedEntries = entries.filter((text) => text
+    .split(/[／/・、,，&＆]+/)
+    .map((part) => normalizeScopeValue(stripHeadingDecorations(part)))
+    .some((part) => characterNames.has(part)));
+  return matchedEntries.length >= Math.max(1, Math.ceil(entries.length / 3));
+};
+
+export const getScriptHierarchyRepairPlan = (project = {}) => {
+  const sourceLines = (Array.isArray(project.lines) ? project.lines : [])
+    .map((line, index) => ({ line, index }))
+    .sort((left, right) => (Number(left.line.order) || left.index) - (Number(right.line.order) || right.index));
+  const chapterMarkers = new Set(
+    sourceLines
+      .filter(({ line }) => isChapterIntroScene(line.sceneTitle))
+      .map(({ line }) => getScriptChapterKey(line.chapterTitle || "第一章"))
+  );
+  if (chapterMarkers.size < 2) {
+    return { changed: 0, moved: 0, removed: 0, movedLineIds: [], removedLineIds: [], lines: sourceLines.map(({ line }) => line), chapters: chapterMarkers.size, scenes: 0 };
+  }
+
+  const firstChapterKey = getScriptChapterKey("第一章");
+  const patches = new Map();
+  const introLinesByChapter = new Map();
+  let activeChapterTitle = "";
+  let activeChapterKey = "";
+
+  sourceLines.forEach(({ line }) => {
+    const chapterTitle = String(line.chapterTitle || "第一章").trim() || "第一章";
+    const chapterKey = getScriptChapterKey(chapterTitle);
+    if (isChapterIntroScene(line.sceneTitle)) {
+      activeChapterTitle = chapterTitle;
+      activeChapterKey = chapterKey;
+      if (!introLinesByChapter.has(chapterKey)) introLinesByChapter.set(chapterKey, []);
+      introLinesByChapter.get(chapterKey).push(line);
+      return;
+    }
+    if (activeChapterKey && activeChapterKey !== firstChapterKey && chapterKey === firstChapterKey) {
+      patches.set(line.id, activeChapterTitle);
+    }
+  });
+
+  const characterNames = new Set((project.characters || [])
+    .map((character) => normalizeScopeValue(character.name))
+    .filter(Boolean));
+  const removedLineIds = new Set();
+  introLinesByChapter.forEach((lines) => {
+    if (isLikelyLegacyCastIntroBlock(lines, characterNames)) {
+      lines.forEach((line) => removedLineIds.add(line.id));
+    }
+  });
+
+  const repairedLines = sourceLines
+    .filter(({ line }) => !removedLineIds.has(line.id))
+    .map(({ line }) => patches.has(line.id)
+      ? { ...line, chapterTitle: patches.get(line.id) }
+      : line);
+  const changed = patches.size + removedLineIds.size;
+  if (!changed) {
+    const scenes = new Set(repairedLines.map((line) => `${getScriptChapterKey(line.chapterTitle)}\u0000${getScriptSceneKey(line.sceneTitle)}`));
+    return { changed: 0, moved: 0, removed: 0, movedLineIds: [], removedLineIds: [], lines: repairedLines, chapters: chapterMarkers.size, scenes: scenes.size };
+  }
+
+  const normalized = normalizeRecordingProject({ ...project, lines: repairedLines });
+  return {
+    changed,
+    moved: patches.size,
+    removed: removedLineIds.size,
+    movedLineIds: [...patches.keys()],
+    removedLineIds: [...removedLineIds],
+    lines: normalized.lines,
+    chapters: new Set(normalized.lines.map((line) => line.chapterId)).size,
+    scenes: new Set(normalized.lines.map((line) => line.sceneId)).size
+  };
+};
+
+export const repairScriptHierarchy = (project = {}) => {
+  const plan = getScriptHierarchyRepairPlan(project);
+  if (!plan.changed) return normalizeRecordingProject(project);
+  const archived = archiveScriptVersion(project, {
+    label: `${project.scriptVersion || "現在版"}（構成修復前）`,
+    reason: "第一章へまとまった章・シーン構成を修復する直前"
+  });
+  return normalizeRecordingProject({ ...archived, lines: plan.lines });
 };
 
 const cleanSpeakerLabel = (value = "") =>
@@ -1040,6 +1143,7 @@ const parseInlineDialogue = (line = "") => {
 
 export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
   const sourceLines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+  const firstChapterLineIndex = sourceLines.findIndex((line) => isChapterHeading(normalizeDocumentLine(line)));
   const knownSpeakerSet = new Set(
     (knownSpeakers || [])
       .map((speaker) => cleanSpeakerLabel(speaker))
@@ -1052,6 +1156,7 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
   let pendingSpeaker = "";
   let pendingDirection = "";
   let openDialogue = null;
+  let skippingCastList = false;
 
   const pushRow = ({ speaker, lineText, direction = "", sourceKind = "dialogue" }) => {
     const normalizedText = normalizeDocumentLine(lineText);
@@ -1077,9 +1182,27 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
     return "";
   };
 
+  const flushOpenDialogue = () => {
+    if (!openDialogue) return;
+    pushRow({
+      speaker: openDialogue.speaker,
+      lineText: openDialogue.text,
+      direction: openDialogue.direction
+    });
+    openDialogue = null;
+  };
+
   sourceLines.forEach((rawLine, index) => {
     const line = normalizeDocumentLine(rawLine);
     if (!line) return;
+    if (firstChapterLineIndex > index && isStandaloneDocumentTitleLine(line)) return;
+
+    const chapterHeading = isChapterHeading(line);
+    const sceneHeading = isSceneHeading(line);
+    const metadataLine = isDocumentMetadataLine(line);
+    if (openDialogue && (chapterHeading || sceneHeading || isCastListHeading(line))) {
+      flushOpenDialogue();
+    }
 
     if (openDialogue) {
       const closeIndex = line.indexOf(openDialogue.closingQuote);
@@ -1097,26 +1220,31 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
       return;
     }
 
-    if (isChapterHeading(line)) {
+    if (chapterHeading) {
       currentChapter = normalizeChapterHeading(line);
       currentScene = "章の冒頭";
       pendingSpeaker = "";
       pendingDirection = "";
+      skippingCastList = false;
       return;
     }
 
-    if (isSceneHeading(line)) {
+    if (sceneHeading) {
       currentScene = normalizeSceneHeading(line);
       pendingSpeaker = "";
       pendingDirection = "";
+      skippingCastList = false;
       return;
     }
 
-    if (isDocumentMetadataLine(line)) {
+    if (metadataLine) {
       pendingSpeaker = "";
       pendingDirection = "";
+      skippingCastList = isCastListHeading(line);
       return;
     }
+
+    if (skippingCastList) return;
 
     if (isScriptCueLine(line)) {
       pendingSpeaker = "";
@@ -1205,13 +1333,7 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
     pushRow({ speaker: "ト書き", lineText: line, sourceKind: "direction" });
   });
 
-  if (openDialogue) {
-    pushRow({
-      speaker: openDialogue.speaker,
-      lineText: openDialogue.text,
-      direction: openDialogue.direction
-    });
-  }
+  flushOpenDialogue();
   if (pendingSpeaker) {
     pushRow({ speaker: "ト書き", lineText: pendingSpeaker, sourceKind: "direction" });
   }

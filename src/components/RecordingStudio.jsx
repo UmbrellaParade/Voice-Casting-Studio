@@ -52,6 +52,7 @@ import {
   getRecordingProgress,
   getShareableRecordingProject,
   getScriptChapterKey,
+  getScriptHierarchyRepairPlan,
   getScriptImportPlan,
   getScriptSceneKey,
   isScriptStructureLabel,
@@ -61,11 +62,13 @@ import {
   parseGoogleDocsScript,
   parseRubyText,
   parseScriptTable,
+  repairScriptHierarchy,
   hasRubyNotation,
   restoreScriptSnapshot,
   stripRubyNotation
 } from "../lib/recording.js";
 import { Field, SectionTitle, TextArea } from "./ui.jsx";
+import { getScriptSceneAnchorId, ScriptSceneToc } from "./ScriptSceneToc.jsx";
 
 const MAX_RECORDING_UPLOAD_BYTES = 25 * 1024 * 1024;
 const COLLABORATIVE_LINE_FIELDS = new Set([
@@ -305,9 +308,9 @@ function ScriptChapterSection({ chapter, open, onToggle, children }) {
   );
 }
 
-function ScriptSceneSection({ scene, open, onToggle, children }) {
+function ScriptSceneSection({ scene, open, onToggle, anchorId, children }) {
   return (
-    <section className={`script-scene${open ? " open" : ""}`}>
+    <section id={anchorId} className={`script-scene${open ? " open" : ""}`}>
       <button
         type="button"
         className="script-scene-heading"
@@ -642,6 +645,10 @@ function RecordingBoardView({ project, patchLine, removeLine, canEditScript }) {
     [scopedProject, selectedCharacterIds, mode, includeContext, query, statusFilter]
   );
   const chapters = getChapterGroups(visibleLines);
+  const tocChapter = selectedChapterId && !selectedSceneId
+    ? chapters.find((chapter) => chapter.chapterId === selectedChapterId)
+    : null;
+  const tocScopeId = `admin-${project.id}-${selectedChapterId || "all"}`;
 
   const toggleScene = (sceneId) => {
     setOpenSceneIds((current) => {
@@ -693,29 +700,38 @@ function RecordingBoardView({ project, patchLine, removeLine, canEditScript }) {
         setStatusFilter={setStatusFilter}
         allLabel={selectedSceneId ? "シーン全文" : selectedChapterId ? "章の全文" : "全文"}
       />
-      <div className="script-chapters">
-        {chapters.map((chapter) => (
-          <ScriptChapterSection key={chapter.chapterId} chapter={chapter} open={openChapterIds.has(chapter.chapterId)} onToggle={() => toggleChapter(chapter.chapterId)}>
-            <div className="script-scenes">
-              {chapter.scenes.map((scene) => (
-                <ScriptSceneSection key={scene.sceneId} scene={scene} open={openSceneIds.has(scene.sceneId)} onToggle={() => toggleScene(scene.sceneId)}>
-                  <div className="script-line-list">
-                    {scene.lines.map((line) => (
-                      <AdminLineCard key={line.id} project={project} line={line} patchLine={patchLine} removeLine={removeLine} canEditScript={canEditScript} />
-                    ))}
-                  </div>
-                </ScriptSceneSection>
-              ))}
+      <div className={`script-board-layout${tocChapter?.scenes.length > 1 ? " has-scene-toc" : ""}`}>
+        <ScriptSceneToc scenes={tocChapter?.scenes || []} scopeId={tocScopeId} />
+        <div className="script-chapters">
+          {chapters.map((chapter) => (
+            <ScriptChapterSection key={chapter.chapterId} chapter={chapter} open={openChapterIds.has(chapter.chapterId)} onToggle={() => toggleChapter(chapter.chapterId)}>
+              <div className="script-scenes">
+                {chapter.scenes.map((scene) => (
+                  <ScriptSceneSection
+                    key={scene.sceneId}
+                    scene={scene}
+                    open={openSceneIds.has(scene.sceneId)}
+                    onToggle={() => toggleScene(scene.sceneId)}
+                    anchorId={getScriptSceneAnchorId(tocScopeId, scene.sceneId)}
+                  >
+                    <div className="script-line-list">
+                      {scene.lines.map((line) => (
+                        <AdminLineCard key={line.id} project={project} line={line} patchLine={patchLine} removeLine={removeLine} canEditScript={canEditScript} />
+                      ))}
+                    </div>
+                  </ScriptSceneSection>
+                ))}
+              </div>
+            </ScriptChapterSection>
+          ))}
+          {!visibleLines.length && (
+            <div className="recording-empty-state">
+              <Search size={28} />
+              <b>条件に合うセリフがありません</b>
+              <span>登場人物や進捗の絞り込みを変更してください。</span>
             </div>
-          </ScriptChapterSection>
-        ))}
-        {!visibleLines.length && (
-          <div className="recording-empty-state">
-            <Search size={28} />
-            <b>条件に合うセリフがありません</b>
-            <span>登場人物や進捗の絞り込みを変更してください。</span>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </>
   );
@@ -728,6 +744,7 @@ function ScriptEditor({
   patchLine,
   removeLine,
   importScriptRows,
+  repairHierarchy,
   saveScriptSnapshot,
   restoreSnapshot
 }) {
@@ -800,6 +817,10 @@ function ScriptEditor({
   const importPlan = useMemo(
     () => getScriptImportPlan(project, reviewedImportRows),
     [project, reviewedImportRows]
+  );
+  const hierarchyRepairPlan = useMemo(
+    () => getScriptHierarchyRepairPlan(project),
+    [project]
   );
   const chapterOptions = useMemo(
     () => [...new Set(project.lines.map((line) => line.chapterTitle).filter(Boolean))],
@@ -907,6 +928,30 @@ function ScriptEditor({
           <TextArea label="共有メモ" value={project.description} onChange={(value) => patchProject({ description: value })} />
         </div>
       </article>
+
+      {hierarchyRepairPlan.changed > 0 && (
+        <article className="panel script-hierarchy-repair-panel">
+          <div>
+            <span className="script-hierarchy-repair-kicker">構成の修復候補</span>
+            <h2>章・シーン構成を正しい位置へ戻せます</h2>
+            <p>
+              {hierarchyRepairPlan.moved > 0 && `第一章へ入った${hierarchyRepairPlan.moved}件を各章へ移動します。`}
+              {hierarchyRepairPlan.removed > 0 && ` 登場人物一覧として混ざった${hierarchyRepairPlan.removed}件を台本表示から除外します。`}
+              録音・確認状況を残したまま、{hierarchyRepairPlan.chapters}章へ整理します。
+            </p>
+          </div>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => {
+              if (!confirm(`章・シーン構成を修復しますか？\n\n第一章へ入った${hierarchyRepairPlan.moved}件を各章へ移動し、登場人物一覧として混ざった${hierarchyRepairPlan.removed}件を除外します。録音・確認状況は残り、修復前の台本は保存版へ自動保存されます。`)) return;
+              repairHierarchy();
+            }}
+          >
+            <RefreshCw size={16} />章・シーンを修復
+          </button>
+        </article>
+      )}
 
       <article className="panel script-import-panel">
         <div className="record-head">
@@ -1649,6 +1694,11 @@ export function RecordingStudio({
     updateProject(project.id, (current) => restoreScriptSnapshot(current, snapshotId));
   };
 
+  const repairHierarchy = () => {
+    if (!project || !canEditScript) return;
+    updateProject(project.id, (current) => repairScriptHierarchy(current));
+  };
+
   const addCharacter = () => {
     if (!project || !canEditScript) return;
     updateProject(project.id, (current) => ({
@@ -1836,6 +1886,7 @@ export function RecordingStudio({
           patchLine={patchLine}
           removeLine={removeLine}
           importScriptRows={importScriptRows}
+          repairHierarchy={repairHierarchy}
           saveScriptSnapshot={saveScriptSnapshot}
           restoreSnapshot={restoreSnapshot}
         />
@@ -1971,7 +2022,7 @@ function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, 
   );
 }
 
-export function SharedRecordingBoard({ logoSrc, reference }) {
+export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Casting Studio" }) {
   const [project, setProject] = useState(null);
   const [viewer, setViewer] = useState(null);
   const [endpointUrl, setEndpointUrl] = useState(reference.endpointUrl || "");
@@ -2138,7 +2189,7 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
       <main className="shared-recording-shell">
         <header className="shared-recording-brand">
           <img src={logoSrc} alt="Umbrella Parade" />
-          <div><Mic2 size={20} /><span>Voice Casting Studio</span></div>
+          <div><Mic2 size={20} /><span>{appName}</span></div>
         </header>
         <div className={`shared-loading${state.error ? " error" : ""}`}>
           {state.busy ? <RefreshCw className="spin" size={28} /> : <KeyRound size={28} />}
@@ -2157,6 +2208,10 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
     statusFilter
   });
   const chapters = getChapterGroups(visibleLines);
+  const tocChapter = selectedChapterId && !selectedSceneId
+    ? chapters.find((chapter) => chapter.chapterId === selectedChapterId)
+    : null;
+  const tocScopeId = `shared-${project.id}-${selectedChapterId || "all"}`;
   const editableCharacters = new Set(viewer?.characterIds || []);
   const toggleScene = (sceneId) => {
     setOpenSceneIds((current) => {
@@ -2188,7 +2243,7 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
     <main className="shared-recording-shell">
       <header className="shared-recording-brand">
         <img src={logoSrc} alt="Umbrella Parade" />
-        <div><Mic2 size={20} /><span>Voice Casting Studio</span></div>
+        <div><Mic2 size={20} /><span>{appName}</span></div>
       </header>
       <section className="shared-recording-heading">
         <div>
@@ -2227,42 +2282,51 @@ export function SharedRecordingBoard({ logoSrc, reference }) {
         setStatusFilter={setStatusFilter}
         allLabel={selectedSceneId ? "シーン全文" : selectedChapterId ? "章の全文" : "全文"}
       />
-      <div className="script-chapters shared-scenes">
-        {chapters.map((chapter) => (
-          <ScriptChapterSection key={chapter.chapterId} chapter={chapter} open={openChapterIds.has(chapter.chapterId)} onToggle={() => toggleChapter(chapter.chapterId)}>
-            <div className="script-scenes">
-              {chapter.scenes.map((scene) => (
-                <ScriptSceneSection key={scene.sceneId} scene={scene} open={openSceneIds.has(scene.sceneId)} onToggle={() => toggleScene(scene.sceneId)}>
-                  <div className="script-line-list">
-                    {scene.lines.map((line) => {
-                      const draft = drafts[line.id] || { recordingUrl: line.recordingUrl, actorNote: line.actorNote };
-                      return (
-                        <SharedLineCard
-                          key={line.id}
-                          project={project}
-                          line={line}
-                          canEdit={!line.isContext && editableCharacters.has(line.characterId)}
-                          draft={draft}
-                          setDraft={setDraft}
-                          submitPatch={submitPatch}
-                          uploadRecording={uploadRecording}
-                          busy={state.busyLineId === line.id}
-                        />
-                      );
-                    })}
-                  </div>
-                </ScriptSceneSection>
-              ))}
+      <div className={`script-board-layout shared-scenes${tocChapter?.scenes.length > 1 ? " has-scene-toc" : ""}`}>
+        <ScriptSceneToc scenes={tocChapter?.scenes || []} scopeId={tocScopeId} />
+        <div className="script-chapters">
+          {chapters.map((chapter) => (
+            <ScriptChapterSection key={chapter.chapterId} chapter={chapter} open={openChapterIds.has(chapter.chapterId)} onToggle={() => toggleChapter(chapter.chapterId)}>
+              <div className="script-scenes">
+                {chapter.scenes.map((scene) => (
+                  <ScriptSceneSection
+                    key={scene.sceneId}
+                    scene={scene}
+                    open={openSceneIds.has(scene.sceneId)}
+                    onToggle={() => toggleScene(scene.sceneId)}
+                    anchorId={getScriptSceneAnchorId(tocScopeId, scene.sceneId)}
+                  >
+                    <div className="script-line-list">
+                      {scene.lines.map((line) => {
+                        const draft = drafts[line.id] || { recordingUrl: line.recordingUrl, actorNote: line.actorNote };
+                        return (
+                          <SharedLineCard
+                            key={line.id}
+                            project={project}
+                            line={line}
+                            canEdit={!line.isContext && editableCharacters.has(line.characterId)}
+                            draft={draft}
+                            setDraft={setDraft}
+                            submitPatch={submitPatch}
+                            uploadRecording={uploadRecording}
+                            busy={state.busyLineId === line.id}
+                          />
+                        );
+                      })}
+                    </div>
+                  </ScriptSceneSection>
+                ))}
+              </div>
+            </ScriptChapterSection>
+          ))}
+          {!visibleLines.length && (
+            <div className="recording-empty-state">
+              <Search size={28} />
+              <b>条件に合うセリフがありません</b>
+              <span>章または登場人物の選択を変更してください。</span>
             </div>
-          </ScriptChapterSection>
-        ))}
-        {!visibleLines.length && (
-          <div className="recording-empty-state">
-            <Search size={28} />
-            <b>条件に合うセリフがありません</b>
-            <span>章または登場人物の選択を変更してください。</span>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       <footer className="shared-recording-footer">
         <span>このページの進捗は管理者と共有されています。</span>

@@ -2600,6 +2600,90 @@ h1 {
   gap: 13px;
 }
 
+.script-board-layout {
+  min-width: 0;
+}
+
+.script-board-layout.has-scene-toc {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.script-scene-toc {
+  position: sticky;
+  top: 76px;
+  z-index: 4;
+  display: grid;
+  gap: 8px;
+  max-height: calc(100vh - 96px);
+  padding: 4px 12px 8px 0;
+  overflow-y: auto;
+  border-right: 1px solid #d8cec1;
+  background: #fbfaf8;
+}
+
+.script-scene-toc-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  color: #4f4658;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.script-scene-toc-list {
+  display: grid;
+  gap: 3px;
+}
+
+.script-scene-toc-list button {
+  display: grid;
+  grid-template-columns: 27px minmax(0, 1fr);
+  gap: 2px 7px;
+  width: 100%;
+  min-height: 48px;
+  padding: 7px 8px;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: #51495a;
+  text-align: left;
+}
+
+.script-scene-toc-list button:hover {
+  background: #f0ece7;
+}
+
+.script-scene-toc-list button.active {
+  border-left-color: #168b9a;
+  background: #e7f4f2;
+  color: #174f55;
+}
+
+.script-scene-toc-list button > span {
+  grid-row: 1 / 3;
+  color: #8a808e;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.script-scene-toc-list strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.script-scene-toc-list small {
+  color: #7b727e;
+  font-size: 10px;
+  font-weight: 800;
+}
+
 .script-chapter {
   display: grid;
   gap: 10px;
@@ -2648,6 +2732,7 @@ h1 {
 .script-scene {
   display: grid;
   gap: 8px;
+  scroll-margin-top: 86px;
 }
 
 .script-scene-heading {
@@ -3213,6 +3298,42 @@ h1 {
 .recording-project-settings,
 .script-import-panel {
   box-shadow: none;
+}
+
+.script-hierarchy-repair-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-color: #8ab9b3;
+  background: #edf7f5;
+  box-shadow: none;
+}
+
+.script-hierarchy-repair-panel > div {
+  min-width: 0;
+}
+
+.script-hierarchy-repair-panel h2 {
+  margin: 3px 0 5px;
+  font-size: 17px;
+}
+
+.script-hierarchy-repair-panel p {
+  margin: 0;
+  color: #4f6664;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.script-hierarchy-repair-kicker {
+  color: #17717b;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.script-hierarchy-repair-panel > button {
+  flex: 0 0 auto;
 }
 
 .script-import-example {
@@ -4195,6 +4316,36 @@ h1 {
 }
 
 @media (max-width: 980px) {
+  .script-board-layout.has-scene-toc {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .script-scene-toc {
+    position: sticky;
+    top: 0;
+    max-height: none;
+    padding: 8px 0 9px;
+    overflow: hidden;
+    border-right: 0;
+    border-bottom: 1px solid #d8cec1;
+  }
+
+  .script-scene-toc-heading {
+    min-height: 26px;
+  }
+
+  .script-scene-toc-list {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+
+  .script-scene-toc-list button {
+    width: 176px;
+    min-width: 176px;
+  }
+
   .manual-script-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -4235,6 +4386,15 @@ h1 {
 }
 
 @media (max-width: 640px) {
+  .script-hierarchy-repair-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .script-hierarchy-repair-panel > button {
+    align-self: flex-start;
+  }
+
   .script-scope-picker {
     padding: 11px;
   }

@@ -182,6 +182,7 @@
   margin-top: 10px;
   padding-left: 10px;
   border-left: 2px solid #d8cec1;
+  scroll-margin-top: 86px;
 }
 
 .member-scene > summary {

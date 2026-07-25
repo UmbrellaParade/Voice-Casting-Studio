@@ -205,13 +205,13 @@ import {
   loadData
 } from "../lib/core.js";
 
-export function Header({ logoSrc }) {
+export function Header({ logoSrc, title = "Voice Casting Studio" }) {
   return (
     <section className="hero">
       <img className="brand-logo" src={logoSrc} alt="Umbrella Parade" />
       <div className="title-block">
         <div className="eyebrow"><Mic2 size={16} /> Recording Collaboration</div>
-        <h1>Voice Casting Studio</h1>
+        <h1>{title}</h1>
         <p>
           台本、担当セリフ、提出録音、確認・リテイク状況を一つの画面にまとめます。
           管理者と声優さんが同じ進捗を見ながら収録を進める共同制作スタジオです。

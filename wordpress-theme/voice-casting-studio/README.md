@@ -1,4 +1,4 @@
-# Voice Casting Studio Theme
+# Voice Cast Studio Theme
 
 Dedicated private WordPress theme for the Umbrella Parade voice drama production workspace.
 

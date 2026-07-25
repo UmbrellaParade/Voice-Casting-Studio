@@ -20,6 +20,7 @@ import {
 import { getGoogleDriveFileId, makeDirectAudioDownloadUrl, makeImagePreviewUrl } from "../lib/core.js";
 import { getCharacterName, getRecordingProgress, parseRubyText } from "../lib/recording.js";
 import { Header, SectionTitle } from "./ui.jsx";
+import { getScriptSceneAnchorId, ScriptSceneToc } from "./ScriptSceneToc.jsx";
 
 const MEMBER_NAV = [
   ["home", "ホーム", Home],
@@ -178,6 +179,10 @@ function MemberScript({ project, assignedCharacterIds, onUpdateLine }) {
     return !characterIds.length || line.kind !== "direction";
   });
   const visibleChapters = getChapters(scopedLines);
+  const tocChapter = chapterId && !sceneId
+    ? visibleChapters.find((item) => item.id === chapterId)
+    : null;
+  const tocScopeId = `member-${project.id}-${chapterId || "all"}`;
   const availableCharacters = project.characters.filter((character) => project.lines.some((line) => line.kind !== "direction" && line.characterId === character.id));
   const toggleCharacter = (id) => setCharacterIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const selectChapter = (id) => { setChapterId(id); setSceneId(""); setCharacterIds([]); };
@@ -189,18 +194,21 @@ function MemberScript({ project, assignedCharacterIds, onUpdateLine }) {
         {chapter && <div className="script-scene-scope"><div className="script-scene-scope-heading"><span>{chapter.title}</span><small>シーンを選択</small></div><div className="script-scene-options"><button type="button" className={!sceneId ? "active" : ""} onClick={() => setSceneId("")}><strong>章の全文</strong><small>{chapter.lines.filter((line) => line.kind !== "direction").length}セリフ</small></button>{chapter.scenes.map((scene) => <button type="button" className={sceneId === scene.id ? "active" : ""} key={scene.id} onClick={() => setSceneId(scene.id)}><strong>{scene.title}</strong><small>{scene.lines.filter((line) => line.kind !== "direction").length}セリフ</small></button>)}</div></div>}
       </div>
       <div className="member-character-filter"><button type="button" className={!characterIds.length ? "active" : ""} onClick={() => setCharacterIds([])}>全文</button>{availableCharacters.map((character) => <button type="button" className={characterIds.includes(character.id) ? "active" : ""} style={{ "--character-color": character.color }} key={character.id} onClick={() => toggleCharacter(character.id)}><i />{character.name}</button>)}</div>
-      <div className="script-chapters">
-        {visibleChapters.map((chapterGroup) => (
-          <details className="member-chapter" key={chapterGroup.id} open>
-            <summary><strong>{chapterGroup.title}</strong><small>{chapterGroup.scenes.length}シーン</small></summary>
-            {chapterGroup.scenes.map((scene) => (
-              <details className="member-scene" key={scene.id} open>
-                <summary><strong>{scene.title}</strong><span>{scene.lines.filter((line) => line.kind !== "direction").length}セリフ</span></summary>
-                <div className="member-line-list">{scene.lines.map((line) => <MemberLine key={line.id} project={project} line={line} editable={assignedCharacterIds.has(line.characterId)} onSave={(lineId, patch) => onUpdateLine(project.id, lineId, patch)} />)}</div>
-              </details>
-            ))}
-          </details>
-        ))}
+      <div className={`script-board-layout${tocChapter?.scenes.length > 1 ? " has-scene-toc" : ""}`}>
+        <ScriptSceneToc scenes={tocChapter?.scenes || []} scopeId={tocScopeId} />
+        <div className="script-chapters">
+          {visibleChapters.map((chapterGroup) => (
+            <details className="member-chapter" key={chapterGroup.id} open>
+              <summary><strong>{chapterGroup.title}</strong><small>{chapterGroup.scenes.length}シーン</small></summary>
+              {chapterGroup.scenes.map((scene) => (
+                <details id={getScriptSceneAnchorId(tocScopeId, scene.id)} className="member-scene" key={scene.id} open>
+                  <summary><strong>{scene.title}</strong><span>{scene.lines.filter((line) => line.kind !== "direction").length}セリフ</span></summary>
+                  <div className="member-line-list">{scene.lines.map((line) => <MemberLine key={line.id} project={project} line={line} editable={assignedCharacterIds.has(line.characterId)} onSave={(lineId, patch) => onUpdateLine(project.id, lineId, patch)} />)}</div>
+                </details>
+              ))}
+            </details>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -237,7 +245,7 @@ function MemberSchedule({ project }) {
   return <div className="production-page-stack"><section className="production-key-dates"><div><span>収録締切</span><strong>{formatDate(project.recordingDeadline)}</strong></div><div><span>公開予定</span><strong>{formatDate(project.releaseDate)}</strong></div><div><span>編集状況</span><strong>{project.editingStatus}</strong></div></section><div className="member-schedule-list">{[...project.scheduleItems].sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999")).map((item) => <article key={item.id}><time>{formatDate(item.date)}</time><div><span>{item.type} / {item.status}</span><h3>{item.title}</h3>{item.notes && <p>{item.notes}</p>}</div></article>)}</div></div>;
 }
 
-export function WordPressMemberPortal({ logoSrc, data, runtime, connectionState, onRefresh, onUpdateLine, onCreateQuestion }) {
+export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voice Cast Studio", connectionState, onRefresh, onUpdateLine, onCreateQuestion }) {
   const projects = data.recordingProjects || [];
   const [active, setActive] = useState("home");
   const [projectId, setProjectId] = useState(projects[0]?.id || "");
@@ -250,7 +258,7 @@ export function WordPressMemberPortal({ logoSrc, data, runtime, connectionState,
   const pageTitle = MEMBER_NAV.find(([key]) => key === active)?.[1] || "ホーム";
   return (
     <main className="app-shell member-portal-shell">
-      <Header logoSrc={logoSrc} />
+      <Header logoSrc={logoSrc} title={appTitle} />
       <nav className="app-nav" aria-label="Main navigation">{MEMBER_NAV.map(([key, label, Icon]) => <button type="button" className={active === key ? "active" : ""} key={key} onClick={() => setActive(key)}><Icon size={17} /><span>{label}</span></button>)}</nav>
       <section className="content-panel view-stack">
         <SectionTitle title={pageTitle} subtitle={`${withHonorific(runtime.currentUser?.name || member?.actorName)} / ${project.title}`} />

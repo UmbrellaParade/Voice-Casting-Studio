@@ -280,6 +280,7 @@ const TRACK_FIELD_TYPE_LABELS = Object.fromEntries(TRACK_FIELD_TYPE_OPTIONS);
 
 const SHOW_AUDITION_WORKFLOW = false;
 const WORDPRESS_RUNTIME = getWordPressRuntime();
+const APP_DISPLAY_NAME = WORDPRESS_RUNTIME?.siteName || (WORDPRESS_RUNTIME ? "Voice Cast Studio" : "Voice Casting Studio");
 const AUDITION_NAV_ITEMS = [
   ["dashboard", "概要", Radio],
   ["episodes", "募集企画", CalendarDays],
@@ -1804,11 +1805,11 @@ ${socialRows || "-"}
   };
 
   if (restorePayload) {
-    return <RestoreDataView logoSrc={logoSrc} payload={restorePayload} restoreData={restoreData} />;
+    return <RestoreDataView logoSrc={logoSrc} payload={restorePayload} restoreData={restoreData} appTitle={APP_DISPLAY_NAME} />;
   }
 
   if (recordingShareReference) {
-    return <SharedRecordingBoard logoSrc={logoSrc} reference={recordingShareReference} />;
+    return <SharedRecordingBoard logoSrc={logoSrc} reference={recordingShareReference} appName={APP_DISPLAY_NAME} />;
   }
 
   if (sharedPayload) {
@@ -1823,6 +1824,7 @@ ${socialRows || "-"}
         logoSrc={logoSrc}
         data={data}
         runtime={WORDPRESS_RUNTIME}
+        appTitle={APP_DISPLAY_NAME}
         connectionState={wordpressState}
         onRefresh={refreshWordPressData}
         onUpdateLine={updateMemberRecordingLine}
@@ -1833,7 +1835,7 @@ ${socialRows || "-"}
 
   return (
     <main className="app-shell">
-      <Header logoSrc={logoSrc} />
+      <Header logoSrc={logoSrc} title={APP_DISPLAY_NAME} />
 
       <nav className="app-nav" aria-label="Main navigation">
         {MAIN_NAV_ITEMS.map(([key, label, Icon]) => (
@@ -2113,13 +2115,13 @@ function PersistentDetails({ persistKey, defaultOpen = false, collapsibleState =
   );
 }
 
-function RestoreDataView({ logoSrc, payload, restoreData }) {
+function RestoreDataView({ logoSrc, payload, restoreData, appTitle = "Voice Casting Studio" }) {
   const incoming = payload?.data;
 
   if (payload?.error || !incoming) {
     return (
       <main className="app-shell public-shell">
-        <Header logoSrc={logoSrc} />
+        <Header logoSrc={logoSrc} title={appTitle} />
         <article className="panel">
           <h2>引き継ぎデータを開けませんでした</h2>
           <p className="muted">URLが途中で切れている可能性があります。PC側で引き継ぎリンクを作り直すか、JSON読み込みを使ってください。</p>
@@ -2130,7 +2132,7 @@ function RestoreDataView({ logoSrc, payload, restoreData }) {
 
   return (
     <main className="app-shell public-shell">
-      <Header logoSrc={logoSrc} />
+      <Header logoSrc={logoSrc} title={appTitle} />
       <article className="panel restore-panel">
         <div className="public-head">
           <div>

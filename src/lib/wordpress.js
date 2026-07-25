@@ -11,6 +11,7 @@ export const getWordPressRuntime = () => {
         preview: true,
         restUrl: "preview/",
         nonce: "preview",
+        siteName: "Voice Cast Studio",
         canManage,
         canEditScript,
         currentUser: {

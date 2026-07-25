@@ -1,6 +1,6 @@
 <?php
 /**
- * Voice Casting Studio theme bootstrap and private REST API.
+ * Voice Cast Studio theme bootstrap and private REST API.
  *
  * @package VoiceCastingStudio
  */
@@ -26,8 +26,8 @@ function vcs_register_workspace_post_type(): void
 {
     register_post_type(VCS_WORKSPACE_POST_TYPE, [
         'labels' => [
-            'name' => 'Voice Casting Studio',
-            'singular_name' => 'Voice Casting Workspace',
+            'name' => 'Voice Cast Studio',
+            'singular_name' => 'Voice Cast Workspace',
         ],
         'public' => false,
         'show_ui' => current_user_can(VCS_MANAGER_CAPABILITY),
@@ -123,6 +123,7 @@ function vcs_enqueue_application(): void
         'assetBaseUrl' => trailingslashit($theme_uri . '/assets'),
         'restUrl' => trailingslashit(rest_url(VCS_REST_NAMESPACE)),
         'nonce' => wp_create_nonce('wp_rest'),
+        'siteName' => get_bloginfo('name') ?: 'Voice Cast Studio',
         'logoutUrl' => wp_logout_url(home_url('/')),
         'currentUser' => [
             'id' => (int) $user->ID,
@@ -161,7 +162,7 @@ function vcs_get_workspace_post(bool $create = false): ?WP_Post
     $post_id = wp_insert_post([
         'post_type' => VCS_WORKSPACE_POST_TYPE,
         'post_status' => 'private',
-        'post_title' => 'Voice Casting Studio Workspace',
+        'post_title' => 'Voice Cast Studio Workspace',
         'post_content' => '{}',
     ], true);
     return is_wp_error($post_id) ? null : get_post($post_id);
