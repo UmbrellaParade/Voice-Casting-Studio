@@ -20,7 +20,7 @@ import {
   Users
 } from "lucide-react";
 import { getGoogleDriveFileId, isWebUrl, makeDirectAudioDownloadUrl, makeGoogleDrivePreviewUrl, makeImagePreviewUrl } from "../lib/core.js";
-import { getCharacterImageCropStyle, getCharacterName, getRecordingDisplayProject, getRecordingProgress, parseRubyText, partitionCharactersByScript } from "../lib/recording.js";
+import { getCharacterImageCropStyle, getCharacterName, getCharacterScriptName, getRecordingDisplayProject, getRecordingProgress, parseRubyText, partitionCharactersByScript } from "../lib/recording.js";
 import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
 import { ConceptView } from "./ConceptView.jsx";
 import { ManualView } from "./ManualView.jsx";
@@ -214,7 +214,7 @@ function MemberScript({ project, assignedCharacterIds, onUpdateLine }) {
         <div className="script-chapter-options"><button type="button" className={!chapterId ? "active" : ""} onClick={() => selectChapter("")}><strong>ボイスドラマ脚本全文</strong><small>{chapters.length}章</small></button>{chapters.map((item) => <button type="button" className={chapterId === item.id ? "active" : ""} key={item.id} onClick={() => selectChapter(item.id)}><strong>{item.title}</strong><small>{item.scenes.length}シーン / {item.lines.filter((line) => line.kind !== "direction").length}セリフ</small></button>)}</div>
         {chapter && <div className="script-scene-scope"><div className="script-scene-scope-heading"><span>{chapter.title}</span><small>シーンを選択</small></div><div className="script-scene-options"><button type="button" className={!sceneId ? "active" : ""} onClick={() => setSceneId("")}><strong>章の全文</strong><small>{chapter.lines.filter((line) => line.kind !== "direction").length}セリフ</small></button>{chapter.scenes.map((scene) => <button type="button" className={sceneId === scene.id ? "active" : ""} key={scene.id} onClick={() => setSceneId(scene.id)}><strong>{scene.title}</strong><small>{scene.lines.filter((line) => line.kind !== "direction").length}セリフ</small></button>)}</div></div>}
       </div>
-      <div className="member-character-filter"><button type="button" className={!characterIds.length ? "active" : ""} onClick={() => setCharacterIds([])}>全文</button>{availableCharacters.map((character) => <button type="button" className={characterIds.includes(character.id) ? "active" : ""} style={{ "--character-color": character.color }} key={character.id} onClick={() => toggleCharacter(character.id)}><i />{character.name}</button>)}</div>
+      <div className="member-character-filter"><button type="button" className={!characterIds.length ? "active" : ""} onClick={() => setCharacterIds([])}>全文</button>{availableCharacters.map((character) => <button type="button" className={characterIds.includes(character.id) ? "active" : ""} style={{ "--character-color": character.color }} key={character.id} onClick={() => toggleCharacter(character.id)}><i />{getCharacterScriptName(character)}</button>)}</div>
       <div className={`script-board-layout${tocChapter?.scenes.length > 1 ? " has-scene-toc" : ""}`}>
         <ScriptSceneToc scenes={tocChapter?.scenes || []} scopeId={tocScopeId} />
         <div className="script-chapters">

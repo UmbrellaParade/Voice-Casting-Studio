@@ -287,6 +287,44 @@ function vcs_normalize_studio_concept(array $data): array
     ];
 }
 
+function vcs_character_alias_token(string $value): string
+{
+    $value = preg_replace('/[\s()[\]【】〈〉《》「」『』・･／\/\\:：_\-―—–]+/u', '', trim($value));
+    return strtolower((string) $value);
+}
+
+function vcs_character_script_name(array $character): string
+{
+    $explicit = trim((string) ($character['scriptName'] ?? $character['shortName'] ?? ''));
+    if ('' !== $explicit) {
+        return $explicit;
+    }
+
+    $name = trim((string) ($character['name'] ?? ''));
+    if ('' === $name) {
+        return '';
+    }
+    $first_name = preg_split('/[・･]/u', $name)[0] ?? $name;
+    $short_name = trim((string) preg_replace('/(?:第)?(?:[0-9]+|[〇零一二三四五六七八九十百千]+)世$/u', '', trim($first_name)));
+    if ('' !== $short_name && $short_name !== $name) {
+        return $short_name;
+    }
+
+    $name_token = vcs_character_alias_token($name);
+    $matched_alias = '';
+    foreach ((array) ($character['scriptAliases'] ?? []) as $alias) {
+        $alias = trim((string) $alias);
+        $alias_token = vcs_character_alias_token($alias);
+        if ('' === $alias_token || strlen($alias_token) >= strlen($name_token) || !str_contains($name_token, $alias_token)) {
+            continue;
+        }
+        if ('' === $matched_alias || strlen($alias_token) < strlen(vcs_character_alias_token($matched_alias))) {
+            $matched_alias = $alias;
+        }
+    }
+    return '' !== $matched_alias ? $matched_alias : $name;
+}
+
 function vcs_extract_script_structure(array $data): array
 {
     $projects = [];
@@ -305,6 +343,7 @@ function vcs_extract_script_structure(array $data): array
                 'strval',
                 is_array($character['scriptAliases'] ?? null) ? $character['scriptAliases'] : []
             ));
+            $character['scriptName'] = vcs_character_script_name($character);
             $normalized_project_characters[] = $character;
             $character_id = (string) ($character['id'] ?? '');
             if ('' !== $character_id && !in_array($character_id, $character_ids, true)) {

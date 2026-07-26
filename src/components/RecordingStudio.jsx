@@ -50,7 +50,9 @@ import {
   createRecordingProject,
   addRubyNotation,
   getCanonicalCharacterName,
+  getCharacterKnownNames,
   getCharacterName,
+  getCharacterScriptName,
   getFilteredRecordingLines,
   getRecordingDisplayProject,
   getRecordingProgress,
@@ -71,6 +73,8 @@ import {
   patchRecordingLineProgress,
   repairScriptHierarchy,
   hasRubyNotation,
+  renameProductionCharacter,
+  renameProductionCharacterScriptName,
   restoreScriptSnapshot,
   stripRubyNotation
 } from "../lib/recording.js";
@@ -446,7 +450,7 @@ function CharacterFilters({
                 style={{ "--character-color": character.color }}
                 onClick={() => toggleCharacter(character.id)}
               >
-                <span className="character-dot" />{character.name}
+                <span className="character-dot" />{getCharacterScriptName(character)}
               </button>
             ))}
         </div>
@@ -840,7 +844,7 @@ function ScriptEditor({
   const importText = importMode === "docs" ? docsImportText : tableImportText;
   const parsedImportRows = useMemo(
     () => importMode === "docs"
-      ? parseGoogleDocsScript(importText, project.characters.map((character) => character.name))
+      ? parseGoogleDocsScript(importText, project.characters.flatMap(getCharacterKnownNames))
       : parseScriptTable(importText, parseCsv),
     [importMode, importText, project.characters]
   );
@@ -850,7 +854,7 @@ function ScriptEditor({
   );
   const reviewedImportRows = useMemo(() => {
     const excluded = new Set(excludedImportRowKeys);
-    const knownCharacterNames = project.characters.map((character) => character.name);
+    const knownCharacterNames = project.characters.flatMap(getCharacterKnownNames);
     return importRowsWithKeys
       .filter((row) => !excluded.has(row.reviewKey))
       .map((row) => {
@@ -923,7 +927,7 @@ function ScriptEditor({
           sourceKind,
           speaker: row.speaker && row.speaker !== "ト書き" && !isScriptStructureLabel(row.speaker)
             ? row.speaker
-            : project.characters[0]?.name || ""
+            : getCharacterScriptName(project.characters[0]) || ""
         });
   };
 
@@ -1202,7 +1206,7 @@ function ScriptEditor({
               </div>
             )}
             <datalist id={`import-character-options-${project.id}`}>
-              {project.characters.map((character) => <option key={character.id} value={character.name} />)}
+              {project.characters.map((character) => <option key={character.id} value={getCharacterScriptName(character)} />)}
             </datalist>
           </div>
         )}
@@ -1424,6 +1428,30 @@ function CastAndSharing({
   const driveFolderUrl = String(settings.recordingDriveFolderUrl || settings.responseDriveFolderUrl || "").trim();
   const token = String(settings.responseSyncToken || "").trim();
   const ready = Boolean(endpointUrl && token);
+  const [characterNameDrafts, setCharacterNameDrafts] = useState({});
+  const [characterScriptNameDrafts, setCharacterScriptNameDrafts] = useState({});
+
+  const clearCharacterDraft = (setter, characterId) => {
+    setter((current) => {
+      const next = { ...current };
+      delete next[characterId];
+      return next;
+    });
+  };
+
+  const commitCharacterName = (character, value) => {
+    clearCharacterDraft(setCharacterNameDrafts, character.id);
+    const name = String(value || "").normalize("NFKC").trim();
+    if (!canEditScript || !name || name === character.name) return;
+    patchCharacter(character.id, { name });
+  };
+
+  const commitCharacterScriptName = (character, value) => {
+    clearCharacterDraft(setCharacterScriptNameDrafts, character.id);
+    const scriptName = String(value || "").normalize("NFKC").trim();
+    if (!canEditScript || !scriptName || scriptName === getCharacterScriptName(character)) return;
+    patchCharacter(character.id, { scriptName });
+  };
 
   return (
     <div className="recording-management-stack">
@@ -1469,12 +1497,38 @@ function CastAndSharing({
                 onChange={(event) => patchCharacter(character.id, { color: event.target.value })}
                 aria-label={`${character.name}の色`}
               />
-              <input
-                value={character.name}
-                onChange={(event) => patchCharacter(character.id, { name: event.target.value })}
-                readOnly={!canEditScript}
-                aria-label={`${character.name}の名前`}
-              />
+              <div className="character-management-identity">
+                <label>
+                  <span>正式名称</span>
+                  <input
+                    type="text"
+                    value={characterNameDrafts[character.id] ?? character.name}
+                    onChange={(event) => setCharacterNameDrafts((current) => ({ ...current, [character.id]: event.target.value }))}
+                    onBlur={(event) => commitCharacterName(character, event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.nativeEvent.isComposing) return;
+                      if (event.key === "Enter") event.currentTarget.blur();
+                    }}
+                    readOnly={!canEditScript}
+                    aria-label={`${character.name}の正式名称`}
+                  />
+                </label>
+                <label>
+                  <span>台本で使う名前</span>
+                  <input
+                    type="text"
+                    value={characterScriptNameDrafts[character.id] ?? getCharacterScriptName(character)}
+                    onChange={(event) => setCharacterScriptNameDrafts((current) => ({ ...current, [character.id]: event.target.value }))}
+                    onBlur={(event) => commitCharacterScriptName(character, event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.nativeEvent.isComposing) return;
+                      if (event.key === "Enter") event.currentTarget.blur();
+                    }}
+                    readOnly={!canEditScript}
+                    aria-label={`${character.name}の台本で使う名前`}
+                  />
+                </label>
+              </div>
               <span>{project.lines.filter((line) => line.kind !== "direction" && line.characterId === character.id).length}セリフ</span>
               {canEditScript && (
                 <button
@@ -1683,15 +1737,18 @@ export function RecordingStudio({
       const kind = draft.sourceKind === "direction" || draft.kind === "direction" ? "direction" : "dialogue";
       const speakerName = String(draft.speaker || "").trim();
       const characters = [...current.characters];
-      const canonicalSpeakerName = getCanonicalCharacterName(speakerName, characters.map((item) => item.name));
+      const canonicalSpeakerName = getCanonicalCharacterName(speakerName, characters.flatMap(getCharacterKnownNames));
       const speakerKey = canonicalSpeakerName.normalize("NFKC").toLocaleLowerCase("ja");
       let character = kind === "dialogue"
-        ? characters.find((item) => item.name.normalize("NFKC").toLocaleLowerCase("ja") === speakerKey)
+        ? characters.find((item) => getCharacterKnownNames(item).some((name) => name.normalize("NFKC").toLocaleLowerCase("ja") === speakerKey))
         : characters[0];
       if (kind === "dialogue" && !character) {
+        const name = canonicalSpeakerName || `登場人物${characters.length + 1}`;
         character = {
           id: newId("character"),
-          name: canonicalSpeakerName || `登場人物${characters.length + 1}`,
+          name,
+          scriptName: name,
+          scriptAliases: [],
           color: ["#168b9a", "#d65285", "#7a63ad", "#b57024", "#2f7d4a", "#5f6d7a"][characters.length % 6],
           imageUrl: "",
           profile: "",
@@ -1773,7 +1830,10 @@ export function RecordingStudio({
         })
         : current;
       const characters = [...working.characters];
-      const characterByName = new Map(characters.map((character) => [character.name.normalize("NFKC").toLocaleLowerCase("ja"), character]));
+      const characterByName = new Map(characters.flatMap((character) => getCharacterKnownNames(character).map((name) => [
+        name.normalize("NFKC").toLocaleLowerCase("ja"),
+        character
+      ])));
       const locationSource = mode === "replace" ? [] : working.lines;
       const chapterByTitle = new Map(locationSource.map((line) => [getScriptChapterKey(line.chapterTitle || "第一章"), line.chapterId]));
       const sceneByScope = new Map(locationSource.map((line) => [`${getScriptChapterKey(line.chapterTitle || "第一章")}\u0000${getScriptSceneKey(line.sceneTitle)}`, line.sceneId]));
@@ -1789,13 +1849,18 @@ export function RecordingStudio({
           ? characters.find((item) => item.id === matchedLine?.characterId) || characters[0]
           : characterByName.get(String(row.speaker || "").normalize("NFKC").toLocaleLowerCase("ja")) || characters.find((item) => item.id === matchedLine?.characterId);
         if (!character && !isDirection) {
+          const name = row.speaker || "話者未設定";
           character = {
             id: newId("character"),
-            name: row.speaker || "話者未設定",
+            name,
+            scriptName: name,
+            scriptAliases: [],
             color: ["#168b9a", "#d65285", "#7a63ad", "#b57024", "#2f7d4a", "#5f6d7a"][characters.length % 6]
           };
           characters.push(character);
-          characterByName.set(character.name.normalize("NFKC").toLocaleLowerCase("ja"), character);
+          getCharacterKnownNames(character).forEach((knownName) => {
+            characterByName.set(knownName.normalize("NFKC").toLocaleLowerCase("ja"), character);
+          });
         }
         const chapterTitle = String(row.chapterTitle || "第一章").trim() || "第一章";
         const chapterKey = getScriptChapterKey(chapterTitle);
@@ -1887,18 +1952,40 @@ export function RecordingStudio({
       ...current,
       characters: [
         ...current.characters,
-        { id: newId("character"), name: `登場人物${current.characters.length + 1}`, color: "#168b9a" }
+        {
+          id: newId("character"),
+          name: `登場人物${current.characters.length + 1}`,
+          scriptName: `登場人物${current.characters.length + 1}`,
+          scriptAliases: [],
+          color: "#168b9a"
+        }
       ]
     }));
   };
 
   const patchCharacter = (characterId, patch) => {
-    const permittedPatch = canEditScript ? patch : Object.fromEntries(Object.entries(patch).filter(([key]) => key !== "name" && key !== "id"));
+    const permittedPatch = canEditScript
+      ? patch
+      : Object.fromEntries(Object.entries(patch).filter(([key]) => key !== "name" && key !== "scriptName" && key !== "id"));
     if (!Object.keys(permittedPatch).length) return;
-    updateProject(project.id, (current) => ({
-      ...current,
-      characters: current.characters.map((character) => character.id === characterId ? { ...character, ...permittedPatch } : character)
-    }));
+    updateProject(project.id, (current) => {
+      let next = current;
+      if (Object.hasOwn(permittedPatch, "name")) {
+        next = renameProductionCharacter(next, characterId, permittedPatch.name);
+      }
+      if (Object.hasOwn(permittedPatch, "scriptName")) {
+        next = renameProductionCharacterScriptName(next, characterId, permittedPatch.scriptName);
+      }
+      const remainingPatch = Object.fromEntries(Object.entries(permittedPatch)
+        .filter(([key]) => key !== "name" && key !== "scriptName"));
+      if (Object.keys(remainingPatch).length) {
+        next = {
+          ...next,
+          characters: next.characters.map((character) => character.id === characterId ? { ...character, ...remainingPatch } : character)
+        };
+      }
+      return next;
+    });
   };
 
   const removeCharacter = (characterId) => {

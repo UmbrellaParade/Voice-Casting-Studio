@@ -1129,7 +1129,7 @@ h1 {
 
 .character-name-fields {
   display: grid;
-  grid-template-columns: minmax(180px, 320px) 84px;
+  grid-template-columns: minmax(180px, 320px) minmax(140px, 220px) 84px;
   gap: 10px;
 }
 
@@ -2138,6 +2138,10 @@ h1 {
 
   .character-name-fields {
     grid-template-columns: minmax(0, 1fr) 76px;
+  }
+
+  .character-name-fields > label:first-child {
+    grid-column: 1 / -1;
   }
 
   .character-editor-fields > header {
@@ -4784,6 +4788,23 @@ h1 {
   border-radius: 5px;
 }
 
+.character-management-identity {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.character-management-identity label {
+  display: grid;
+  gap: 4px;
+}
+
+.character-management-identity label > span {
+  color: #796f7f;
+  font-size: 10px;
+  font-weight: 900;
+}
+
 .character-management-row > span {
   color: #796f7f;
   font-size: 12px;
@@ -5595,6 +5616,10 @@ h1 {
 
   .character-management-row {
     grid-template-columns: 38px 1fr 34px;
+  }
+
+  .character-management-identity {
+    grid-template-columns: 1fr;
   }
 
   .character-management-row > span {

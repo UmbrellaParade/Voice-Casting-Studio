@@ -7,6 +7,7 @@ import {
   archiveScriptVersion,
   getCharacterDialogueCounts,
   getCharacterImageCropStyle,
+  getCharacterScriptName,
   getFilteredRecordingLines,
   getRecordingDisplayProject,
   getRecordingProgress,
@@ -254,10 +255,67 @@ test("keeps pasted script dialogue linked when a character display name changes"
   const display = getRecordingDisplayProject(renamed);
 
   assert.equal(renamed.characters[0].name, "ベル");
+  assert.equal(getCharacterScriptName(renamed.characters[0]), "ベル");
   assert.deepEqual(renamed.characters[0].scriptAliases, ["ヴェル"]);
   assert.equal(getCharacterDialogueCounts(renamed).vel, 1);
   assert.equal(display.lines.find((line) => line.kind === "dialogue")?.characterId, "vel");
   assert.deepEqual(partitionCharactersByScript(renamed).linkedCharacters.map((character) => character.id), ["vel"]);
+});
+
+test("keeps the short script name linked when a character is changed to a formal name", () => {
+  const original = normalizeRecordingProject({
+    characters: [{ id: "vel", name: "ヴェル" }],
+    lines: [{
+      id: "chapter_body",
+      chapterId: "chapter_1",
+      chapterTitle: "第一章",
+      sceneId: "scene_1",
+      sceneTitle: "章の本文",
+      kind: "direction",
+      manualBody: true,
+      text: "ヴェル「行こう。」\nヴェルの心の声「まだ迷っている。」"
+    }]
+  });
+
+  const renamed = normalizeRecordingProject(renameProductionCharacter(original, "vel", "ヴェル13世"));
+  const display = getRecordingDisplayProject(renamed);
+
+  assert.equal(renamed.characters[0].name, "ヴェル13世");
+  assert.equal(getCharacterScriptName(renamed.characters[0]), "ヴェル");
+  assert.deepEqual(renamed.characters[0].scriptAliases, ["ヴェル"]);
+  assert.equal(getCharacterDialogueCounts(renamed).vel, 2);
+  assert.deepEqual(display.lines.filter((line) => line.kind === "dialogue").map((line) => line.characterId), ["vel", "vel"]);
+  assert.deepEqual(partitionCharactersByScript(renamed).linkedCharacters.map((character) => character.id), ["vel"]);
+});
+
+test("infers short script names from formal names already saved in older data", () => {
+  const project = normalizeRecordingProject({
+    characters: [
+      { id: "vel_monitor", name: "ヴェルイヤモニ" },
+      { id: "vel", name: "ヴェル13世" },
+      { id: "kara", name: "カーラ・マンソン" },
+      { id: "oldis", name: "オルディス・グランベル" },
+      { id: "lazaro", name: "ラザロ・ストール" }
+    ],
+    lines: [{
+      id: "chapter_body",
+      chapterId: "chapter_1",
+      chapterTitle: "第一章",
+      sceneId: "scene_1",
+      sceneTitle: "章の本文",
+      kind: "direction",
+      manualBody: true,
+      text: "ヴェル「始めよう。」\nカーラ「了解。」\nオルディス「任せてくれ。」"
+    }]
+  });
+
+  assert.deepEqual(project.characters.map(getCharacterScriptName), ["ヴェル", "カーラ", "オルディス", "ラザロ"]);
+  assert.equal(project.characters[0].id, "vel");
+  assert.equal(project.characters[0].name, "ヴェル13世");
+  assert.equal(project.characters.some((character) => character.id === "vel_monitor"), false);
+  assert.deepEqual(getCharacterDialogueCounts(project), { vel: 1, kara: 1, oldis: 1, lazaro: 0 });
+  assert.deepEqual(partitionCharactersByScript(project).linkedCharacters.map((character) => character.id), ["vel", "kara", "oldis"]);
+  assert.deepEqual(partitionCharactersByScript(project).unlinkedCharacters.map((character) => character.id), ["lazaro"]);
 });
 
 test("separates characters removed from the current script without deleting their settings", () => {

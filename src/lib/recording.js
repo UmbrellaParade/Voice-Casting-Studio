@@ -126,10 +126,43 @@ const normalizeCharacterAliases = (aliases = [], currentName = "") => {
     });
 };
 
-const getCharacterKnownNames = (character = {}) => [
-  String(character.name || "").normalize("NFKC").trim(),
-  ...normalizeCharacterAliases(character.scriptAliases, character.name)
-].filter(Boolean);
+const inferCharacterScriptName = (character = {}) => {
+  const name = String(character.name || "").normalize("NFKC").trim();
+  if (!name) return "";
+  const firstName = name.split(/[・･]/)[0].trim() || name;
+  const withoutGenerationalSuffix = firstName
+    .replace(/(?:第)?(?:\d+|[〇零一二三四五六七八九十百千]+)世$/u, "")
+    .trim();
+  if (withoutGenerationalSuffix && withoutGenerationalSuffix !== name) return withoutGenerationalSuffix;
+
+  const nameToken = normalizeCharacterAliasToken(name);
+  const shorterAlias = normalizeCharacterAliases(character.scriptAliases, name)
+    .filter((alias) => {
+      const aliasToken = normalizeCharacterAliasToken(alias);
+      return aliasToken && aliasToken.length < nameToken.length && nameToken.includes(aliasToken);
+    })
+    .sort((left, right) => left.length - right.length)[0];
+  return shorterAlias || name;
+};
+
+export const getCharacterScriptName = (character = {}) => {
+  const explicit = String(character.scriptName || character.shortName || "").normalize("NFKC").trim();
+  return explicit || inferCharacterScriptName(character);
+};
+
+export const getCharacterKnownNames = (character = {}) => {
+  const seen = new Set();
+  return [
+    String(character.name || "").normalize("NFKC").trim(),
+    getCharacterScriptName(character),
+    ...normalizeCharacterAliases(character.scriptAliases, character.name)
+  ].filter((name) => {
+    const token = normalizeCharacterAliasToken(name);
+    if (!token || seen.has(token)) return false;
+    seen.add(token);
+    return true;
+  });
+};
 
 export const renameProductionCharacter = (project = {}, characterId = "", nextName = "") => {
   const name = String(nextName || "").normalize("NFKC").trim();
@@ -138,13 +171,41 @@ export const renameProductionCharacter = (project = {}, characterId = "", nextNa
     ...project,
     characters: (Array.isArray(project.characters) ? project.characters : []).map((character) => {
       if (character.id !== characterId || character.name === name) return character;
+      const previousName = String(character.name || "").normalize("NFKC").trim();
+      const previousScriptName = getCharacterScriptName(character);
+      const scriptAliases = normalizeCharacterAliases([
+        ...(Array.isArray(character.scriptAliases) ? character.scriptAliases : []),
+        previousName,
+        previousScriptName
+      ], name);
+      const scriptName = previousScriptName === previousName
+        ? inferCharacterScriptName({ name, scriptAliases })
+        : previousScriptName;
       return {
         ...character,
         name,
+        scriptName,
+        scriptAliases
+      };
+    })
+  };
+};
+
+export const renameProductionCharacterScriptName = (project = {}, characterId = "", nextScriptName = "") => {
+  const scriptName = String(nextScriptName || "").normalize("NFKC").trim();
+  if (!scriptName || !characterId) return project;
+  return {
+    ...project,
+    characters: (Array.isArray(project.characters) ? project.characters : []).map((character) => {
+      if (character.id !== characterId || getCharacterScriptName(character) === scriptName) return character;
+      const previousScriptName = getCharacterScriptName(character);
+      return {
+        ...character,
+        scriptName,
         scriptAliases: normalizeCharacterAliases([
           ...(Array.isArray(character.scriptAliases) ? character.scriptAliases : []),
-          character.name
-        ], name)
+          previousScriptName
+        ], character.name)
       };
     })
   };
@@ -265,6 +326,7 @@ const cloneScriptCharacters = (characters = []) => (Array.isArray(characters) ? 
   .map((character, index) => ({
     id: String(character.id || createLocalId("character")),
     name: String(character.name || `登場人物${index + 1}`).trim(),
+    scriptName: getCharacterScriptName(character) || String(character.name || `登場人物${index + 1}`).trim(),
     scriptAliases: normalizeCharacterAliases(character.scriptAliases, character.name),
     color: String(character.color || CHARACTER_COLORS[index % CHARACTER_COLORS.length]),
     imageUrl: String(character.imageUrl || ""),
@@ -697,10 +759,13 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
   const rawLines = Array.isArray(project.lines) ? project.lines : [];
   const rawCharacters = Array.isArray(project.characters) ? project.characters : [];
   const normalizedCharacters = rawCharacters.map((character, characterIndex) => {
+    const name = String(character.name || `登場人物${characterIndex + 1}`).trim();
+    const scriptAliases = normalizeCharacterAliases(character.scriptAliases, name);
     const normalized = {
       id: character.id || createLocalId("character"),
-      name: String(character.name || `登場人物${characterIndex + 1}`).trim(),
-      scriptAliases: normalizeCharacterAliases(character.scriptAliases, character.name),
+      name,
+      scriptName: getCharacterScriptName({ ...character, name, scriptAliases }),
+      scriptAliases,
       color: character.color || CHARACTER_COLORS[characterIndex % CHARACTER_COLORS.length],
       imageUrl: String(character.imageUrl || ""),
       imagePositionX: normalizeImagePosition(character.imagePositionX),
@@ -726,25 +791,29 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
   ];
   const characterGroups = new Map();
   characterCandidates.forEach((character) => {
-    const canonicalName = getCanonicalCharacterName(character.name, availableCharacterNames);
-    const canonicalKey = normalizeCharacterNameKey(canonicalName);
-    if (!characterGroups.has(canonicalKey)) characterGroups.set(canonicalKey, { canonicalName, canonicalKey, members: [] });
+    const canonicalScriptName = getCanonicalCharacterName(getCharacterScriptName(character), availableCharacterNames);
+    const canonicalKey = normalizeCharacterNameKey(canonicalScriptName);
+    if (!characterGroups.has(canonicalKey)) characterGroups.set(canonicalKey, { canonicalScriptName, canonicalKey, members: [] });
     characterGroups.get(canonicalKey).members.push(character);
   });
 
   const characterIdAliases = new Map();
   const characterTargetIdByName = new Map();
   let characters = [...characterGroups.values()].map((group) => {
-    const target = group.members.find((character) => normalizeCharacterNameKey(character.name) === group.canonicalKey) || group.members[0];
+    const target = group.members.find((character) =>
+      normalizeCharacterNameKey(getCharacterScriptName(character)) === group.canonicalKey &&
+      normalizeCharacterNameKey(character.name) !== group.canonicalKey
+    ) || group.members.find((character) => normalizeCharacterNameKey(character.name) === group.canonicalKey) || group.members[0];
     const firstValue = (key) => group.members.find((character) => String(character[key] || "").trim())?.[key] || "";
     const imageSource = target.imageUrl ? target : group.members.find((character) => character.imageUrl) || target;
     const scriptAliases = normalizeCharacterAliases(
       group.members.flatMap((character) => [character.name, ...(character.scriptAliases || [])]),
-      group.canonicalName
+      target.name
     );
     const merged = {
       ...target,
-      name: group.canonicalName,
+      name: target.name,
+      scriptName: group.canonicalScriptName || getCharacterScriptName(target),
       scriptAliases,
       imageUrl: imageSource.imageUrl,
       imagePositionX: imageSource.imagePositionX,
@@ -777,6 +846,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       const character = {
         id: createLocalId("character"),
         name: canonicalSpeakerName,
+        scriptName: canonicalSpeakerName,
         scriptAliases: [],
         color: CHARACTER_COLORS[characters.length % CHARACTER_COLORS.length],
         imageUrl: "",
@@ -1398,7 +1468,8 @@ export const getScriptHierarchyRepairPlan = (project = {}) => {
   });
 
   const characterNames = new Set((project.characters || [])
-    .map((character) => normalizeScopeValue(character.name))
+    .flatMap(getCharacterKnownNames)
+    .map((name) => normalizeScopeValue(name))
     .filter(Boolean));
   const removedLineIds = new Set();
   introLinesByChapter.forEach((lines) => {
