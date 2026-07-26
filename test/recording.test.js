@@ -59,6 +59,11 @@ test("keeps unassigned role tasks in sync with actor assignments", () => {
     characterId: "role_b",
     formCreated: true,
     recruitmentStarted: true,
+    formEditUrl: "",
+    formResponderUrl: "",
+    headerImageUrl: "",
+    socialImageUrl: "",
+    createdAt: "",
     updatedAt: ""
   });
 
@@ -85,6 +90,11 @@ test("normalizes and sorts manual production tasks", () => {
     characterId: "role_b",
     formCreated: true,
     recruitmentStarted: false,
+    formEditUrl: "",
+    formResponderUrl: "",
+    headerImageUrl: "",
+    socialImageUrl: "",
+    createdAt: "",
     updatedAt: ""
   }]);
   assert.deepEqual(sortProductionTasks(project.tasks).map((task) => task.id), ["important", "later", "done"]);
@@ -1058,6 +1068,14 @@ test("omits private production data from actor share payloads", () => {
     sourceScriptText: "非公開の取り込み原文",
     scriptSnapshots: [{ id: "private_version", lines: [{ id: "old_line", recordingUrl: "https://drive.google.com/file/d/private/view" }] }],
     auditionFormsFolderUrl: "https://drive.google.com/drive/folders/private",
+    auditionRoleProgress: [{
+      characterId: "role_private",
+      formCreated: true,
+      formEditUrl: "https://docs.google.com/forms/d/private/edit",
+      formResponderUrl: "https://docs.google.com/forms/d/private/viewform",
+      headerImageUrl: "https://drive.google.com/file/d/header/view",
+      socialImageUrl: "https://drive.google.com/file/d/social/view"
+    }],
     lines: [{ id: "current_line", text: "現在の台本" }]
   });
   const shared = getShareableRecordingProject(project);
@@ -1065,5 +1083,10 @@ test("omits private production data from actor share payloads", () => {
   assert.equal("sourceScriptText" in shared, false);
   assert.equal("scriptSnapshots" in shared, false);
   assert.equal("auditionFormsFolderUrl" in shared, false);
+  assert.equal(shared.auditionRoleProgress[0].formCreated, true);
+  assert.equal("formEditUrl" in shared.auditionRoleProgress[0], false);
+  assert.equal("formResponderUrl" in shared.auditionRoleProgress[0], false);
+  assert.equal("headerImageUrl" in shared.auditionRoleProgress[0], false);
+  assert.equal("socialImageUrl" in shared.auditionRoleProgress[0], false);
   assert.equal(shared.lines[0].text, "現在の台本");
 });

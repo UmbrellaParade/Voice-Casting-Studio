@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowDown,
@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ClipboardCopy,
   CircleHelp,
+  Download,
   ExternalLink,
   FileAudio,
   FileImage,
@@ -18,17 +19,27 @@ import {
   Link,
   ListTodo,
   KeyRound,
+  LoaderCircle,
   Megaphone,
   MessageSquareText,
   Move,
   Music2,
   Plus,
   RotateCcw,
+  Save,
+  ShieldCheck,
+  Sparkles,
   Trash2,
   Upload,
   UserPlus,
   Users
 } from "lucide-react";
+import {
+  chooseAuditionImageFolder,
+  downloadAuditionImageFiles,
+  getAuditionImageFolderStatus,
+  saveAuditionImageFiles
+} from "../lib/audition.js";
 import {
   getGoogleDriveFileId,
   isWebUrl,
@@ -1612,7 +1623,21 @@ function ScheduleView({ project, updateProject, canEditScript = true }) {
   );
 }
 
-function TasksView({ project, updateProject, canEditScript = true, setActive }) {
+function TasksView({
+  project,
+  updateProject,
+  canEditScript = true,
+  auditionAutomation = {},
+  onSaveAuditionAutomationSettings = null,
+  onCreateAuditionForm = null,
+  setActive
+}) {
+  const [openAiApiKey, setOpenAiApiKey] = useState("");
+  const [appsScriptWebAppUrl, setAppsScriptWebAppUrl] = useState("");
+  const [appsScriptSecret, setAppsScriptSecret] = useState("");
+  const [automationMessage, setAutomationMessage] = useState("");
+  const [creatingCharacterId, setCreatingCharacterId] = useState("");
+  const [imageFolderStatus, setImageFolderStatus] = useState({ supported: true, selected: false, permitted: false, name: "" });
   const unassignedCharacters = getUnassignedProductionCharacters(project);
   const tasks = sortProductionTasks(project.tasks);
   const incompleteTaskCount = tasks.filter((task) => !task.completed).length;
@@ -1622,6 +1647,19 @@ function TasksView({ project, updateProject, canEditScript = true, setActive }) 
   const formCreatedCount = unassignedCharacters.filter((character) => auditionProgressByCharacterId.get(character.id)?.formCreated).length;
   const recruitmentStartedCount = unassignedCharacters.filter((character) => auditionProgressByCharacterId.get(character.id)?.recruitmentStarted).length;
   const canOpenAuditionFolder = isWebUrl(project.auditionFormsFolderUrl);
+  const automationSettings = auditionAutomation.settings || {};
+  const automationReady = Boolean(automationSettings.hasOpenAiKey && automationSettings.appsScriptConfigured);
+
+  useEffect(() => {
+    if (!canEditScript) return undefined;
+    let cancelled = false;
+    getAuditionImageFolderStatus().then((status) => {
+      if (!cancelled) setImageFolderStatus(status);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [canEditScript]);
 
   const patchTask = (taskId, patch) => updateProject((current) => ({
     ...current,
@@ -1664,6 +1702,64 @@ function TasksView({ project, updateProject, canEditScript = true, setActive }) 
     }, 50);
   };
 
+  const saveAutomationSettings = async () => {
+    if (!onSaveAuditionAutomationSettings || !openAiApiKey.trim()) return;
+    setAutomationMessage("");
+    try {
+      await onSaveAuditionAutomationSettings({ openAiApiKey: openAiApiKey.trim() });
+      setOpenAiApiKey("");
+      setAutomationMessage("OpenAI APIキーを安全に保存しました。");
+    } catch (error) {
+      setAutomationMessage(error.message);
+    }
+  };
+
+  const saveGoogleAutomationSettings = async () => {
+    if (!onSaveAuditionAutomationSettings || !appsScriptWebAppUrl.trim() || !appsScriptSecret.trim()) return;
+    setAutomationMessage("");
+    try {
+      await onSaveAuditionAutomationSettings({
+        appsScriptWebAppUrl: appsScriptWebAppUrl.trim(),
+        appsScriptSecret: appsScriptSecret.trim()
+      });
+      setAppsScriptWebAppUrl("");
+      setAppsScriptSecret("");
+      setAutomationMessage("Googleフォーム自動作成との連携を保存しました。");
+    } catch (error) {
+      setAutomationMessage(error.message);
+    }
+  };
+
+  const chooseImageFolder = async () => {
+    setAutomationMessage("");
+    try {
+      const status = await chooseAuditionImageFolder();
+      setImageFolderStatus((current) => ({ ...current, ...status, supported: true }));
+      setAutomationMessage(`画像のPC保存先を「${status.name}」に設定しました。`);
+    } catch (error) {
+      if (error?.name !== "AbortError") setAutomationMessage(error.message);
+    }
+  };
+
+  const createAuditionFormForCharacter = async (character) => {
+    if (!onCreateAuditionForm || creatingCharacterId) return;
+    setCreatingCharacterId(character.id);
+    setAutomationMessage(`${character.name}の画像を生成し、フォームを作成しています。数分かかる場合があります…`);
+    try {
+      const result = await onCreateAuditionForm(project.id, character.id);
+      const imageFiles = Array.isArray(result.imageFiles) ? result.imageFiles : [];
+      const saveResult = await saveAuditionImageFiles(imageFiles);
+      if (!saveResult.saved && imageFiles.length) downloadAuditionImageFiles(imageFiles);
+      setAutomationMessage(saveResult.saved
+        ? `${character.name}のフォームを作成し、画像を「${saveResult.folderName}」へ保存しました。`
+        : `${character.name}のフォームを作成しました。PC保存先が未選択のため、画像はダウンロードしました。`);
+    } catch (error) {
+      setAutomationMessage(error.message);
+    } finally {
+      setCreatingCharacterId("");
+    }
+  };
+
   return (
     <div className="production-page-stack tasks-workspace">
       <section className={`task-section unassigned-role-section${unassignedCharacters.length ? " attention" : " complete"}`}>
@@ -1699,9 +1795,76 @@ function TasksView({ project, updateProject, canEditScript = true, setActive }) 
               </div>
             </div>}
 
+            {canEditScript && <section className="audition-automation-panel" aria-label="オーディションフォーム自動作成設定">
+              <div className="audition-automation-heading">
+                <div><Sparkles size={19} /><div><b>フォーム自動作成</b><span>OpenAIで2種類の画像を作り、見本フォームを役名入りで複製します。</span></div></div>
+                <div className="audition-automation-badges">
+                  <span className={automationSettings.hasOpenAiKey ? "ready" : "waiting"}>{automationSettings.hasOpenAiKey ? "APIキー設定済み" : "APIキー未設定"}</span>
+                  <span className={automationSettings.appsScriptConfigured ? "ready" : "waiting"}>{automationSettings.appsScriptConfigured ? "Google連携済み" : "Google連携準備中"}</span>
+                </div>
+              </div>
+              <div className="audition-automation-controls">
+                <label>
+                  <span><KeyRound size={15} />OpenAI APIキー</span>
+                  <input
+                    type="password"
+                    value={openAiApiKey}
+                    autoComplete="new-password"
+                    placeholder={automationSettings.hasOpenAiKey ? "保存済み（変更する時だけ入力）" : "sk-..."}
+                    onChange={(event) => setOpenAiApiKey(event.target.value)}
+                  />
+                </label>
+                <button type="button" className="primary" disabled={!openAiApiKey.trim() || auditionAutomation.status === "saving"} onClick={saveAutomationSettings}>
+                  {auditionAutomation.status === "saving" ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}
+                  APIキーを保存
+                </button>
+                <button type="button" className="secondary" disabled={!imageFolderStatus.supported} onClick={chooseImageFolder}>
+                  <Download size={16} />
+                  {imageFolderStatus.selected ? "PC保存先を変更" : "PC保存先を選択"}
+                </button>
+              </div>
+              {!automationSettings.appsScriptConfigured && <details className="audition-google-setup">
+                <summary>初回のGoogle連携設定</summary>
+                <p>設置時に一度だけ使う制作オーナー専用設定です。</p>
+                <div>
+                  <label>
+                    <span>Google Apps Script URL</span>
+                    <input
+                      type="url"
+                      value={appsScriptWebAppUrl}
+                      placeholder="https://script.google.com/macros/s/.../exec"
+                      onChange={(event) => setAppsScriptWebAppUrl(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>Google連携シークレット</span>
+                    <input
+                      type="password"
+                      value={appsScriptSecret}
+                      autoComplete="new-password"
+                      onChange={(event) => setAppsScriptSecret(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={!appsScriptWebAppUrl.trim() || !appsScriptSecret.trim() || auditionAutomation.status === "saving"}
+                    onClick={saveGoogleAutomationSettings}
+                  ><Link size={16} />Google連携を保存</button>
+                </div>
+              </details>}
+              <div className="audition-automation-notes">
+                <span><ShieldCheck size={15} />APIキーと作成ボタンは制作オーナーだけに表示され、キーそのものは画面へ再表示しません。</span>
+                <span>PC保存先：{imageFolderStatus.selected ? imageFolderStatus.name : "オーディションフォームサムネ一覧（最初に一度選択）"}</span>
+              </div>
+              {(automationMessage || auditionAutomation.message) && <p className={`audition-automation-message${auditionAutomation.status === "error" ? " error" : ""}`} role="status">{automationMessage || auditionAutomation.message}</p>}
+            </section>}
+
             <div className="unassigned-role-grid">
-              {unassignedCharacters.map((character) => (
-                <article className="unassigned-role-card" key={character.id} style={{ "--character-color": character.color }}>
+              {unassignedCharacters.map((character) => {
+                const roleProgress = auditionProgressByCharacterId.get(character.id);
+                const isCreating = creatingCharacterId === character.id;
+                return <article className="unassigned-role-card" key={character.id} style={{ "--character-color": character.color }}>
                   <i />
                   <div className="unassigned-role-main">
                     <div><strong>{character.name}</strong><span>{character.dialogueCount}セリフ</span></div>
@@ -1709,6 +1872,13 @@ function TasksView({ project, updateProject, canEditScript = true, setActive }) 
                     <p>担当声優名を登録すると、このタスクは自動で一覧から外れます。</p>
                   </div>
                   <div className="unassigned-role-actions">
+                    {canEditScript && <button
+                      type="button"
+                      className="primary audition-create-button"
+                      disabled={!automationReady || Boolean(creatingCharacterId) || !character.imageUrl || Boolean(roleProgress?.formEditUrl)}
+                      title={!character.imageUrl ? "先にキャラクター画像を登録してください" : !automationReady ? "先にAPIキーとGoogle連携を設定してください" : ""}
+                      onClick={() => createAuditionFormForCharacter(character)}
+                    >{isCreating ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}{isCreating ? "作成中…" : roleProgress?.formEditUrl ? "作成済み" : "フォームを自動作成"}</button>}
                     {canEditScript && canOpenAuditionFolder && <a className="secondary" href={project.auditionFormsFolderUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />フォーム一覧</a>}
                     {canEditScript && <button type="button" className="secondary" onClick={() => openCharacterEditor(character.id)}><Users size={15} />担当声優を登録</button>}
                   </div>
@@ -1734,8 +1904,15 @@ function TasksView({ project, updateProject, canEditScript = true, setActive }) 
                       <span>募集開始済み</span>
                     </label>
                   </div>
+                  {canEditScript && roleProgress?.formEditUrl && <div className="audition-created-links">
+                    <a href={roleProgress.formEditUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} />フォームを編集</a>
+                    {roleProgress.formResponderUrl && <a href={roleProgress.formResponderUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} />応募画面を確認</a>}
+                    {roleProgress.headerImageUrl && <a href={roleProgress.headerImageUrl} target="_blank" rel="noreferrer"><FileImage size={14} />ヘッダー画像</a>}
+                    {roleProgress.socialImageUrl && <a href={roleProgress.socialImageUrl} target="_blank" rel="noreferrer"><FileImage size={14} />SNS画像</a>}
+                    <span>Googleフォームのテーマ画面で、生成済みヘッダー画像を選ぶと完成です。</span>
+                  </div>}
                 </article>
-              ))}
+              })}
             </div>
           </>
         ) : (
@@ -1787,7 +1964,10 @@ export function ProductionWorkspace({
   updateProject,
   siteUsers = [],
   canEditScript = true,
+  auditionAutomation = {},
   currentUser = {},
+  onSaveAuditionAutomationSettings = null,
+  onCreateAuditionForm = null,
   onCreateQuestion = null,
   onResolveQuestion = null,
   setActive
@@ -1825,7 +2005,15 @@ export function ProductionWorkspace({
           onResolveQuestion={onResolveQuestion}
         />
       )}
-      {view === "tasks" && <TasksView project={project} updateProject={updateProject} canEditScript={canEditScript} setActive={setActive} />}
+      {view === "tasks" && <TasksView
+        project={project}
+        updateProject={updateProject}
+        canEditScript={canEditScript}
+        auditionAutomation={auditionAutomation}
+        onSaveAuditionAutomationSettings={onSaveAuditionAutomationSettings}
+        onCreateAuditionForm={onCreateAuditionForm}
+        setActive={setActive}
+      />}
       {view === "schedule" && <ScheduleView project={project} updateProject={updateProject} canEditScript={canEditScript} />}
     </div>
   );

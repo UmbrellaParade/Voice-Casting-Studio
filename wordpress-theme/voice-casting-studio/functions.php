@@ -14,6 +14,8 @@ const VCS_WORKSPACE_POST_TYPE = 'vcs_workspace';
 const VCS_MANAGER_CAPABILITY = 'manage_voice_casting_studio';
 const VCS_SCRIPT_CAPABILITY = 'edit_voice_casting_scripts';
 const VCS_ROLE_SCHEMA_VERSION = '2';
+const VCS_AUDITION_AUTOMATION_OPTION = '_vcs_audition_automation';
+const VCS_AUDITION_OPENAI_MODEL = 'gpt-image-2';
 
 function vcs_setup_theme(): void
 {
@@ -267,6 +269,92 @@ function vcs_rest_can_manage(): bool
     return is_user_logged_in() && current_user_can(VCS_MANAGER_CAPABILITY);
 }
 
+function vcs_rest_can_edit_script(): bool
+{
+    return is_user_logged_in() && current_user_can(VCS_SCRIPT_CAPABILITY);
+}
+
+function vcs_encrypt_secret(string $plaintext): string|WP_Error
+{
+    if ('' === $plaintext) {
+        return '';
+    }
+    if (!function_exists('openssl_encrypt')) {
+        return new WP_Error('vcs_encryption_unavailable', 'このサーバーではAPIキーを安全に保存できません。', ['status' => 500]);
+    }
+    try {
+        $iv = random_bytes(12);
+    } catch (Throwable $error) {
+        return new WP_Error('vcs_encryption_random_failed', 'APIキーの暗号化を開始できませんでした。', ['status' => 500]);
+    }
+    $tag = '';
+    $key = hash('sha256', wp_salt('auth') . '|voice-cast-studio|audition', true);
+    $ciphertext = openssl_encrypt(
+        $plaintext,
+        'aes-256-gcm',
+        $key,
+        OPENSSL_RAW_DATA,
+        $iv,
+        $tag,
+        VCS_AUDITION_AUTOMATION_OPTION
+    );
+    if (false === $ciphertext) {
+        return new WP_Error('vcs_encryption_failed', 'APIキーを暗号化できませんでした。', ['status' => 500]);
+    }
+    return 'v1:' . base64_encode($iv . $tag . $ciphertext);
+}
+
+function vcs_decrypt_secret(string $stored): string
+{
+    if (!str_starts_with($stored, 'v1:') || !function_exists('openssl_decrypt')) {
+        return '';
+    }
+    $decoded = base64_decode(substr($stored, 3), true);
+    if (!is_string($decoded) || strlen($decoded) < 29) {
+        return '';
+    }
+    $iv = substr($decoded, 0, 12);
+    $tag = substr($decoded, 12, 16);
+    $ciphertext = substr($decoded, 28);
+    $key = hash('sha256', wp_salt('auth') . '|voice-cast-studio|audition', true);
+    $plaintext = openssl_decrypt(
+        $ciphertext,
+        'aes-256-gcm',
+        $key,
+        OPENSSL_RAW_DATA,
+        $iv,
+        $tag,
+        VCS_AUDITION_AUTOMATION_OPTION
+    );
+    return is_string($plaintext) ? $plaintext : '';
+}
+
+function vcs_get_audition_automation_option(): array
+{
+    $settings = get_option(VCS_AUDITION_AUTOMATION_OPTION, []);
+    return is_array($settings) ? $settings : [];
+}
+
+function vcs_get_audition_automation_secret(array $settings, string $key): string
+{
+    return vcs_decrypt_secret((string) ($settings[$key] ?? ''));
+}
+
+function vcs_safe_audition_automation_settings(?array $settings = null): array
+{
+    $settings ??= vcs_get_audition_automation_option();
+    return [
+        'hasOpenAiKey' => '' !== vcs_get_audition_automation_secret($settings, 'openAiApiKey'),
+        'appsScriptConfigured' => '' !== vcs_get_audition_automation_secret($settings, 'appsScriptWebAppUrl')
+            && '' !== vcs_get_audition_automation_secret($settings, 'appsScriptSecret'),
+        'model' => VCS_AUDITION_OPENAI_MODEL,
+        'headerSize' => '1600x400',
+        'socialSize' => '1792x1008',
+        'headerThemeNeedsManualSelection' => true,
+        'updatedAt' => (string) ($settings['updatedAt'] ?? ''),
+    ];
+}
+
 function vcs_request_has_public_collaboration_access(WP_REST_Request $request): bool
 {
     $nonce = sanitize_text_field((string) $request->get_header('X-VCS-Public-Nonce'));
@@ -487,6 +575,22 @@ function vcs_extract_script_structure(array $data): array
     ];
 }
 
+function vcs_strip_private_audition_progress(array $progress_items): array
+{
+    return array_values(array_map(
+        static function (array $progress): array {
+            unset(
+                $progress['formEditUrl'],
+                $progress['formResponderUrl'],
+                $progress['headerImageUrl'],
+                $progress['socialImageUrl']
+            );
+            return $progress;
+        },
+        array_filter($progress_items, 'is_array')
+    ));
+}
+
 function vcs_filter_project_for_actor(array $project, int $user_id, array $character_ids, string $member_id = ''): array
 {
     unset(
@@ -497,6 +601,7 @@ function vcs_filter_project_for_actor(array $project, int $user_id, array $chara
         $project['auditionFormUrl'],
         $project['auditionUrl']
     );
+    $project['auditionRoleProgress'] = vcs_strip_private_audition_progress($project['auditionRoleProgress'] ?? []);
     $project['castMembers'] = array_values(array_map(
         static function (array $member): array {
             unset($member['contact'], $member['accessKey']);
@@ -566,6 +671,7 @@ function vcs_filter_project_for_shared_guest(array $project, string $public_memb
         $project['auditionFormUrl'],
         $project['auditionUrl']
     );
+    $project['auditionRoleProgress'] = vcs_strip_private_audition_progress($project['auditionRoleProgress'] ?? []);
     $project['castMembers'] = array_values(array_map(
         static function (array $member): array {
             unset($member['contact'], $member['accessKey'], $member['wpUserId']);
@@ -1159,6 +1265,404 @@ function vcs_rest_resolve_question(WP_REST_Request $request): WP_REST_Response|W
     return rest_ensure_response(['ok' => true, 'question' => $question]);
 }
 
+function vcs_rest_get_audition_automation_settings(): WP_REST_Response
+{
+    return rest_ensure_response(vcs_safe_audition_automation_settings());
+}
+
+function vcs_rest_save_audition_automation_settings(WP_REST_Request $request): WP_REST_Response|WP_Error
+{
+    $params = $request->get_json_params();
+    if (!is_array($params)) {
+        return new WP_Error('vcs_audition_settings_required', '設定内容を読み取れませんでした。', ['status' => 400]);
+    }
+    $settings = vcs_get_audition_automation_option();
+
+    if (!empty($params['clearOpenAiApiKey'])) {
+        unset($settings['openAiApiKey']);
+    }
+    if (array_key_exists('openAiApiKey', $params) && '' !== trim((string) $params['openAiApiKey'])) {
+        $api_key = trim((string) $params['openAiApiKey']);
+        if (!preg_match('/^sk-[A-Za-z0-9_-]{20,}$/', $api_key)) {
+            return new WP_Error('vcs_openai_key_invalid', 'OpenAI APIキーの形式を確認してください。', ['status' => 400]);
+        }
+        $encrypted = vcs_encrypt_secret($api_key);
+        if (is_wp_error($encrypted)) {
+            return $encrypted;
+        }
+        $settings['openAiApiKey'] = $encrypted;
+    }
+
+    // These integration values are accepted only from the owner setup panel and
+    // are returned to the browser only as a configured/not-configured flag.
+    if (array_key_exists('appsScriptWebAppUrl', $params) && '' !== trim((string) $params['appsScriptWebAppUrl'])) {
+        $url = esc_url_raw(trim((string) $params['appsScriptWebAppUrl']));
+        $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
+        if ('https' !== wp_parse_url($url, PHP_URL_SCHEME) || 'script.google.com' !== $host) {
+            return new WP_Error('vcs_apps_script_url_invalid', 'Google Apps ScriptのURLが正しくありません。', ['status' => 400]);
+        }
+        $encrypted = vcs_encrypt_secret($url);
+        if (is_wp_error($encrypted)) {
+            return $encrypted;
+        }
+        $settings['appsScriptWebAppUrl'] = $encrypted;
+    }
+    if (array_key_exists('appsScriptSecret', $params) && '' !== trim((string) $params['appsScriptSecret'])) {
+        $secret = trim((string) $params['appsScriptSecret']);
+        if (strlen($secret) < 32) {
+            return new WP_Error('vcs_apps_script_secret_invalid', 'Google連携用の秘密文字列が短すぎます。', ['status' => 400]);
+        }
+        $encrypted = vcs_encrypt_secret($secret);
+        if (is_wp_error($encrypted)) {
+            return $encrypted;
+        }
+        $settings['appsScriptSecret'] = $encrypted;
+    }
+
+    $settings['updatedAt'] = current_time('c');
+    update_option(VCS_AUDITION_AUTOMATION_OPTION, $settings, false);
+    return rest_ensure_response(vcs_safe_audition_automation_settings($settings));
+}
+
+function vcs_load_audition_image(string $source): array|WP_Error
+{
+    $source = trim($source);
+    if ('' === $source) {
+        return new WP_Error('vcs_character_image_required', '先にキャラクター画像を登録してください。', ['status' => 409]);
+    }
+    $bytes = '';
+    $mime_type = '';
+    if (str_starts_with($source, 'data:')) {
+        if (!preg_match('#^data:(image/(?:png|jpeg|webp));base64,(.+)$#s', $source, $matches)) {
+            return new WP_Error('vcs_character_image_invalid', 'キャラクター画像の形式を読み取れませんでした。', ['status' => 400]);
+        }
+        $mime_type = $matches[1];
+        $bytes = base64_decode($matches[2], true);
+        if (!is_string($bytes)) {
+            return new WP_Error('vcs_character_image_invalid', 'キャラクター画像を読み取れませんでした。', ['status' => 400]);
+        }
+    } else {
+        $url = str_starts_with($source, '/') ? home_url($source) : esc_url_raw($source);
+        $source_host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
+        $site_host = strtolower((string) wp_parse_url(home_url('/'), PHP_URL_HOST));
+        if ('https' !== wp_parse_url($url, PHP_URL_SCHEME) || $site_host !== $source_host) {
+            return new WP_Error('vcs_character_image_host', '自動作成には、このサイトへ登録したキャラクター画像を使用してください。', ['status' => 400]);
+        }
+        $response = wp_safe_remote_get($url, [
+            'timeout' => 30,
+            'redirection' => 3,
+            'limit_response_size' => 12 * MB_IN_BYTES,
+        ]);
+        if (is_wp_error($response)) {
+            return new WP_Error('vcs_character_image_fetch', 'キャラクター画像を取得できませんでした。', ['status' => 502]);
+        }
+        if (200 !== wp_remote_retrieve_response_code($response)) {
+            return new WP_Error('vcs_character_image_fetch', 'キャラクター画像を取得できませんでした。', ['status' => 502]);
+        }
+        $bytes = wp_remote_retrieve_body($response);
+        $mime_type = strtolower(trim(explode(';', (string) wp_remote_retrieve_header($response, 'content-type'))[0]));
+    }
+    if (!is_string($bytes) || '' === $bytes || strlen($bytes) > 12 * MB_IN_BYTES) {
+        return new WP_Error('vcs_character_image_size', 'キャラクター画像が大きすぎるか、空です。', ['status' => 400]);
+    }
+    $image_info = @getimagesizefromstring($bytes);
+    if (!is_array($image_info)) {
+        return new WP_Error('vcs_character_image_invalid', 'キャラクター画像として読み取れませんでした。', ['status' => 400]);
+    }
+    $detected_mime = image_type_to_mime_type((int) ($image_info[2] ?? 0));
+    if (in_array($detected_mime, ['image/png', 'image/jpeg', 'image/webp'], true)) {
+        $mime_type = $detected_mime;
+    }
+    return [
+        'bytes' => $bytes,
+        'mimeType' => $mime_type,
+        'fileName' => 'character.' . ('image/jpeg' === $mime_type ? 'jpg' : ('image/webp' === $mime_type ? 'webp' : 'png')),
+    ];
+}
+
+function vcs_get_audition_logo_image(): array|WP_Error
+{
+    $logo_path = get_template_directory() . '/assets/assets/umbrella-parade-audition-logo.png';
+    if (!is_readable($logo_path)) {
+        $logo_path = get_template_directory() . '/assets/assets/umbrella-parade-concept-logo.png';
+    }
+    $bytes = is_readable($logo_path) ? file_get_contents($logo_path) : false;
+    if (!is_string($bytes) || '' === $bytes) {
+        return new WP_Error('vcs_audition_logo_missing', 'Umbrella Paradeロゴを読み込めませんでした。', ['status' => 500]);
+    }
+    return ['bytes' => $bytes, 'mimeType' => 'image/png', 'fileName' => 'umbrella-parade-logo.png'];
+}
+
+function vcs_openai_multipart_body(array $fields, array $images): array
+{
+    $boundary = '----VCS' . bin2hex(random_bytes(18));
+    $body = '';
+    foreach ($fields as $name => $value) {
+        $body .= '--' . $boundary . "\r\n";
+        $body .= 'Content-Disposition: form-data; name="' . $name . '"' . "\r\n\r\n";
+        $body .= (string) $value . "\r\n";
+    }
+    foreach ($images as $image) {
+        $file_name = str_replace(['"', "\r", "\n"], '', (string) ($image['fileName'] ?? 'image.png'));
+        $body .= '--' . $boundary . "\r\n";
+        $body .= 'Content-Disposition: form-data; name="image[]"; filename="' . $file_name . '"' . "\r\n";
+        $body .= 'Content-Type: ' . (string) ($image['mimeType'] ?? 'image/png') . "\r\n\r\n";
+        $body .= (string) ($image['bytes'] ?? '') . "\r\n";
+    }
+    $body .= '--' . $boundary . "--\r\n";
+    return ['body' => $body, 'contentType' => 'multipart/form-data; boundary=' . $boundary];
+}
+
+function vcs_generate_audition_image(string $api_key, string $prompt, string $size, array $images): array|WP_Error
+{
+    try {
+        $multipart = vcs_openai_multipart_body([
+            'model' => VCS_AUDITION_OPENAI_MODEL,
+            'prompt' => $prompt,
+            'size' => $size,
+            'quality' => 'medium',
+            'output_format' => 'png',
+        ], $images);
+    } catch (Throwable $error) {
+        return new WP_Error('vcs_openai_request_build', '画像生成リクエストを準備できませんでした。', ['status' => 500]);
+    }
+    $response = wp_remote_post('https://api.openai.com/v1/images/edits', [
+        'timeout' => 240,
+        'redirection' => 0,
+        'httpversion' => '1.1',
+        'headers' => [
+            'Authorization' => 'Bearer ' . $api_key,
+            'Content-Type' => $multipart['contentType'],
+        ],
+        'body' => $multipart['body'],
+        'data_format' => 'body',
+    ]);
+    if (is_wp_error($response)) {
+        return new WP_Error('vcs_openai_unreachable', 'OpenAIへ接続できませんでした。時間をおいて再度お試しください。', ['status' => 502]);
+    }
+    $status = wp_remote_retrieve_response_code($response);
+    $payload = json_decode(wp_remote_retrieve_body($response), true);
+    if ($status < 200 || $status >= 300 || !is_array($payload)) {
+        $message = sanitize_text_field((string) ($payload['error']['message'] ?? '画像生成に失敗しました。'));
+        if (401 === $status) {
+            $message = 'OpenAI APIキーを確認してください。';
+        }
+        return new WP_Error('vcs_openai_error', $message, ['status' => 502]);
+    }
+    $base64 = (string) ($payload['data'][0]['b64_json'] ?? '');
+    $bytes = base64_decode($base64, true);
+    if (!is_string($bytes) || '' === $bytes) {
+        return new WP_Error('vcs_openai_empty_image', 'OpenAIから画像データを受け取れませんでした。', ['status' => 502]);
+    }
+    return ['base64' => $base64, 'bytes' => $bytes, 'mimeType' => 'image/png'];
+}
+
+function vcs_crop_audition_header(array $generated): array|WP_Error
+{
+    require_once ABSPATH . 'wp-admin/includes/image.php';
+    $source_path = wp_tempnam('vcs-audition-header-source.png');
+    if (!$source_path || false === file_put_contents($source_path, $generated['bytes'])) {
+        return new WP_Error('vcs_header_temp_failed', 'ヘッダー画像を整形できませんでした。', ['status' => 500]);
+    }
+    $output_path = $source_path . '.png';
+    try {
+        $editor = wp_get_image_editor($source_path);
+        if (is_wp_error($editor)) {
+            return new WP_Error('vcs_header_editor_failed', 'サーバーでヘッダー画像を整形できませんでした。', ['status' => 500]);
+        }
+        $size = $editor->get_size();
+        $source_width = (int) ($size['width'] ?? 0);
+        $source_height = (int) ($size['height'] ?? 0);
+        if ($source_width < 1 || $source_height < 1) {
+            return new WP_Error('vcs_header_size_failed', '生成画像の大きさを確認できませんでした。', ['status' => 500]);
+        }
+        $crop_width = $source_width;
+        $crop_height = (int) round($crop_width / 4);
+        if ($crop_height > $source_height) {
+            $crop_height = $source_height;
+            $crop_width = (int) round($crop_height * 4);
+        }
+        $source_x = max(0, (int) floor(($source_width - $crop_width) / 2));
+        $source_y = max(0, (int) floor(($source_height - $crop_height) / 2));
+        $cropped = $editor->crop($source_x, $source_y, $crop_width, $crop_height, 1600, 400, false);
+        if (is_wp_error($cropped)) {
+            return new WP_Error('vcs_header_crop_failed', 'ヘッダー画像を1600×400に整形できませんでした。', ['status' => 500]);
+        }
+        $saved = $editor->save($output_path, 'image/png');
+        if (is_wp_error($saved)) {
+            return new WP_Error('vcs_header_save_failed', 'ヘッダー画像を保存できませんでした。', ['status' => 500]);
+        }
+        $bytes = file_get_contents((string) ($saved['path'] ?? $output_path));
+        if (!is_string($bytes) || '' === $bytes) {
+            return new WP_Error('vcs_header_save_failed', 'ヘッダー画像を読み出せませんでした。', ['status' => 500]);
+        }
+        return ['base64' => base64_encode($bytes), 'bytes' => $bytes, 'mimeType' => 'image/png'];
+    } finally {
+        if (is_file($source_path)) unlink($source_path);
+        if (is_file($output_path)) unlink($output_path);
+    }
+}
+
+function vcs_call_audition_apps_script(string $url, string $secret, array $payload): array|WP_Error
+{
+    $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
+    if ('https' !== wp_parse_url($url, PHP_URL_SCHEME) || 'script.google.com' !== $host) {
+        return new WP_Error('vcs_apps_script_config_invalid', 'Google連携設定が正しくありません。', ['status' => 500]);
+    }
+    $response = wp_remote_post($url, [
+        'timeout' => 150,
+        'redirection' => 5,
+        'headers' => ['Content-Type' => 'application/json; charset=utf-8'],
+        'body' => wp_json_encode(['secret' => $secret, 'action' => 'createAuditionForm'] + $payload),
+        'data_format' => 'body',
+    ]);
+    if (is_wp_error($response)) {
+        return new WP_Error('vcs_apps_script_unreachable', 'Google Driveへ接続できませんでした。', ['status' => 502]);
+    }
+    $result = json_decode(wp_remote_retrieve_body($response), true);
+    if (wp_remote_retrieve_response_code($response) < 200
+        || wp_remote_retrieve_response_code($response) >= 300
+        || !is_array($result)
+        || empty($result['ok'])) {
+        $message = sanitize_text_field((string) ($result['error'] ?? 'Googleフォームを作成できませんでした。'));
+        return new WP_Error('vcs_apps_script_error', $message, ['status' => 502]);
+    }
+    return $result;
+}
+
+function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Response|WP_Error
+{
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(420);
+    }
+    $params = $request->get_json_params();
+    $project_id = sanitize_text_field((string) ($params['projectId'] ?? ''));
+    $character_id = sanitize_text_field((string) ($params['characterId'] ?? ''));
+    if ('' === $project_id || '' === $character_id) {
+        return new WP_Error('vcs_audition_role_required', '作品と役を選択してください。', ['status' => 400]);
+    }
+
+    $settings = vcs_get_audition_automation_option();
+    $api_key = vcs_get_audition_automation_secret($settings, 'openAiApiKey');
+    $apps_script_url = vcs_get_audition_automation_secret($settings, 'appsScriptWebAppUrl');
+    $apps_script_secret = vcs_get_audition_automation_secret($settings, 'appsScriptSecret');
+    if ('' === $api_key) {
+        return new WP_Error('vcs_openai_key_required', '先にOpenAI APIキーを保存してください。', ['status' => 409]);
+    }
+    if ('' === $apps_script_url || '' === $apps_script_secret) {
+        return new WP_Error('vcs_apps_script_required', 'Googleフォーム連携がまだ設定されていません。', ['status' => 409]);
+    }
+
+    $data = vcs_decode_workspace(vcs_get_workspace_post(false));
+    $project_index = vcs_find_project_index($data, $project_id);
+    if ($project_index < 0) {
+        return new WP_Error('vcs_project_not_found', '作品が見つかりません。', ['status' => 404]);
+    }
+    $project = $data['recordingProjects'][$project_index];
+    $character = null;
+    foreach (($project['characters'] ?? []) as $candidate) {
+        if (is_array($candidate) && (string) ($candidate['id'] ?? '') === $character_id) {
+            $character = $candidate;
+            break;
+        }
+    }
+    if (!$character) {
+        return new WP_Error('vcs_character_not_found', '役が見つかりません。', ['status' => 404]);
+    }
+    $role_name = trim((string) ($character['name'] ?? ''));
+    if ('' === $role_name) {
+        return new WP_Error('vcs_character_name_required', 'キャラクター名を登録してください。', ['status' => 409]);
+    }
+    foreach (($project['auditionRoleProgress'] ?? []) as $progress) {
+        if (is_array($progress)
+            && (string) ($progress['characterId'] ?? '') === $character_id
+            && '' !== trim((string) ($progress['formEditUrl'] ?? ''))) {
+            return new WP_Error('vcs_audition_already_created', 'この役のフォームはすでに作成済みです。', ['status' => 409]);
+        }
+    }
+
+    $lock_key = 'vcs_audition_' . md5($project_id . '|' . $character_id);
+    if (get_transient($lock_key)) {
+        return new WP_Error('vcs_audition_in_progress', 'この役のフォームは現在作成中です。しばらくお待ちください。', ['status' => 409]);
+    }
+    set_transient($lock_key, '1', 10 * MINUTE_IN_SECONDS);
+
+    try {
+        $character_image = vcs_load_audition_image((string) ($character['imageUrl'] ?? ''));
+        if (is_wp_error($character_image)) return $character_image;
+        $logo_image = vcs_get_audition_logo_image();
+        if (is_wp_error($logo_image)) return $logo_image;
+        $profile = trim(wp_strip_all_tags((string) ($character['profile'] ?? '')));
+        $profile = function_exists('mb_substr') ? mb_substr($profile, 0, 700) : substr($profile, 0, 700);
+        $project_title = trim((string) ($project['title'] ?? 'Voice Cast Studio'));
+        $common_prompt = "Input image 1 is the official character reference. Preserve the same character identity, face, hairstyle, outfit, colors, and overall design. Input image 2 is the official Umbrella Parade logo; reproduce it faithfully without changing its lettering or proportions. Do not add other characters, third-party logos, watermarks, or unreadable decorative text. Project: {$project_title}. Role: {$role_name}. Character notes: {$profile}.";
+
+        $header_prompt = $common_prompt . " Create polished Japanese voice-actor audition key art for a Google Forms header. Use a cinematic but readable composition with the character as the clear subject and the Umbrella Parade logo visibly integrated. Include the exact Japanese title 『{$role_name}』役オーディション, spelled exactly. Keep every essential face, logo, and title element inside the central horizontal 4:1 safe band because the generated 1600x544 image will be center-cropped to 1600x400. Balanced contrast, professional production artwork.";
+        $generated_header = vcs_generate_audition_image($api_key, $header_prompt, '1600x544', [$character_image, $logo_image]);
+        if (is_wp_error($generated_header)) return $generated_header;
+        $header_image = vcs_crop_audition_header($generated_header);
+        if (is_wp_error($header_image)) return $header_image;
+
+        $social_prompt = $common_prompt . " Create polished 16:9 Japanese social-media audition artwork. Feature the character prominently, integrate the Umbrella Parade logo, and include the exact Japanese title 『{$role_name}』役オーディション, spelled exactly. Leave comfortable margins so the artwork is readable on phones. Cinematic, polished, and suitable for an official voice-actor recruitment announcement.";
+        $social_image = vcs_generate_audition_image($api_key, $social_prompt, '1792x1008', [$character_image, $logo_image]);
+        if (is_wp_error($social_image)) return $social_image;
+
+        $request_key = substr(hash_hmac('sha256', $project_id . '|' . $character_id, $apps_script_secret), 0, 48);
+        $google_result = vcs_call_audition_apps_script($apps_script_url, $apps_script_secret, [
+            'requestKey' => $request_key,
+            'projectTitle' => $project_title,
+            'roleName' => $role_name,
+            'headerImage' => ['base64' => $header_image['base64'], 'mimeType' => 'image/png'],
+            'socialImage' => ['base64' => $social_image['base64'], 'mimeType' => 'image/png'],
+        ]);
+        if (is_wp_error($google_result)) return $google_result;
+
+        $progress_items = is_array($project['auditionRoleProgress'] ?? null) ? $project['auditionRoleProgress'] : [];
+        $existing_progress = [];
+        foreach ($progress_items as $progress) {
+            if (is_array($progress) && (string) ($progress['characterId'] ?? '') === $character_id) {
+                $existing_progress = $progress;
+                break;
+            }
+        }
+        $progress = array_merge($existing_progress, [
+            'characterId' => $character_id,
+            'formCreated' => true,
+            'recruitmentStarted' => (bool) ($existing_progress['recruitmentStarted'] ?? false),
+            'formEditUrl' => esc_url_raw((string) ($google_result['formEditUrl'] ?? '')),
+            'formResponderUrl' => esc_url_raw((string) ($google_result['formResponderUrl'] ?? '')),
+            'headerImageUrl' => esc_url_raw((string) ($google_result['headerImageUrl'] ?? '')),
+            'socialImageUrl' => esc_url_raw((string) ($google_result['socialImageUrl'] ?? '')),
+            'createdAt' => sanitize_text_field((string) ($google_result['createdAt'] ?? current_time('c'))),
+            'updatedAt' => current_time('c'),
+        ]);
+        $found_progress = false;
+        foreach ($progress_items as $index => $item) {
+            if (is_array($item) && (string) ($item['characterId'] ?? '') === $character_id) {
+                $progress_items[$index] = $progress;
+                $found_progress = true;
+            }
+        }
+        if (!$found_progress) $progress_items[] = $progress;
+        $data['recordingProjects'][$project_index]['auditionRoleProgress'] = array_values($progress_items);
+        $write = vcs_write_workspace($data);
+        if (is_wp_error($write)) return $write;
+
+        $safe_role_name = preg_replace('/[\\\\\/:*?"<>|]+/u', '_', $role_name);
+        return rest_ensure_response([
+            'ok' => true,
+            'progress' => $progress,
+            'imageFiles' => [
+                ['fileName' => $safe_role_name . '_Googleフォームヘッダー_1600x400.png', 'mimeType' => 'image/png', 'base64' => $header_image['base64']],
+                ['fileName' => $safe_role_name . '_SNS_16x9.png', 'mimeType' => 'image/png', 'base64' => $social_image['base64']],
+            ],
+            'headerThemeNeedsManualSelection' => true,
+        ]);
+    } finally {
+        delete_transient($lock_key);
+    }
+}
+
 function vcs_rest_upload_image(WP_REST_Request $request): WP_REST_Response|WP_Error
 {
     if (empty($_FILES['file'])) {
@@ -1216,6 +1720,23 @@ function vcs_register_rest_routes(): void
         'methods' => WP_REST_Server::CREATABLE,
         'callback' => 'vcs_rest_upload_image',
         'permission_callback' => static fn(): bool => vcs_rest_can_manage() && current_user_can('upload_files'),
+    ]);
+    register_rest_route(VCS_REST_NAMESPACE, '/audition-automation/settings', [
+        [
+            'methods' => WP_REST_Server::READABLE,
+            'callback' => 'vcs_rest_get_audition_automation_settings',
+            'permission_callback' => 'vcs_rest_can_edit_script',
+        ],
+        [
+            'methods' => WP_REST_Server::CREATABLE,
+            'callback' => 'vcs_rest_save_audition_automation_settings',
+            'permission_callback' => 'vcs_rest_can_edit_script',
+        ],
+    ]);
+    register_rest_route(VCS_REST_NAMESPACE, '/audition-automation/create', [
+        'methods' => WP_REST_Server::CREATABLE,
+        'callback' => 'vcs_rest_create_audition_form',
+        'permission_callback' => 'vcs_rest_can_edit_script',
     ]);
 }
 add_action('rest_api_init', 'vcs_register_rest_routes');

@@ -2410,6 +2410,188 @@ h1 {
   opacity: .42;
 }
 
+.audition-automation-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #bfcfd0;
+  border-radius: 6px;
+  background: #f4faf9;
+}
+
+.audition-automation-heading,
+.audition-automation-heading > div:first-child,
+.audition-automation-heading > div:first-child > div {
+  display: flex;
+  min-width: 0;
+}
+
+.audition-automation-heading {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.audition-automation-heading > div:first-child {
+  align-items: center;
+  gap: 8px;
+}
+
+.audition-automation-heading > div:first-child > svg {
+  flex: 0 0 auto;
+  color: #167680;
+}
+
+.audition-automation-heading > div:first-child > div {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.audition-automation-heading b {
+  font-size: 13px;
+}
+
+.audition-automation-heading span,
+.audition-automation-notes span {
+  color: #655f67;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.audition-automation-badges {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.audition-automation-badges span {
+  padding: 4px 7px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.audition-automation-badges .ready {
+  background: #dff2ea;
+  color: #216a4c;
+}
+
+.audition-automation-badges .waiting {
+  background: #fff0d4;
+  color: #875804;
+}
+
+.audition-automation-controls {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto auto;
+  gap: 7px;
+  align-items: end;
+}
+
+.audition-automation-controls label {
+  display: grid;
+  gap: 5px;
+}
+
+.audition-automation-controls label > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #4f4953;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.audition-automation-controls input {
+  width: 100%;
+}
+
+.audition-automation-controls button {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.audition-google-setup {
+  border-top: 1px solid #cfe0de;
+  padding-top: 8px;
+}
+
+.audition-google-setup summary {
+  cursor: pointer;
+  color: #315f64;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.audition-google-setup > p {
+  margin: 6px 0;
+  color: #655f67;
+  font-size: 10px;
+}
+
+.audition-google-setup > div {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(180px, .7fr) auto;
+  gap: 7px;
+  align-items: end;
+}
+
+.audition-google-setup label {
+  display: grid;
+  gap: 5px;
+}
+
+.audition-google-setup label > span {
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.audition-google-setup input {
+  width: 100%;
+}
+
+.audition-google-setup button {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.audition-automation-notes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 5px 14px;
+}
+
+.audition-automation-notes span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.audition-automation-notes svg {
+  flex: 0 0 auto;
+  color: #2d8068;
+}
+
+.audition-automation-message {
+  margin: 0;
+  padding: 8px 9px;
+  border-left: 3px solid #27848c;
+  background: #e9f5f5;
+  color: #285c60;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.audition-automation-message.error {
+  border-left-color: #b54755;
+  background: #fff0f1;
+  color: #963542;
+}
+
 .unassigned-role-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2471,6 +2653,10 @@ h1 {
   gap: 6px;
 }
 
+.audition-create-button {
+  white-space: nowrap;
+}
+
 .unassigned-role-statuses {
   display: flex;
   grid-column: 2 / -1;
@@ -2499,6 +2685,38 @@ h1 {
   border-color: #76b29c;
   background: #e9f7f1;
   color: #236248;
+}
+
+.audition-created-links {
+  display: flex;
+  grid-column: 2 / -1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #ece4dc;
+}
+
+.audition-created-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid #c9d7d4;
+  border-radius: 5px;
+  background: #f4faf8;
+  color: #176d73;
+  font-size: 10px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.audition-created-links > span {
+  flex: 1 1 230px;
+  color: #7b6675;
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .unassigned-role-statuses input {
@@ -2989,8 +3207,18 @@ h1 {
   }
 
   .audition-form-panel,
-  .audition-form-control {
+  .audition-form-control,
+  .audition-automation-controls,
+  .audition-google-setup > div {
     grid-template-columns: 1fr;
+  }
+
+  .audition-automation-heading {
+    flex-direction: column;
+  }
+
+  .audition-automation-badges {
+    justify-content: flex-start;
   }
 
   .task-section-actions {
@@ -3027,7 +3255,15 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .unassigned-role-actions .audition-create-button {
+    grid-column: 1 / -1;
+  }
+
   .unassigned-role-statuses {
+    grid-column: 2;
+  }
+
+  .audition-created-links {
     grid-column: 2;
   }
 

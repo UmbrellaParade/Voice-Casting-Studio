@@ -61,6 +61,11 @@ const normalizeAuditionRoleProgress = (value) => {
       characterId,
       formCreated: Boolean(progress.formCreated),
       recruitmentStarted: Boolean(progress.recruitmentStarted),
+      formEditUrl: String(progress.formEditUrl || ""),
+      formResponderUrl: String(progress.formResponderUrl || ""),
+      headerImageUrl: String(progress.headerImageUrl || ""),
+      socialImageUrl: String(progress.socialImageUrl || ""),
+      createdAt: String(progress.createdAt || ""),
       updatedAt: String(progress.updatedAt || "")
     });
   });
@@ -536,6 +541,14 @@ export const getShareableRecordingProject = (project = {}) => {
   delete sharedProject.auditionFormFolderUrl;
   delete sharedProject.auditionFormUrl;
   delete sharedProject.auditionUrl;
+  sharedProject.auditionRoleProgress = (sharedProject.auditionRoleProgress || []).map((progress) => {
+    const publicProgress = { ...progress };
+    delete publicProgress.formEditUrl;
+    delete publicProgress.formResponderUrl;
+    delete publicProgress.headerImageUrl;
+    delete publicProgress.socialImageUrl;
+    return publicProgress;
+  });
   return sharedProject;
 };
 

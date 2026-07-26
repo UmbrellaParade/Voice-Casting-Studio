@@ -64,6 +64,12 @@ const wordpressRequest = async (path, options = {}) => {
       return { ok: true, question: { id: body.questionId, status: "解決済み", updatedAt: new Date().toISOString() } };
     }
     if (path === "image") return { id: 0, url: "" };
+    if (path === "audition-automation/settings") {
+      return { hasOpenAiKey: false, appsScriptConfigured: false, model: "gpt-image-2" };
+    }
+    if (path === "audition-automation/create") {
+      throw new Error("プレビューではオーディションフォームを作成できません。");
+    }
   }
   const shareHeaders = runtime.shareAccess?.accessKey ? {
     "X-VCS-Project": runtime.shareAccess.projectId,
@@ -148,3 +154,18 @@ export const uploadWordPressImage = (file) => {
   body.append("file", file);
   return wordpressRequest("image", { method: "POST", body });
 };
+
+export const getWordPressAuditionAutomationSettings = () => wordpressRequest(
+  "audition-automation/settings",
+  { method: "GET" }
+);
+
+export const saveWordPressAuditionAutomationSettings = (settings) => wordpressRequest(
+  "audition-automation/settings",
+  { method: "POST", body: JSON.stringify(settings) }
+);
+
+export const createWordPressAuditionForm = ({ projectId, characterId }) => wordpressRequest(
+  "audition-automation/create",
+  { method: "POST", body: JSON.stringify({ projectId, characterId }) }
+);

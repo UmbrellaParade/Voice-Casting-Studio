@@ -39,10 +39,13 @@ import "./member.css";
 import { PersistentAudioProvider } from "./components/PersistentAudioPlayer.jsx";
 import { postToGasEndpoint, getFromGasEndpoint, loadAppConfig } from "./lib/gas.js";
 import {
+  createWordPressAuditionForm,
   createWordPressQuestion,
+  getWordPressAuditionAutomationSettings,
   getWordPressRuntime,
   loadWordPressWorkspace,
   resolveWordPressQuestion,
+  saveWordPressAuditionAutomationSettings,
   saveWordPressWorkspace,
   updateWordPressRecordingLine
 } from "./lib/wordpress.js";
@@ -481,6 +484,11 @@ function App() {
     canEditScript: WORDPRESS_RUNTIME ? Boolean(WORDPRESS_RUNTIME.canEditScript) : true,
     currentUser: WORDPRESS_RUNTIME?.currentUser || null
   }));
+  const [auditionAutomationState, setAuditionAutomationState] = useState(() => ({
+    status: WORDPRESS_RUNTIME?.canEditScript ? "loading" : "unavailable",
+    message: "",
+    settings: null
+  }));
   const [syncState, setSyncState] = useState({ busy: false, message: "" });
   const [packExportMessage, setPackExportMessage] = useState("");
   const autoThumbnailGenerationRef = useRef("");
@@ -558,6 +566,39 @@ function App() {
     return result;
   };
 
+  const saveAuditionAutomationSettings = async (settings) => {
+    setAuditionAutomationState((current) => ({ ...current, status: "saving", message: "API設定を保存しています…" }));
+    try {
+      const result = await saveWordPressAuditionAutomationSettings(settings);
+      setAuditionAutomationState({ status: "ready", message: "API設定を保存しました。", settings: result });
+      return result;
+    } catch (error) {
+      setAuditionAutomationState((current) => ({ ...current, status: "error", message: error.message }));
+      throw error;
+    }
+  };
+
+  const createAuditionForm = async (projectId, characterId) => {
+    const result = await createWordPressAuditionForm({ projectId, characterId });
+    if (result.progress) {
+      setData((current) => ({
+        ...current,
+        recordingProjects: current.recordingProjects.map((project) => {
+          if (project.id !== projectId) return project;
+          const progressItems = project.auditionRoleProgress || [];
+          const exists = progressItems.some((progress) => progress.characterId === characterId);
+          return {
+            ...project,
+            auditionRoleProgress: exists
+              ? progressItems.map((progress) => progress.characterId === characterId ? result.progress : progress)
+              : [...progressItems, result.progress]
+          };
+        })
+      }));
+    }
+    return result;
+  };
+
   useEffect(() => {
     if (!WORDPRESS_RUNTIME) return undefined;
     let cancelled = false;
@@ -576,6 +617,21 @@ function App() {
           canEditScript: Boolean(WORDPRESS_RUNTIME?.canEditScript),
           currentUser: WORDPRESS_RUNTIME?.currentUser || null
         });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!WORDPRESS_RUNTIME?.canEditScript) return undefined;
+    let cancelled = false;
+    getWordPressAuditionAutomationSettings()
+      .then((settings) => {
+        if (!cancelled) setAuditionAutomationState({ status: "ready", message: "", settings });
+      })
+      .catch((error) => {
+        if (!cancelled) setAuditionAutomationState({ status: "error", message: error.message, settings: null });
       });
     return () => {
       cancelled = true;
@@ -1957,7 +2013,10 @@ ${socialRows || "-"}
               updateProject={(updater) => updateRecordingProject(selectedRecordingProjectId, updater)}
               siteUsers={wordpressState.users}
               canEditScript={canEditScript}
+              auditionAutomation={auditionAutomationState}
               currentUser={wordpressState.currentUser || WORDPRESS_RUNTIME?.currentUser || {}}
+              onSaveAuditionAutomationSettings={canEditScript && WORDPRESS_RUNTIME ? saveAuditionAutomationSettings : null}
+              onCreateAuditionForm={canEditScript && WORDPRESS_RUNTIME ? createAuditionForm : null}
               onCreateQuestion={WORDPRESS_RUNTIME && !canEditScript ? addMemberQuestion : null}
               onResolveQuestion={WORDPRESS_RUNTIME && !canEditScript ? resolveMemberQuestion : null}
               setActive={setActive}
