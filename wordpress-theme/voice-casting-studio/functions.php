@@ -94,6 +94,7 @@ function vcs_prepare_anonymous_member_portal(): void
 {
     if (!is_user_logged_in()) {
         nocache_headers();
+        header('X-Robots-Tag: noindex, nofollow', true);
     }
 }
 add_action('template_redirect', 'vcs_prepare_anonymous_member_portal');
@@ -532,6 +533,30 @@ function vcs_filter_project_for_actor(array $project, int $user_id, array $chara
     return $project;
 }
 
+function vcs_filter_project_for_shared_guest(array $project): array
+{
+    unset($project['scriptSnapshots'], $project['sourceScriptText']);
+    $project['castMembers'] = [];
+    $project['questions'] = [];
+    $project['lines'] = array_values(array_map(
+        static function (array $line): array {
+            unset($line['recordingUrl'], $line['recordingFileName'], $line['actorNote'], $line['directorNote']);
+            return $line;
+        },
+        $project['lines'] ?? []
+    ));
+    $derived_progress = [];
+    foreach (($project['derivedLineProgress'] ?? []) as $line_id => $progress) {
+        if (!is_array($progress)) {
+            continue;
+        }
+        unset($progress['recordingUrl'], $progress['recordingFileName'], $progress['actorNote'], $progress['directorNote']);
+        $derived_progress[(string) $line_id] = $progress;
+    }
+    $project['derivedLineProgress'] = $derived_progress;
+    return $project;
+}
+
 function vcs_rest_get_workspace(WP_REST_Request $request): WP_REST_Response
 {
     $post = vcs_get_workspace_post(false);
@@ -539,24 +564,40 @@ function vcs_rest_get_workspace(WP_REST_Request $request): WP_REST_Response
     $can_manage = current_user_can(VCS_MANAGER_CAPABILITY);
     $can_edit_script = current_user_can(VCS_SCRIPT_CAPABILITY);
     $current_cast_member_id = '';
+    $access_mode = $can_manage ? 'manager' : 'actor';
     $workspace = $post ? vcs_decode_workspace($post) : null;
     if (is_array($workspace) && !$can_manage && !is_user_logged_in()) {
         $share_context = vcs_get_share_context($request, $workspace);
         $member = $share_context['member'] ?? [];
-        $workspace = $share_context ? [
-            'studioConcept' => vcs_normalize_studio_concept($workspace),
-            'recordingProjects' => [vcs_filter_project_for_actor(
-                $share_context['project'],
-                (int) ($member['wpUserId'] ?? 0),
-                $share_context['characterIds'],
-                (string) ($member['id'] ?? '')
-            )],
-        ] : null;
-        $user = (object) [
-            'ID' => 0,
-            'display_name' => (string) ($member['actorName'] ?? '声優さん'),
-        ];
-        $current_cast_member_id = (string) ($member['id'] ?? '');
+        if ($share_context) {
+            $workspace = [
+                'studioConcept' => vcs_normalize_studio_concept($workspace),
+                'recordingProjects' => [vcs_filter_project_for_actor(
+                    $share_context['project'],
+                    (int) ($member['wpUserId'] ?? 0),
+                    $share_context['characterIds'],
+                    (string) ($member['id'] ?? '')
+                )],
+            ];
+            $user = (object) [
+                'ID' => 0,
+                'display_name' => (string) ($member['actorName'] ?? '声優さん'),
+            ];
+            $current_cast_member_id = (string) ($member['id'] ?? '');
+        } else {
+            $workspace = [
+                'studioConcept' => vcs_normalize_studio_concept($workspace),
+                'recordingProjects' => array_values(array_map(
+                    'vcs_filter_project_for_shared_guest',
+                    $workspace['recordingProjects'] ?? []
+                )),
+            ];
+            $user = (object) [
+                'ID' => 0,
+                'display_name' => '全メンバー共通',
+            ];
+            $access_mode = 'guest';
+        }
     } elseif (is_array($workspace) && !$can_manage) {
         $assigned_projects = [];
         foreach (($workspace['recordingProjects'] ?? []) as $project) {
@@ -584,6 +625,7 @@ function vcs_rest_get_workspace(WP_REST_Request $request): WP_REST_Response
             'id' => (int) $user->ID,
             'name' => $user->display_name,
             'castMemberId' => $current_cast_member_id,
+            'accessMode' => $access_mode,
         ],
         'canManage' => $can_manage,
         'canEditScript' => $can_edit_script,
@@ -1070,7 +1112,7 @@ function vcs_register_rest_routes(): void
         [
             'methods' => WP_REST_Server::READABLE,
             'callback' => 'vcs_rest_get_workspace',
-            'permission_callback' => 'vcs_rest_actor_access',
+            'permission_callback' => '__return_true',
         ],
         [
             'methods' => WP_REST_Server::CREATABLE,

@@ -20,7 +20,7 @@ import {
   Users
 } from "lucide-react";
 import { getGoogleDriveFileId, isWebUrl, makeDirectAudioDownloadUrl, makeGoogleDrivePreviewUrl, makeImagePreviewUrl } from "../lib/core.js";
-import { buildProductionQuestionThreads, canResolveProductionQuestion, getCharacterImageCropStyle, getCharacterName, getCharacterScriptName, getRecordingDisplayProject, getRecordingProgress, parseRubyText, partitionCharactersByScript, sortProductionScheduleItems } from "../lib/recording.js";
+import { buildProductionQuestionThreads, canResolveProductionQuestion, getCharacterImageCropStyle, getCharacterName, getCharacterScriptName, getFilteredRecordingLines, getRecordingDisplayProject, getRecordingProgress, parseRubyText, partitionCharactersByScript, sortProductionScheduleItems } from "../lib/recording.js";
 import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
 import { ConceptView } from "./ConceptView.jsx";
 import { ManualView } from "./ManualView.jsx";
@@ -107,10 +107,10 @@ const getChapters = (lines = []) => {
   return chapters.map(({ byScene, ...chapter }) => chapter);
 };
 
-function MemberProjectBar({ projects, project, setProjectId, runtime, connectionState, onRefresh }) {
+function MemberProjectBar({ projects, project, setProjectId, runtime, connectionState, onRefresh, isGuest = false }) {
   return (
     <div className="member-project-bar">
-      <label><span>担当作品</span><select value={project.id} onChange={(event) => setProjectId(event.target.value)}>{projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+      <label><span>{isGuest ? "共有作品" : "担当作品"}</span><select value={project.id} onChange={(event) => setProjectId(event.target.value)}>{projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
       <div>
         <span className={`member-sync-state ${connectionState.status}`}>{connectionState.message}</span>
         <button type="button" className="icon-button" title="最新状況を読み込む" onClick={onRefresh}><RefreshCw size={16} /></button>
@@ -145,7 +145,7 @@ function MemberDeadlineList({ project, compact = false }) {
   );
 }
 
-function MemberHome({ project, assignedCharacterIds, setActive }) {
+function MemberHome({ project, assignedCharacterIds, setActive, isGuest = false }) {
   const assignedLines = project.lines.filter((line) => line.kind !== "direction" && assignedCharacterIds.has(line.characterId));
   const progress = getRecordingProgress({ ...project, lines: assignedLines });
   const unreviewed = assignedLines.filter((line) => line.actorStatus !== "未収録" && ["未確認", "確認中"].includes(line.reviewStatus));
@@ -156,11 +156,11 @@ function MemberHome({ project, assignedCharacterIds, setActive }) {
     <div className="production-page-stack member-home">
       <MemberKeyDates project={project} />
       <MemberDeadlineList project={project} compact />
-      <div className="production-metrics-grid">
-        <button type="button" className="production-metric" onClick={() => setActive("script")}><CheckCircle2 size={20} /><span>担当セリフ収録済み</span><strong>{progress.recorded}/{progress.total}</strong><small>{progress.recordedPercent}%</small></button>
+      <div className={`production-metrics-grid${isGuest ? " member-guest-metrics" : ""}`}>
+        <button type="button" className="production-metric" onClick={() => setActive("script")}><CheckCircle2 size={20} /><span>{isGuest ? "全セリフ収録済み" : "担当セリフ収録済み"}</span><strong>{progress.recorded}/{progress.total}</strong><small>{progress.recordedPercent}%</small></button>
         <button type="button" className={`production-metric ${unreviewed.length ? "attention" : ""}`} onClick={() => setActive("script")}><FileAudio size={20} /><span>確認待ち</span><strong>{unreviewed.length}</strong><small>提出済み録音</small></button>
         <button type="button" className={`production-metric ${retakes.length ? "danger" : ""}`} onClick={() => setActive("script")}><RefreshCw size={20} /><span>リテイク</span><strong>{retakes.length}</strong><small>再提出が必要</small></button>
-        <button type="button" className={`production-metric ${questions.length ? "attention" : ""}`} onClick={() => setActive("questions")}><CircleHelp size={20} /><span>対応中の質問</span><strong>{questions.length}</strong><small>未回答・回答済み</small></button>
+        {!isGuest && <button type="button" className={`production-metric ${questions.length ? "attention" : ""}`} onClick={() => setActive("questions")}><CircleHelp size={20} /><span>対応中の質問</span><strong>{questions.length}</strong><small>未回答・回答済み</small></button>}
       </div>
       <div className="production-home-grid">
         <section className="panel production-dashboard-section announcements"><header><div><Megaphone size={19} /><h3>お知らせ</h3></div></header><div className="production-dashboard-list compact">{project.announcements.map((item) => <article className={item.priority === "重要" ? "important" : ""} key={item.id}><div><b>{item.title}</b><span>{formatDate(item.publishedAt)}</span></div><p>{item.body}</p></article>)}{!project.announcements.length && <p className="production-list-empty">お知らせはありません。</p>}</div></section>
@@ -200,7 +200,7 @@ function MemberLine({ project, line, editable, onSave }) {
   };
   return (
     <article className={`member-script-line${editable ? " assigned" : " context"}${line.kind === "direction" ? " direction" : ""}${line.derivedFromManualBody ? " derived-manual-line" : ""}`} style={{ "--character-color": character?.color || "#5f6d7a", "--character-background": makeTint(character?.color) }}>
-      <header><span>{String(line.displayOrder ?? line.order).padStart(3, "0")}</span><b>{line.kind === "direction" ? "ト書き" : character?.name || "話者未設定"}{line.kind !== "direction" && line.performanceType && line.performanceType !== "通常" && <em className="line-performance-badge">{line.performanceType}</em>}</b>{line.kind !== "direction" && <div><span>{actorStatus}</span><span>{line.reviewStatus}</span></div>}</header>
+      <header><span>{String(line.displayOrder ?? line.order).padStart(3, "0")}</span><b>{line.kind === "direction" ? "ト書き" : character?.name || "話者未設定"}{line.kind !== "direction" && line.performanceType && line.performanceType !== "通常" && <em className="line-performance-badge">{line.performanceType}</em>}</b>{line.kind !== "direction" && <div><span>収録: {actorStatus}</span><span className={`review-status status-${line.reviewStatus}`}>制作確認: {line.reviewStatus}</span></div>}</header>
       <p><RubyText text={line.text} /></p>
       {line.direction && <small>{line.direction}</small>}
       {line.derivedFromManualBody && <small className="derived-manual-note">章本文から表示</small>}
@@ -216,21 +216,23 @@ function MemberLine({ project, line, editable, onSave }) {
   );
 }
 
-function MemberScript({ project, assignedCharacterIds, onUpdateLine }) {
+function MemberScript({ project, assignedCharacterIds, onUpdateLine, canUpdateLine = true }) {
   const displayProject = useMemo(() => getRecordingDisplayProject(project), [project]);
   const chapters = useMemo(() => getChapters(displayProject.lines), [displayProject.lines]);
   const [chapterId, setChapterId] = useState("");
   const [sceneId, setSceneId] = useState("");
   const [characterIds, setCharacterIds] = useState([]);
+  const [includeContext, setIncludeContext] = useState(true);
   const chapter = chapters.find((item) => item.id === chapterId);
   const characterScopeLines = displayProject.lines.filter((line) => {
     if (sceneId && line.sceneId !== sceneId) return false;
     if (!sceneId && chapterId && line.chapterId !== chapterId) return false;
     return true;
   });
-  const scopedLines = characterScopeLines.filter((line) => {
-    if (characterIds.length && line.kind !== "direction" && !characterIds.includes(line.characterId)) return false;
-    return !characterIds.length || line.kind !== "direction";
+  const scopedLines = getFilteredRecordingLines({
+    project: { ...displayProject, lines: characterScopeLines },
+    selectedCharacterIds: characterIds,
+    includeContext
   });
   const visibleChapters = getChapters(scopedLines);
   const tocChapter = chapterId && !sceneId
@@ -248,6 +250,10 @@ function MemberScript({ project, assignedCharacterIds, onUpdateLine }) {
         {chapter && <div className="script-scene-scope"><div className="script-scene-scope-heading"><span>{chapter.title}</span><small>シーンを選択</small></div><div className="script-scene-options"><button type="button" className={!sceneId ? "active" : ""} onClick={() => setSceneId("")}><strong>章の全文</strong><small>{chapter.lines.filter((line) => line.kind !== "direction").length}セリフ</small></button>{chapter.scenes.map((scene) => <button type="button" className={sceneId === scene.id ? "active" : ""} key={scene.id} onClick={() => setSceneId(scene.id)}><strong>{scene.title}</strong><small>{scene.lines.filter((line) => line.kind !== "direction").length}セリフ</small></button>)}</div></div>}
       </div>
       <div className="member-character-filter"><button type="button" className={!characterIds.length ? "active" : ""} onClick={() => setCharacterIds([])}>全文</button>{availableCharacters.map((character) => <button type="button" className={characterIds.includes(character.id) ? "active" : ""} style={{ "--character-color": character.color }} key={character.id} onClick={() => toggleCharacter(character.id)}><i />{getCharacterScriptName(character)}</button>)}</div>
+      <label className={`member-context-toggle${characterIds.length ? "" : " disabled"}`}>
+        <input type="checkbox" checked={includeContext} disabled={!characterIds.length} onChange={(event) => setIncludeContext(event.target.checked)} />
+        <span><b>前後のセリフも表示</b><small>人物を選ぶと、そのセリフの直前・直後も一緒に表示します。</small></span>
+      </label>
       <div className={`script-board-layout${tocChapter?.scenes.length > 1 ? " has-scene-toc" : ""}`}>
         <ScriptSceneToc scenes={tocChapter?.scenes || []} scopeId={tocScopeId} />
         <div className="script-chapters">
@@ -257,7 +263,7 @@ function MemberScript({ project, assignedCharacterIds, onUpdateLine }) {
               {chapterGroup.scenes.map((scene) => (
                 <details id={getScriptSceneAnchorId(tocScopeId, scene.id)} className="member-scene" key={scene.id} open>
                   <summary><strong>{scene.title}</strong><span>{scene.lines.filter((line) => line.kind !== "direction").length}セリフ</span></summary>
-                  <div className="member-line-list">{scene.lines.map((line) => <MemberLine key={line.id} project={displayProject} line={line} editable={assignedCharacterIds.has(line.characterId)} onSave={(lineId, patch, context) => onUpdateLine(project.id, lineId, patch, context)} />)}</div>
+                  <div className="member-line-list">{scene.lines.map((line) => <MemberLine key={line.id} project={displayProject} line={line} editable={canUpdateLine && !line.isContext && assignedCharacterIds.has(line.characterId)} onSave={(lineId, patch, context) => onUpdateLine(project.id, lineId, patch, context)} />)}</div>
                 </details>
               ))}
             </details>
@@ -268,7 +274,7 @@ function MemberScript({ project, assignedCharacterIds, onUpdateLine }) {
   );
 }
 
-function MemberCharacters({ project, assignedCharacterIds }) {
+function MemberCharacters({ project, assignedCharacterIds, showAssignments = true }) {
   const { linkedCharacters } = partitionCharactersByScript(project);
   return (
     <div className="member-character-grid">
@@ -276,7 +282,7 @@ function MemberCharacters({ project, assignedCharacterIds }) {
         <article key={character.id} style={{ "--character-color": character.color }}>
           <div className="member-character-image">{character.imageUrl ? <img src={makeImagePreviewUrl(character.imageUrl) || character.imageUrl} alt={character.name} style={getCharacterImageCropStyle(character)} /> : <Users size={32} />}</div>
           <div>
-            <header><h3>{character.name}</h3>{assignedCharacterIds.has(character.id) && <span>担当</span>}</header>
+            <header><h3>{character.name}</h3>{showAssignments && assignedCharacterIds.has(character.id) && <span>担当</span>}</header>
             {character.profile && <p>{character.profile}</p>}
             {assignedCharacterIds.has(character.id) && character.recordingFolderUrl && (
               <footer><a href={character.recordingFolderUrl} target="_blank" rel="noreferrer"><FolderOpen size={16} />収録フォルダー</a></footer>
@@ -477,28 +483,32 @@ export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voic
   const [projectId, setProjectId] = useState(projects[0]?.id || "");
   useEffect(() => { if (!projects.some((item) => item.id === projectId)) setProjectId(projects[0]?.id || ""); }, [projects, projectId]);
   const project = projects.find((item) => item.id === projectId) || projects[0];
+  const isGuest = runtime.currentUser?.accessMode === "guest";
+  const memberNav = isGuest ? MEMBER_NAV.filter(([key]) => key !== "questions") : MEMBER_NAV;
+  useEffect(() => { if (isGuest && active === "questions") setActive("home"); }, [active, isGuest]);
   if (connectionState.status === "loading") return <main className="member-portal-loading"><RefreshCw className="spin" size={30} /><b>{connectionState.message}</b></main>;
-  if (!project) return <main className="member-portal-loading"><Users size={30} /><b>{connectionState.status === "error" ? connectionState.message : "担当作品がまだ割り当てられていません。"}</b>{runtime.logoutUrl && <a className="secondary" href={runtime.logoutUrl}><LogOut size={16} />ログアウト</a>}</main>;
-  const member = project.castMembers.find((item) => Number(item.wpUserId) === Number(runtime.currentUser?.id)) || project.castMembers[0];
-  const assignedCharacterIds = new Set(member?.characterIds || []);
-  const pageTitle = MEMBER_NAV.find(([key]) => key === active)?.[1] || "ホーム";
+  if (!project) return <main className="member-portal-loading"><Users size={30} /><b>{connectionState.status === "error" ? connectionState.message : isGuest ? "共有中の作品はまだありません。" : "担当作品がまだ割り当てられていません。"}</b>{runtime.logoutUrl && <a className="secondary" href={runtime.logoutUrl}><LogOut size={16} />ログアウト</a>}</main>;
+  const member = isGuest ? null : project.castMembers.find((item) => Number(item.wpUserId) === Number(runtime.currentUser?.id)) || project.castMembers[0];
+  const assignedCharacterIds = new Set(isGuest ? project.characters.map((character) => character.id) : member?.characterIds || []);
+  const pageTitle = memberNav.find(([key]) => key === active)?.[1] || "ホーム";
   const pageSubtitle = active === "concept"
     ? "Umbrella Paradeが大切にしている考えと、目指す未来を共有します。"
-    : `${withHonorific(runtime.currentUser?.name || member?.actorName)} / ${project.title}`;
+    : isGuest ? `全メンバー共通 / ${project.title}` : `${withHonorific(runtime.currentUser?.name || member?.actorName)} / ${project.title}`;
   return (
     <main className="app-shell member-portal-shell">
       <Header logoSrc={logoSrc} title={appTitle} />
-      <nav className="app-nav" aria-label="Main navigation">{MEMBER_NAV.map(([key, label, Icon]) => <button type="button" className={active === key ? "active" : ""} key={key} onClick={() => setActive(key)}><Icon size={17} /><span>{label}</span></button>)}</nav>
+      <nav className="app-nav" aria-label="Main navigation">{memberNav.map(([key, label, Icon]) => <button type="button" className={active === key ? "active" : ""} key={key} onClick={() => setActive(key)}><Icon size={17} /><span>{label}</span></button>)}</nav>
       <section className="content-panel view-stack">
         <SectionTitle title={pageTitle} subtitle={pageSubtitle} />
-        {active !== "concept" && <MemberProjectBar projects={projects} project={project} setProjectId={setProjectId} runtime={runtime} connectionState={connectionState} onRefresh={onRefresh} />}
-        {active === "home" && <MemberHome project={project} assignedCharacterIds={assignedCharacterIds} setActive={setActive} />}
+        {isGuest && <div className="member-shared-view-notice"><Users size={18} /><span><b>全メンバー共通の閲覧画面</b>収録済みチェックと個別の質問は、担当者専用URLから利用できます。</span></div>}
+        {active !== "concept" && <MemberProjectBar projects={projects} project={project} setProjectId={setProjectId} runtime={runtime} connectionState={connectionState} onRefresh={onRefresh} isGuest={isGuest} />}
+        {active === "home" && <MemberHome project={project} assignedCharacterIds={assignedCharacterIds} setActive={setActive} isGuest={isGuest} />}
         {active === "concept" && <ConceptView concept={data.studioConcept} showTitle={false} />}
-        {active === "script" && <MemberScript project={project} assignedCharacterIds={assignedCharacterIds} onUpdateLine={onUpdateLine} />}
-        {active === "characters" && <MemberCharacters project={project} assignedCharacterIds={assignedCharacterIds} />}
+        {active === "script" && <MemberScript project={project} assignedCharacterIds={assignedCharacterIds} onUpdateLine={onUpdateLine} canUpdateLine={!isGuest} />}
+        {active === "characters" && <MemberCharacters project={project} assignedCharacterIds={assignedCharacterIds} showAssignments={!isGuest} />}
         {active === "links" && <MemberLinks project={project} assignedCharacterIds={assignedCharacterIds} />}
         {active === "materials" && <MemberMaterials project={project} />}
-        {active === "questions" && <MemberQuestions project={project} assignedCharacterIds={assignedCharacterIds} currentUser={runtime.currentUser || {}} onCreateQuestion={onCreateQuestion} onResolveQuestion={onResolveQuestion} />}
+        {!isGuest && active === "questions" && <MemberQuestions project={project} assignedCharacterIds={assignedCharacterIds} currentUser={runtime.currentUser || {}} onCreateQuestion={onCreateQuestion} onResolveQuestion={onResolveQuestion} />}
         {active === "schedule" && <MemberSchedule project={project} />}
         {active === "manual" && <ManualView viewerRole="actor" showTitle={false} onNavigate={setActive} />}
       </section>

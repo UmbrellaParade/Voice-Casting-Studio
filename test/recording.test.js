@@ -476,6 +476,33 @@ test("selecting a character includes every performance type for that character",
   assert.deepEqual(filtered.map((line) => line.performanceType), ["通常", "心の声", "イヤモニ"]);
 });
 
+test("shows the previous and next lines as context without crossing a scene boundary", () => {
+  const project = normalizeRecordingProject({
+    characters: [
+      { id: "vel", name: "ヴェル" },
+      { id: "carla", name: "カーラ" }
+    ],
+    lines: [
+      { id: "before", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 1, characterId: "carla", text: "大丈夫？" },
+      { id: "target", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 2, characterId: "vel", text: "ああ。" },
+      { id: "after", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 3, characterId: "carla", text: "なら行こう。" },
+      { id: "next_scene", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_2", sceneTitle: "Scene 2", order: 4, characterId: "carla", text: "次の場面。" }
+    ]
+  });
+
+  const filtered = getFilteredRecordingLines({
+    project,
+    selectedCharacterIds: ["vel"],
+    includeContext: true
+  });
+
+  assert.deepEqual(filtered.map((line) => [line.id, line.isContext]), [
+    ["before", true],
+    ["target", false],
+    ["after", true]
+  ]);
+});
+
 test("keeps derived recording progress when unrelated chapter text is edited", () => {
   const base = normalizeRecordingProject({
     characters: [{ id: "vel", name: "ヴェル" }],
