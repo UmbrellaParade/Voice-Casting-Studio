@@ -269,7 +269,11 @@ import { RecordingStudio, SharedRecordingBoard } from "./components/RecordingStu
 import { ProductionWorkspace } from "./components/ProductionHub.jsx";
 import { WordPressMemberPortal } from "./components/WordPressMemberPortal.jsx";
 import { ManualView } from "./components/ManualView.jsx";
-import { normalizeRecordingProject, readRecordingShareReference } from "./lib/recording.js";
+import {
+  normalizeRecordingProject,
+  patchRecordingLineProgress,
+  readRecordingShareReference
+} from "./lib/recording.js";
 
 const moveArrayItem = (items = [], fromIndex, toIndex) => {
   if (fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length || fromIndex === toIndex) return items;
@@ -505,14 +509,13 @@ function App() {
     }
   };
 
-  const updateMemberRecordingLine = async (projectId, lineId, patch) => {
-    const result = await updateWordPressRecordingLine({ projectId, lineId, patch });
+  const updateMemberRecordingLine = async (projectId, lineId, patch, lineContext = null) => {
+    const result = await updateWordPressRecordingLine({ projectId, lineId, patch, lineContext });
     setData((current) => ({
       ...current,
-      recordingProjects: current.recordingProjects.map((project) => project.id === projectId ? {
-        ...project,
-        lines: project.lines.map((line) => line.id === lineId ? { ...line, ...result.line } : line)
-      } : project)
+      recordingProjects: current.recordingProjects.map((project) => project.id === projectId
+        ? patchRecordingLineProgress(project, lineId, result.line || patch, lineContext)
+        : project)
     }));
     return result;
   };

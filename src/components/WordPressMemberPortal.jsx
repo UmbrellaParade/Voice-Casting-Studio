@@ -16,11 +16,10 @@ import {
   MessageSquareText,
   Music2,
   RefreshCw,
-  Save,
   Users
 } from "lucide-react";
 import { getGoogleDriveFileId, isWebUrl, makeDirectAudioDownloadUrl, makeGoogleDrivePreviewUrl, makeImagePreviewUrl } from "../lib/core.js";
-import { getCharacterImageCropStyle, getCharacterName, getRecordingDisplayProject, getRecordingProgress, parseRubyText } from "../lib/recording.js";
+import { getCharacterImageCropStyle, getCharacterName, getRecordingDisplayProject, getRecordingProgress, parseRubyText, partitionCharactersByScript } from "../lib/recording.js";
 import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
 import { ManualView } from "./ManualView.jsx";
 import { Header, SectionTitle } from "./ui.jsx";
@@ -51,15 +50,6 @@ const makeTint = (color = "#5f6d7a", alpha = 0.09) => {
 };
 
 const getPlaybackUrl = (url = "") => getGoogleDriveFileId(url) ? makeDirectAudioDownloadUrl(url) : url;
-
-const isDriveUrl = (value = "") => {
-  try {
-    const url = new URL(value);
-    return ["drive.google.com", "docs.google.com"].includes(url.hostname);
-  } catch {
-    return false;
-  }
-};
 
 const withHonorific = (name = "メンバー") => /(?:さん|様|さま|氏)$/.test(name) ? name : `${name}さん`;
 
@@ -146,36 +136,44 @@ function MemberHome({ project, assignedCharacterIds, setActive }) {
 
 function MemberLine({ project, line, editable, onSave }) {
   const character = project.characters.find((item) => item.id === line.characterId);
-  const [draft, setDraft] = useState({ recordingUrl: line.recordingUrl, actorNote: line.actorNote, actorStatus: line.actorStatus });
+  const [actorStatus, setActorStatus] = useState(line.actorStatus);
   const [state, setState] = useState({ busy: false, message: "" });
-  useEffect(() => setDraft({ recordingUrl: line.recordingUrl, actorNote: line.actorNote, actorStatus: line.actorStatus }), [line.recordingUrl, line.actorNote, line.actorStatus]);
-  const save = async () => {
-    if (draft.recordingUrl && !isDriveUrl(draft.recordingUrl)) {
-      setState({ busy: false, message: "Google Driveの共有URLを入力してください。" });
-      return;
-    }
+  useEffect(() => setActorStatus(line.actorStatus), [line.actorStatus]);
+  const toggleRecorded = async (checked) => {
+    const previousStatus = actorStatus;
+    const nextStatus = checked
+      ? (line.reviewStatus === "リテイク" ? "再提出済み" : "収録済み")
+      : "未収録";
+    setActorStatus(nextStatus);
     setState({ busy: true, message: "保存中…" });
     try {
-      await onSave(line.id, draft);
-      setState({ busy: false, message: "保存しました。" });
+      await onSave(line.id, { actorStatus: nextStatus }, {
+        id: line.id,
+        derivedFromManualBody: Boolean(line.derivedFromManualBody),
+        sourceLineId: line.sourceLineId || "",
+        characterId: line.characterId,
+        chapterId: line.chapterId,
+        sceneId: line.sceneId,
+        performanceType: line.performanceType || "通常"
+      });
+      setState({ busy: false, message: "保存済み" });
     } catch (error) {
+      setActorStatus(previousStatus);
       setState({ busy: false, message: error.message });
     }
   };
   return (
     <article className={`member-script-line${editable ? " assigned" : " context"}${line.kind === "direction" ? " direction" : ""}${line.derivedFromManualBody ? " derived-manual-line" : ""}`} style={{ "--character-color": character?.color || "#5f6d7a", "--character-background": makeTint(character?.color) }}>
-      <header><span>{String(line.displayOrder ?? line.order).padStart(3, "0")}</span><b>{line.kind === "direction" ? "ト書き" : character?.name || "話者未設定"}</b>{line.kind !== "direction" && !line.derivedFromManualBody && <div><span>{line.actorStatus}</span><span>{line.reviewStatus}</span></div>}</header>
+      <header><span>{String(line.displayOrder ?? line.order).padStart(3, "0")}</span><b>{line.kind === "direction" ? "ト書き" : character?.name || "話者未設定"}{line.kind !== "direction" && line.performanceType && line.performanceType !== "通常" && <em className="line-performance-badge">{line.performanceType}</em>}</b>{line.kind !== "direction" && <div><span>{actorStatus}</span><span>{line.reviewStatus}</span></div>}</header>
       <p><RubyText text={line.text} /></p>
       {line.direction && <small>{line.direction}</small>}
       {line.derivedFromManualBody && <small className="derived-manual-note">章本文から表示</small>}
       {editable && line.kind !== "direction" && (
-        <div className="member-line-submission">
-          <AudioPlayer url={line.recordingUrl} label={`${character?.name || "担当"}の録音`} />
+        <div className="member-line-submission simple-check">
+          {line.recordingUrl && <AudioPlayer url={line.recordingUrl} label={`${character?.name || "担当"}の録音`} />}
           {line.directorNote && <p className="member-director-note"><b>{line.reviewStatus === "リテイク" ? "リテイク内容" : "確認メモ"}</b>{line.directorNote}</p>}
-          <label className="member-recorded-check"><input type="checkbox" checked={draft.actorStatus !== "未収録"} onChange={(event) => setDraft((current) => ({ ...current, actorStatus: event.target.checked ? (line.reviewStatus === "リテイク" ? "再提出済み" : "収録済み") : "未収録" }))} /><span>収録済み</span></label>
-          <label><span>Google Drive録音URL</span><input value={draft.recordingUrl} placeholder="https://drive.google.com/..." onChange={(event) => setDraft((current) => ({ ...current, recordingUrl: event.target.value }))} /></label>
-          <label><span>提出メモ</span><textarea value={draft.actorNote} onChange={(event) => setDraft((current) => ({ ...current, actorNote: event.target.value }))} /></label>
-          <div className="member-line-save"><span>{state.message}</span><button type="button" className="primary" disabled={state.busy} onClick={save}><Save size={15} />保存</button></div>
+          <label className="member-recorded-check"><input type="checkbox" checked={actorStatus !== "未収録"} disabled={state.busy} onChange={(event) => toggleRecorded(event.target.checked)} /><span>このセリフは収録済み</span></label>
+          <span className={`member-recorded-save-state${state.message && !state.busy && state.message !== "保存済み" ? " error" : ""}`}>{state.message}</span>
         </div>
       )}
     </article>
@@ -223,7 +221,7 @@ function MemberScript({ project, assignedCharacterIds, onUpdateLine }) {
               {chapterGroup.scenes.map((scene) => (
                 <details id={getScriptSceneAnchorId(tocScopeId, scene.id)} className="member-scene" key={scene.id} open>
                   <summary><strong>{scene.title}</strong><span>{scene.lines.filter((line) => line.kind !== "direction").length}セリフ</span></summary>
-                  <div className="member-line-list">{scene.lines.map((line) => <MemberLine key={line.id} project={displayProject} line={line} editable={!line.derivedFromManualBody && assignedCharacterIds.has(line.characterId)} onSave={(lineId, patch) => onUpdateLine(project.id, lineId, patch)} />)}</div>
+                  <div className="member-line-list">{scene.lines.map((line) => <MemberLine key={line.id} project={displayProject} line={line} editable={assignedCharacterIds.has(line.characterId)} onSave={(lineId, patch, context) => onUpdateLine(project.id, lineId, patch, context)} />)}</div>
                 </details>
               ))}
             </details>
@@ -235,9 +233,10 @@ function MemberScript({ project, assignedCharacterIds, onUpdateLine }) {
 }
 
 function MemberCharacters({ project, assignedCharacterIds }) {
+  const { linkedCharacters } = partitionCharactersByScript(project);
   return (
     <div className="member-character-grid">
-      {project.characters.map((character) => (
+      {linkedCharacters.map((character) => (
         <article key={character.id} style={{ "--character-color": character.color }}>
           <div className="member-character-image">{character.imageUrl ? <img src={makeImagePreviewUrl(character.imageUrl) || character.imageUrl} alt={character.name} style={getCharacterImageCropStyle(character)} /> : <Users size={32} />}</div>
           <div>
@@ -250,6 +249,7 @@ function MemberCharacters({ project, assignedCharacterIds }) {
           </div>
         </article>
       ))}
+      {!linkedCharacters.length && <div className="production-empty-state"><Users size={30} /><b>現在の台本に登場するキャラクターはいません</b></div>}
     </div>
   );
 }
@@ -269,7 +269,8 @@ function MemberSharedLink({ icon: Icon, label, detail, url }) {
 }
 
 function MemberLinks({ project, assignedCharacterIds }) {
-  const characters = project.characters.filter((character) => assignedCharacterIds.has(character.id));
+  const { linkedCharacters } = partitionCharactersByScript(project);
+  const characters = linkedCharacters.filter((character) => assignedCharacterIds.has(character.id));
   const sharedLinks = (project.sharedLinks || []).filter((link) => link.title || link.url);
   return (
     <div className="production-page-stack member-links-page">

@@ -1,5 +1,6 @@
 export const ACTOR_RECORDING_STATUSES = ["未収録", "収録済み", "再提出済み"];
 export const DIRECTOR_REVIEW_STATUSES = ["未確認", "確認中", "OK", "リテイク", "保留"];
+export const LINE_PERFORMANCE_TYPES = ["通常", "ナレーション", "心の声", "イヤモニ"];
 export const PRODUCTION_MATERIAL_CATEGORIES = ["主題歌", "BGM", "SE", "完成音源", "サムネイル"];
 export const PRODUCTION_MATERIAL_STATUSES = ["準備中", "制作中", "確認待ち", "完成"];
 export const PRODUCTION_QUESTION_STATUSES = ["未回答", "回答済み", "解決済み"];
@@ -104,6 +105,16 @@ const normalizeCharacterAliasToken = (value = "") => String(value || "")
   .replace(/\s+/g, "")
   .replace(/[()[\]【】〈〉《》「」『』・･／/\\:：_\-―—–]/g, "")
   .toLocaleLowerCase("ja");
+
+export const normalizeLinePerformanceType = (value = "", speaker = "") => {
+  const explicit = String(value || "").normalize("NFKC").trim();
+  if (LINE_PERFORMANCE_TYPES.includes(explicit)) return explicit;
+  const source = `${explicit} ${String(speaker || "")}`.normalize("NFKC");
+  if (/心の声/.test(source)) return "心の声";
+  if (/(?:イヤモニ|イヤーモニター)/.test(source)) return "イヤモニ";
+  if (/(?:ナレーター|ナレーション|語り)/.test(source)) return "ナレーション";
+  return "通常";
+};
 
 export const getCanonicalCharacterName = (value = "", availableNames = []) => {
   const name = String(value || "").normalize("NFKC").trim();
@@ -232,6 +243,7 @@ const cloneScriptLines = (lines = []) => (Array.isArray(lines) ? lines : [])
     order: Number.isFinite(Number(line.order)) ? Number(line.order) : index + 1,
     characterId: String(line.characterId || ""),
     kind: line.kind === "direction" ? "direction" : "dialogue",
+    performanceType: normalizeLinePerformanceType(line.performanceType),
     manualBody: Boolean(line.manualBody),
     text: String(line.text || line.line || ""),
     direction: String(line.direction || line.note || ""),
@@ -654,6 +666,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
     };
     return normalized;
   });
+  const originalCharacterNameById = new Map(normalizedCharacters.map((character) => [character.id, character.name]));
   const structuralCharacterIds = new Set(
     normalizedCharacters
       .filter((character) => isScriptStructureLabel(character.name))
@@ -739,6 +752,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
   const sceneIdOwners = new Map();
   const lines = rawLines.map((line, lineIndex) => {
     const speakerName = String(line.character || line.speaker || "").trim();
+    const originalSpeakerName = speakerName || originalCharacterNameById.get(line.characterId) || "";
     const structuralSpeaker = structuralCharacterIds.has(line.characterId) || isScriptStructureLabel(speakerName);
     const canonicalSpeakerName = getCanonicalCharacterName(speakerName, availableCharacterNames);
     const matchedCharacter = characterByName.get(normalizeCharacterNameKey(canonicalSpeakerName));
@@ -781,6 +795,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       order: Number.isFinite(Number(line.order)) ? Number(line.order) : lineIndex + 1,
       characterId,
       kind: line.kind === "direction" || structuralSpeaker ? "direction" : "dialogue",
+      performanceType: normalizeLinePerformanceType(line.performanceType, originalSpeakerName),
       manualBody: Boolean(line.manualBody),
       text: String(line.text || line.line || ""),
       direction: String(line.direction || line.note || ""),
@@ -794,6 +809,27 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       updatedAt: String(line.updatedAt || "")
     };
   });
+  const derivedLineProgress = Object.fromEntries(
+    Object.entries(project.derivedLineProgress && typeof project.derivedLineProgress === "object"
+      ? project.derivedLineProgress
+      : {})
+      .filter(([lineId, progress]) => lineId && progress && typeof progress === "object")
+      .map(([lineId, progress]) => [lineId, {
+        id: lineId,
+        sourceLineId: String(progress.sourceLineId || ""),
+        characterId: characterIdAliases.get(progress.characterId) || String(progress.characterId || ""),
+        chapterId: String(progress.chapterId || ""),
+        sceneId: String(progress.sceneId || ""),
+        performanceType: normalizeLinePerformanceType(progress.performanceType),
+        actorStatus: normalizeStatus(progress.actorStatus, ACTOR_RECORDING_STATUSES, "未収録"),
+        reviewStatus: normalizeStatus(progress.reviewStatus, DIRECTOR_REVIEW_STATUSES, "未確認"),
+        recordingUrl: String(progress.recordingUrl || ""),
+        recordingFileName: String(progress.recordingFileName || ""),
+        actorNote: String(progress.actorNote || ""),
+        directorNote: String(progress.directorNote || ""),
+        updatedAt: String(progress.updatedAt || "")
+      }])
+  );
 
   return {
     id: project.id || `recording_project_${index + 1}`,
@@ -821,6 +857,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       accessKey: member.accessKey || createRecordingAccessKey()
     })),
     lines: lines.sort((a, b) => Number(a.order) - Number(b.order)),
+    derivedLineProgress,
     materials: (Array.isArray(project.materials) ? project.materials : []).map((material, materialIndex) => ({
       id: material.id || createLocalId("material"),
       category: PRODUCTION_MATERIAL_CATEGORIES.includes(material.category) ? material.category : "BGM",
@@ -908,6 +945,10 @@ export const mergeRemoteRecordingProject = (localProject, remoteProject) => {
     ...localProject,
     sharedAt: remoteProject?.sharedAt || localProject.sharedAt,
     updatedAt: remoteProject?.updatedAt || localProject.updatedAt,
+    derivedLineProgress: {
+      ...(localProject.derivedLineProgress || {}),
+      ...(remoteProject?.derivedLineProgress || {})
+    },
     lines: (localProject.lines || []).map((line) => {
       const remote = remoteLines.get(line.id);
       if (!remote) return line;
@@ -935,11 +976,12 @@ const normalizeScriptMatchValue = (value = "") =>
     .trim()
     .toLocaleLowerCase("ja");
 
-export const getScriptLineMatchKey = ({ speaker = "", text = "", kind = "", sourceKind = "" } = {}) => {
+export const getScriptLineMatchKey = ({ speaker = "", text = "", kind = "", sourceKind = "", performanceType = "" } = {}) => {
   const isDirection = kind === "direction" || sourceKind === "direction" || speaker === "ト書き";
   return [
     isDirection ? "direction" : "dialogue",
     normalizeScriptMatchValue(isDirection ? "ト書き" : speaker),
+    isDirection ? "" : normalizeLinePerformanceType(performanceType, speaker),
     normalizeScriptMatchValue(text)
   ].join("\u0000");
 };
@@ -958,6 +1000,7 @@ export const getScriptImportPlan = (project, rows = []) => {
       speaker: line.kind === "direction" ? "ト書き" : getCharacterName(project, line.characterId),
       text: line.text,
       kind: line.kind,
+      performanceType: line.performanceType,
       chapterTitle: line.chapterTitle,
       sceneTitle: line.sceneTitle
     };
@@ -996,7 +1039,7 @@ export const getScriptImportPlan = (project, rows = []) => {
 };
 
 export const getRecordingProgress = (project) => {
-  const lines = (project?.lines || []).filter((line) => line.kind !== "direction");
+  const lines = getRecordingDisplayProject(project).lines.filter((line) => line.kind !== "direction");
   const total = lines.length;
   const recorded = lines.filter((line) => line.actorStatus !== "未収録").length;
   const approved = lines.filter((line) => line.reviewStatus === "OK").length;
@@ -1044,7 +1087,7 @@ export const getFilteredRecordingLines = ({
     const statusMatch =
       statusFilter === "すべて" ||
       (!isDirection && (line.actorStatus === statusFilter || line.reviewStatus === statusFilter));
-    const haystack = `${line.chapterTitle} ${line.sceneTitle} ${getCharacterName(project, line.characterId)} ${line.text} ${line.direction} ${line.fileName}`.toLocaleLowerCase("ja");
+    const haystack = `${line.chapterTitle} ${line.sceneTitle} ${getCharacterName(project, line.characterId)} ${line.performanceType || "通常"} ${line.text} ${line.direction} ${line.fileName}`.toLocaleLowerCase("ja");
     const queryMatch = !normalizedQuery || haystack.includes(normalizedQuery);
     if (selectedMatch && dialogueMatch && statusMatch && queryMatch) directIndexes.add(index);
   });
@@ -1446,9 +1489,13 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
     rows.push({
       chapterTitle: currentChapter,
       sceneTitle: currentScene,
+      speakerLabel: cleanedSpeaker,
       speaker: cleanedSpeaker === "ト書き"
         ? cleanedSpeaker
         : getCanonicalCharacterName(cleanedSpeaker, knownSpeakerNames),
+      performanceType: cleanedSpeaker === "ト書き"
+        ? "通常"
+        : normalizeLinePerformanceType("", cleanedSpeaker),
       text: normalizedText || normalizedDirection,
       direction: normalizedText ? normalizedDirection : "",
       fileName: "",
@@ -1650,9 +1697,29 @@ export const getCharacterDialogueCounts = (project = {}) => {
   return counts;
 };
 
+export const partitionCharactersByScript = (project = {}) => {
+  const characters = Array.isArray(project.characters) ? project.characters : [];
+  const dialogueCounts = getCharacterDialogueCounts(project);
+  const linkedCharacters = [];
+  const unlinkedCharacters = [];
+
+  characters.forEach((character) => {
+    const target = (dialogueCounts[character.id] || 0) > 0
+      ? linkedCharacters
+      : unlinkedCharacters;
+    target.push(character);
+  });
+
+  return { dialogueCounts, linkedCharacters, unlinkedCharacters };
+};
+
 export const getRecordingDisplayProject = (project = {}) => {
   const characters = Array.isArray(project.characters) ? project.characters : [];
   const knownNames = characters.map((character) => character.name);
+  const derivedLineProgress = project.derivedLineProgress && typeof project.derivedLineProgress === "object"
+    ? project.derivedLineProgress
+    : {};
+  const derivedIdentityCounts = new Map();
   const characterIdByName = new Map(characters.map((character) => [
     normalizeCharacterNameKey(getCanonicalCharacterName(character.name, knownNames)),
     character.id
@@ -1660,7 +1727,7 @@ export const getRecordingDisplayProject = (project = {}) => {
   const lines = (Array.isArray(project.lines) ? project.lines : []).flatMap((line) => {
     if (!line.manualBody || !String(line.text || "").trim()) return [line];
     const parsedRows = parseGoogleDocsScript(line.text, knownNames);
-    const resolvedRows = parsedRows.map((row, rowIndex) => {
+    const resolvedRows = parsedRows.map((row) => {
       const isDirection = row.sourceKind === "direction" || row.speaker === "ト書き";
       const canonicalName = isDirection ? "" : getCanonicalCharacterName(row.speaker, knownNames);
       const characterId = canonicalName
@@ -1668,21 +1735,43 @@ export const getRecordingDisplayProject = (project = {}) => {
         : "";
       const resolvedAsDialogue = Boolean(characterId) && !isDirection;
       const fallbackPrefix = !isDirection && !characterId && row.speaker ? `${row.speaker}：` : "";
+      const performanceType = resolvedAsDialogue
+        ? normalizeLinePerformanceType(row.performanceType, row.speakerLabel || row.speaker)
+        : "通常";
+      const identityKey = [
+        getScriptChapterKey(line.chapterTitle),
+        getScriptSceneKey(line.sceneTitle),
+        getScriptLineMatchKey({
+          speaker: resolvedAsDialogue ? canonicalName : "ト書き",
+          text: row.text,
+          sourceKind: resolvedAsDialogue ? "dialogue" : "direction",
+          performanceType
+        }),
+        normalizeScriptMatchValue(row.direction)
+      ].join("\u0002");
+      const occurrence = (derivedIdentityCounts.get(identityKey) || 0) + 1;
+      derivedIdentityCounts.set(identityKey, occurrence);
+      const lineId = makeStableScopeId("derived_line", `${identityKey}\u0002${occurrence}`);
+      const savedProgress = derivedLineProgress[lineId] || {};
       return {
         ...line,
-        id: `${line.id}__display_${row.sourceOrder ?? rowIndex}`,
+        id: lineId,
         characterId: resolvedAsDialogue ? characterId : "",
         kind: resolvedAsDialogue ? "dialogue" : "direction",
+        performanceType,
         manualBody: false,
         derivedFromManualBody: true,
         sourceLineId: line.id,
         text: `${fallbackPrefix}${row.text || ""}`.trim(),
         direction: resolvedAsDialogue ? String(row.direction || "") : "",
         fileName: "",
-        recordingUrl: "",
-        recordingFileName: "",
-        actorNote: "",
-        directorNote: ""
+        actorStatus: normalizeStatus(savedProgress.actorStatus, ACTOR_RECORDING_STATUSES, "未収録"),
+        reviewStatus: normalizeStatus(savedProgress.reviewStatus, DIRECTOR_REVIEW_STATUSES, "未確認"),
+        recordingUrl: String(savedProgress.recordingUrl || ""),
+        recordingFileName: String(savedProgress.recordingFileName || ""),
+        actorNote: String(savedProgress.actorNote || ""),
+        directorNote: String(savedProgress.directorNote || ""),
+        updatedAt: String(savedProgress.updatedAt || "")
       };
     });
     return resolvedRows.some((row) => row.kind === "dialogue") ? resolvedRows : [line];
@@ -1696,13 +1785,67 @@ export const getRecordingDisplayProject = (project = {}) => {
   };
 };
 
+const DERIVED_LINE_PROGRESS_FIELDS = new Set([
+  "actorStatus",
+  "reviewStatus",
+  "recordingUrl",
+  "recordingFileName",
+  "actorNote",
+  "directorNote",
+  "updatedAt"
+]);
+
+export const patchRecordingLineProgress = (project = {}, lineId = "", patch = {}, lineContext = null) => {
+  const storedLine = (project.lines || []).find((line) => line.id === lineId);
+  if (storedLine) {
+    return {
+      ...project,
+      lines: project.lines.map((line) => line.id === lineId ? { ...line, ...patch } : line)
+    };
+  }
+
+  const displayLine = lineContext?.id === lineId
+    ? lineContext
+    : getRecordingDisplayProject(project).lines.find((line) => line.id === lineId);
+  if (!displayLine?.derivedFromManualBody) return project;
+  const progressPatch = Object.fromEntries(
+    Object.entries(patch).filter(([key]) => DERIVED_LINE_PROGRESS_FIELDS.has(key))
+  );
+  if (!Object.keys(progressPatch).length) return project;
+  const previous = project.derivedLineProgress?.[lineId] || {};
+  return {
+    ...project,
+    derivedLineProgress: {
+      ...(project.derivedLineProgress || {}),
+      [lineId]: {
+        id: lineId,
+        sourceLineId: displayLine.sourceLineId || previous.sourceLineId || "",
+        characterId: displayLine.characterId || previous.characterId || "",
+        chapterId: displayLine.chapterId || previous.chapterId || "",
+        sceneId: displayLine.sceneId || previous.sceneId || "",
+        performanceType: displayLine.performanceType || previous.performanceType || "通常",
+        actorStatus: previous.actorStatus || displayLine.actorStatus || "未収録",
+        reviewStatus: previous.reviewStatus || displayLine.reviewStatus || "未確認",
+        recordingUrl: previous.recordingUrl || displayLine.recordingUrl || "",
+        recordingFileName: previous.recordingFileName || displayLine.recordingFileName || "",
+        actorNote: previous.actorNote || displayLine.actorNote || "",
+        directorNote: previous.directorNote || displayLine.directorNote || "",
+        updatedAt: previous.updatedAt || displayLine.updatedAt || "",
+        ...progressPatch
+      }
+    }
+  };
+};
+
 const normalizeParsedTableRow = (row = {}) => {
   const originalSpeaker = cleanSpeakerLabel(row.speaker);
   const isDirection = !originalSpeaker || isScriptStructureLabel(originalSpeaker);
   const text = String(row.text || "").trim() || (isDirection && originalSpeaker !== "ト書き" ? originalSpeaker : "");
   return {
     ...row,
+    speakerLabel: originalSpeaker,
     speaker: isDirection ? "ト書き" : originalSpeaker,
+    performanceType: isDirection ? "通常" : normalizeLinePerformanceType(row.performanceType, originalSpeaker),
     text,
     sourceKind: isDirection ? "direction" : "dialogue"
   };
@@ -1715,6 +1858,7 @@ export const parseScriptTable = (text = "", parseCsv) => {
     chapter: ["章", "chapter", "チャプター"],
     scene: ["シーン", "scene", "場面"],
     speaker: ["話者", "登場人物", "キャラクター", "speaker", "character"],
+    performanceType: ["読み分け", "演技区分", "話者区分", "performance", "voice type"],
     text: ["セリフ", "台詞", "本文", "text", "line"],
     direction: ["演技指示", "ト書き", "指示", "direction", "note"],
     fileName: ["ファイル名", "録音ファイル名", "filename", "file"]
@@ -1735,6 +1879,7 @@ export const parseScriptTable = (text = "", parseCsv) => {
           chapterTitle: get("chapter") || "第一章",
           sceneTitle: get("scene") || "Scene 1",
           speaker: get("speaker"),
+          performanceType: get("performanceType"),
           text: get("text"),
           direction: get("direction"),
           fileName: get("fileName"),
@@ -1762,6 +1907,7 @@ export const parseScriptTable = (text = "", parseCsv) => {
         chapterTitle: get("chapter", hasChapterCell ? 0 : -1) || "第一章",
         sceneTitle: get("scene", offset) || "Scene 1",
         speaker: get("speaker", offset + 1),
+        performanceType: get("performanceType", -1),
         text: get("text", offset + 2),
         direction: get("direction", offset + 3),
         fileName: get("fileName", offset + 4),

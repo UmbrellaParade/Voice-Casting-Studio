@@ -355,6 +355,17 @@ function vcs_filter_project_for_actor(array $project, int $user_id, array $chara
         },
         $project['lines'] ?? []
     ));
+    $derived_progress = [];
+    foreach (($project['derivedLineProgress'] ?? []) as $line_id => $progress) {
+        if (!is_array($progress)) {
+            continue;
+        }
+        if (!in_array((string) ($progress['characterId'] ?? ''), $character_ids, true)) {
+            unset($progress['recordingUrl'], $progress['recordingFileName'], $progress['actorNote'], $progress['directorNote']);
+        }
+        $derived_progress[(string) $line_id] = $progress;
+    }
+    $project['derivedLineProgress'] = $derived_progress;
     $project['questions'] = array_values(array_filter(
         $project['questions'] ?? [],
         static function (array $question) use ($user_id, $character_ids): bool {
@@ -485,6 +496,30 @@ function vcs_merge_concurrent_actor_data(array $incoming, array $current): array
             }
         }
 
+        $incoming_progress = is_array($project['derivedLineProgress'] ?? null)
+            ? $project['derivedLineProgress']
+            : [];
+        foreach (($current_project['derivedLineProgress'] ?? []) as $line_id => $current_progress) {
+            if (!is_array($current_progress)) {
+                continue;
+            }
+            $incoming_line = $incoming_progress[$line_id] ?? null;
+            if (!is_array($incoming_line)) {
+                $incoming['recordingProjects'][$project_index]['derivedLineProgress'][$line_id] = $current_progress;
+                continue;
+            }
+            $incoming_time = strtotime((string) ($incoming_line['updatedAt'] ?? '')) ?: 0;
+            $current_time = strtotime((string) ($current_progress['updatedAt'] ?? '')) ?: 0;
+            if ($current_time <= $incoming_time) {
+                continue;
+            }
+            foreach (['actorStatus', 'recordingUrl', 'recordingFileName', 'actorNote', 'updatedAt'] as $key) {
+                if (array_key_exists($key, $current_progress)) {
+                    $incoming['recordingProjects'][$project_index]['derivedLineProgress'][$line_id][$key] = $current_progress[$key];
+                }
+            }
+        }
+
         $incoming_question_ids = [];
         foreach (($project['questions'] ?? []) as $question) {
             $incoming_question_ids[(string) ($question['id'] ?? '')] = true;
@@ -509,6 +544,7 @@ function vcs_rest_update_line(WP_REST_Request $request): WP_REST_Response|WP_Err
     $project_id = sanitize_text_field((string) ($params['projectId'] ?? ''));
     $line_id = sanitize_text_field((string) ($params['lineId'] ?? ''));
     $patch = is_array($params['patch'] ?? null) ? $params['patch'] : [];
+    $line_context = is_array($params['lineContext'] ?? null) ? $params['lineContext'] : [];
     $post = vcs_get_workspace_post(false);
     $data = vcs_decode_workspace($post);
     $project_index = vcs_find_project_index($data, $project_id);
@@ -523,12 +559,60 @@ function vcs_rest_update_line(WP_REST_Request $request): WP_REST_Response|WP_Err
             break;
         }
     }
-    if ($line_index < 0) {
-        return new WP_Error('vcs_line_not_found', 'Line not found.', ['status' => 404]);
-    }
-
     $can_manage = current_user_can(VCS_MANAGER_CAPABILITY);
-    $line = $project['lines'][$line_index];
+    $is_derived = false;
+    if ($line_index < 0) {
+        $is_derived = str_starts_with($line_id, 'derived_line_')
+            && !empty($line_context['derivedFromManualBody']);
+        $source_line_id = sanitize_text_field((string) ($line_context['sourceLineId'] ?? ''));
+        $source_line = null;
+        foreach (($project['lines'] ?? []) as $candidate) {
+            if (($candidate['id'] ?? '') === $source_line_id && !empty($candidate['manualBody'])) {
+                $source_line = $candidate;
+                break;
+            }
+        }
+        if (!$is_derived || !is_array($source_line)) {
+            return new WP_Error('vcs_line_not_found', 'Line not found.', ['status' => 404]);
+        }
+
+        $character_id = sanitize_text_field((string) ($line_context['characterId'] ?? ''));
+        $character_exists = false;
+        foreach (($project['characters'] ?? []) as $character) {
+            if (($character['id'] ?? '') === $character_id) {
+                $character_exists = true;
+                break;
+            }
+        }
+        if (!$character_exists) {
+            return new WP_Error('vcs_character_not_found', 'Character not found.', ['status' => 404]);
+        }
+
+        $stored_progress = is_array($project['derivedLineProgress'][$line_id] ?? null)
+            ? $project['derivedLineProgress'][$line_id]
+            : [];
+        $performance_type = sanitize_text_field((string) ($line_context['performanceType'] ?? '通常'));
+        if (!in_array($performance_type, ['通常', 'ナレーション', '心の声', 'イヤモニ'], true)) {
+            $performance_type = '通常';
+        }
+        $line = array_merge([
+            'id' => $line_id,
+            'sourceLineId' => $source_line_id,
+            'characterId' => $character_id,
+            'chapterId' => (string) ($source_line['chapterId'] ?? ''),
+            'sceneId' => (string) ($source_line['sceneId'] ?? ''),
+            'performanceType' => $performance_type,
+            'actorStatus' => '未収録',
+            'reviewStatus' => '未確認',
+            'recordingUrl' => '',
+            'recordingFileName' => '',
+            'actorNote' => '',
+            'directorNote' => '',
+            'updatedAt' => '',
+        ], $stored_progress);
+    } else {
+        $line = $project['lines'][$line_index];
+    }
     if (!$can_manage) {
         $character_ids = vcs_user_character_ids($project, get_current_user_id());
         if (!in_array((string) ($line['characterId'] ?? ''), $character_ids, true)) {
@@ -566,12 +650,20 @@ function vcs_rest_update_line(WP_REST_Request $request): WP_REST_Response|WP_Err
         }
     }
     $line['updatedAt'] = current_time('c');
-    $data['recordingProjects'][$project_index]['lines'][$line_index] = $line;
+    if ($is_derived) {
+        if (!isset($data['recordingProjects'][$project_index]['derivedLineProgress'])
+            || !is_array($data['recordingProjects'][$project_index]['derivedLineProgress'])) {
+            $data['recordingProjects'][$project_index]['derivedLineProgress'] = [];
+        }
+        $data['recordingProjects'][$project_index]['derivedLineProgress'][$line_id] = $line;
+    } else {
+        $data['recordingProjects'][$project_index]['lines'][$line_index] = $line;
+    }
     $write = vcs_write_workspace($data);
     if (is_wp_error($write)) {
         return $write;
     }
-    return rest_ensure_response(['ok' => true, 'line' => $line]);
+    return rest_ensure_response(['ok' => true, 'line' => $line, 'derived' => $is_derived]);
 }
 
 function vcs_rest_create_question(WP_REST_Request $request): WP_REST_Response|WP_Error

@@ -247,6 +247,10 @@
 }
 
 .member-script-line > header > b {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
   overflow-wrap: anywhere;
   font-size: 12px;
 }
@@ -307,6 +311,41 @@
   width: 18px;
   min-height: auto;
   height: 18px;
+}
+
+.member-line-submission.simple-check {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.member-line-submission.simple-check .member-recorded-check {
+  grid-column: 1;
+  min-height: 46px;
+  padding: 9px 12px;
+  border: 1px solid #c9d8d3;
+  border-radius: 6px;
+  background: #f7fbf9;
+  color: #305c4b;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.member-line-submission.simple-check .member-recorded-check:has(input:checked) {
+  border-color: #70ae96;
+  background: #e8f6ef;
+  color: #205e45;
+}
+
+.member-recorded-save-state {
+  min-width: 52px;
+  color: #62736d;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.member-recorded-save-state.error {
+  color: #ac3350;
 }
 
 .member-audio-player {
@@ -692,6 +731,15 @@
   .member-character-grid > article,
   .member-schedule-list > article {
     grid-template-columns: 1fr;
+  }
+
+  .member-line-submission.simple-check .member-recorded-check,
+  .member-recorded-save-state {
+    grid-column: 1;
+  }
+
+  .member-recorded-save-state {
+    text-align: left;
   }
 
   .member-shared-link-list {

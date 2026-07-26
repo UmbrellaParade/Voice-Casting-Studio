@@ -41,13 +41,13 @@ import {
   PRODUCTION_SCHEDULE_STATUSES,
   PRODUCTION_SCHEDULE_TYPES,
   archiveScriptVersion,
-  getCharacterDialogueCounts,
   getCharacterImageCropStyle,
   getCharacterName,
   getRecordingProgress,
   normalizeImagePosition,
   normalizeImageScale,
   parseRubyText,
+  partitionCharactersByScript,
   reorderProductionCharacters,
   reorderProductionMaterials,
   reorderProductionSharedLinks
@@ -376,7 +376,10 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
   const [dragOverCharacterId, setDragOverCharacterId] = useState("");
   const [message, setMessage] = useState("");
   const pointerDragRef = useRef(null);
-  const dialogueCounts = useMemo(() => getCharacterDialogueCounts(project), [project.characters, project.lines]);
+  const { dialogueCounts, linkedCharacters, unlinkedCharacters } = useMemo(
+    () => partitionCharactersByScript(project),
+    [project.characters, project.lines]
+  );
 
   const patchCharacter = (characterId, patch) => updateProject((current) => ({
     ...current,
@@ -520,69 +523,85 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
     castMembers: current.castMembers.map((member) => member.id === memberId ? { ...member, ...patch } : member)
   }));
 
+  const renderCharacterEditor = (character, characterIndex, orderedCharacters, isLinked = true) => {
+    const assignedMember = project.castMembers.find((member) => member.characterIds.includes(character.id));
+    const lineCount = dialogueCounts[character.id] || 0;
+    return (
+      <article
+        className={`character-editor${isLinked ? "" : " script-unlinked"}${draggingCharacterId === character.id ? " dragging" : ""}${dragOverCharacterId === character.id ? " drag-over" : ""}`}
+        data-character-id={character.id}
+        key={character.id}
+        style={{ "--character-color": character.color }}
+      >
+        <CharacterImage character={character} patchCharacter={(patch) => patchCharacter(character.id, patch)} />
+        <div className="character-editor-fields">
+          <header>
+            <div className="character-name-fields">
+              <label><span>名前</span><input value={character.name} readOnly={!canEditScript} onChange={(event) => patchCharacter(character.id, { name: event.target.value })} /></label>
+              <label className="character-color-field"><span>セリフ色</span><input type="color" value={character.color} onChange={(event) => patchCharacter(character.id, { color: event.target.value })} /></label>
+            </div>
+            <div className="character-header-actions">
+              {!isLinked && <span className="character-script-state">台本外</span>}
+              <div className="character-line-count"><strong>{lineCount}</strong><span>セリフ</span></div>
+              {canEditScript && (
+                <div className="character-order-controls" aria-label={`${character.name}の並び替え`}>
+                  <button
+                    type="button"
+                    className="icon-button character-drag-handle"
+                    title="ドラッグして並べ替え"
+                    aria-label={`${character.name}をドラッグして並べ替え`}
+                    onPointerDown={(event) => beginCharacterDrag(event, character.id)}
+                    onPointerMove={trackCharacterDrag}
+                    onPointerUp={finishCharacterDrag}
+                    onPointerCancel={resetCharacterDrag}
+                  ><GripVertical size={17} /></button>
+                  <button type="button" className="icon-button" title="一つ上へ" aria-label={`${character.name}を一つ上へ`} disabled={characterIndex === 0} onClick={() => moveCharacter(character.id, orderedCharacters[characterIndex - 1]?.id)}><ArrowUp size={16} /></button>
+                  <button type="button" className="icon-button" title="一つ下へ" aria-label={`${character.name}を一つ下へ`} disabled={characterIndex === orderedCharacters.length - 1} onClick={() => moveCharacter(character.id, orderedCharacters[characterIndex + 1]?.id)}><ArrowDown size={16} /></button>
+                </div>
+              )}
+            </div>
+          </header>
+          <div className="character-field-grid">
+            <label><span>担当声優</span><input value={actorNameDrafts[character.id] ?? assignedMember?.actorName ?? ""} placeholder="声優さんの名前を入力" onChange={(event) => setActorNameDrafts((current) => ({ ...current, [character.id]: event.target.value }))} onBlur={(event) => assignActorName(character.id, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>
+            <label><span>キャラクター画像URL</span><input value={character.imageUrl.startsWith("data:") ? "" : character.imageUrl} placeholder={character.imageUrl.startsWith("data:") ? "画像を登録済み" : "https://..."} onChange={(event) => patchCharacter(character.id, { imageUrl: event.target.value })} /></label>
+            <label className="wide"><span>設定・人物像</span><textarea value={character.profile} onChange={(event) => patchCharacter(character.id, { profile: event.target.value })} /></label>
+            <label className="wide"><span>バックグラウンド</span><textarea value={character.background} onChange={(event) => patchCharacter(character.id, { background: event.target.value })} /></label>
+            <label><span>収録フォルダー</span><input value={character.recordingFolderUrl} placeholder="Google DriveフォルダーURL" onChange={(event) => patchCharacter(character.id, { recordingFolderUrl: event.target.value })} /></label>
+          </div>
+          <footer>
+            <div className="character-link-actions">
+              <a className={!isWebUrl(character.recordingFolderUrl) ? "disabled" : ""} href={isWebUrl(character.recordingFolderUrl) ? character.recordingFolderUrl : undefined} target="_blank" rel="noreferrer"><FolderOpen size={16} />収録フォルダー</a>
+            </div>
+            {canEditScript && <button type="button" className="icon-button danger-icon" title="登場人物を削除" onClick={() => removeCharacter(character.id)}><Trash2 size={16} /></button>}
+          </footer>
+        </div>
+      </article>
+    );
+  };
+
   return (
     <div className="production-page-stack">
       <div className="production-section-toolbar">
-        <div><Users size={19} /><span>{project.characters.length}人の登場人物</span></div>
+        <div><Users size={19} /><span>台本に登場 {linkedCharacters.length}人{unlinkedCharacters.length ? ` / 台本外 ${unlinkedCharacters.length}人` : ""}</span></div>
         {canEditScript && <button type="button" className="primary" onClick={addCharacter}><Plus size={16} />登場人物</button>}
       </div>
       {message && <p className="production-inline-message">{message}</p>}
       <div className="character-editor-list">
-        {project.characters.map((character, characterIndex) => {
-          const assignedMember = project.castMembers.find((member) => member.characterIds.includes(character.id));
-          const lineCount = dialogueCounts[character.id] || 0;
-          return (
-            <article
-              className={`character-editor${draggingCharacterId === character.id ? " dragging" : ""}${dragOverCharacterId === character.id ? " drag-over" : ""}`}
-              data-character-id={character.id}
-              key={character.id}
-              style={{ "--character-color": character.color }}
-            >
-              <CharacterImage character={character} patchCharacter={(patch) => patchCharacter(character.id, patch)} />
-              <div className="character-editor-fields">
-                <header>
-                  <div className="character-name-fields">
-                    <label><span>名前</span><input value={character.name} readOnly={!canEditScript} onChange={(event) => patchCharacter(character.id, { name: event.target.value })} /></label>
-                    <label className="character-color-field"><span>セリフ色</span><input type="color" value={character.color} onChange={(event) => patchCharacter(character.id, { color: event.target.value })} /></label>
-                  </div>
-                  <div className="character-header-actions">
-                    <div className="character-line-count"><strong>{lineCount}</strong><span>セリフ</span></div>
-                    {canEditScript && (
-                      <div className="character-order-controls" aria-label={`${character.name}の並び替え`}>
-                        <button
-                          type="button"
-                          className="icon-button character-drag-handle"
-                          title="ドラッグして並べ替え"
-                          aria-label={`${character.name}をドラッグして並べ替え`}
-                          onPointerDown={(event) => beginCharacterDrag(event, character.id)}
-                          onPointerMove={trackCharacterDrag}
-                          onPointerUp={finishCharacterDrag}
-                          onPointerCancel={resetCharacterDrag}
-                        ><GripVertical size={17} /></button>
-                        <button type="button" className="icon-button" title="一つ上へ" aria-label={`${character.name}を一つ上へ`} disabled={characterIndex === 0} onClick={() => moveCharacter(character.id, project.characters[characterIndex - 1]?.id)}><ArrowUp size={16} /></button>
-                        <button type="button" className="icon-button" title="一つ下へ" aria-label={`${character.name}を一つ下へ`} disabled={characterIndex === project.characters.length - 1} onClick={() => moveCharacter(character.id, project.characters[characterIndex + 1]?.id)}><ArrowDown size={16} /></button>
-                      </div>
-                    )}
-                  </div>
-                </header>
-                <div className="character-field-grid">
-                  <label><span>担当声優</span><input value={actorNameDrafts[character.id] ?? assignedMember?.actorName ?? ""} placeholder="声優さんの名前を入力" onChange={(event) => setActorNameDrafts((current) => ({ ...current, [character.id]: event.target.value }))} onBlur={(event) => assignActorName(character.id, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>
-                  <label><span>キャラクター画像URL</span><input value={character.imageUrl.startsWith("data:") ? "" : character.imageUrl} placeholder={character.imageUrl.startsWith("data:") ? "画像を登録済み" : "https://..."} onChange={(event) => patchCharacter(character.id, { imageUrl: event.target.value })} /></label>
-                  <label className="wide"><span>設定・人物像</span><textarea value={character.profile} onChange={(event) => patchCharacter(character.id, { profile: event.target.value })} /></label>
-                  <label className="wide"><span>バックグラウンド</span><textarea value={character.background} onChange={(event) => patchCharacter(character.id, { background: event.target.value })} /></label>
-                  <label><span>収録フォルダー</span><input value={character.recordingFolderUrl} placeholder="Google DriveフォルダーURL" onChange={(event) => patchCharacter(character.id, { recordingFolderUrl: event.target.value })} /></label>
-                </div>
-                <footer>
-                  <div className="character-link-actions">
-                    <a className={!isWebUrl(character.recordingFolderUrl) ? "disabled" : ""} href={isWebUrl(character.recordingFolderUrl) ? character.recordingFolderUrl : undefined} target="_blank" rel="noreferrer"><FolderOpen size={16} />収録フォルダー</a>
-                  </div>
-                  {canEditScript && <button type="button" className="icon-button danger-icon" title="登場人物を削除" onClick={() => removeCharacter(character.id)}><Trash2 size={16} /></button>}
-                </footer>
-              </div>
-            </article>
-          );
-        })}
+        {linkedCharacters.map((character, characterIndex) => renderCharacterEditor(character, characterIndex, linkedCharacters))}
+        {!linkedCharacters.length && <div className="production-empty-state"><Users size={30} /><b>現在の台本に登場するキャラクターはいません</b></div>}
       </div>
+
+      {unlinkedCharacters.length > 0 && (
+        <details className="character-unlinked-section">
+          <summary>
+            <div><AlertCircle size={19} /><div><h3>台本外のキャラクター</h3><p>現在の台本にセリフがない人物です。設定と画像はそのまま保存されています。</p></div></div>
+            <span>{unlinkedCharacters.length}人<ChevronDown size={18} /></span>
+          </summary>
+          <div className="character-editor-list">
+            {unlinkedCharacters.map((character, characterIndex) => renderCharacterEditor(character, characterIndex, unlinkedCharacters, false))}
+          </div>
+        </details>
+      )}
 
       <section className="panel cast-roster-panel">
         <header><div><UserPlus size={19} /><div><h3>担当声優</h3><p>登場人物へ割り当てるメンバーを管理します。</p></div></div><button type="button" className="secondary" onClick={addCastMember}><Plus size={16} />声優さん</button></header>
@@ -640,6 +659,10 @@ function LinksView({ project, updateProject, canEditScript = true }) {
   const [dragOverLinkId, setDragOverLinkId] = useState("");
   const [message, setMessage] = useState("");
   const linkDragRef = useRef(null);
+  const { linkedCharacters } = useMemo(
+    () => partitionCharactersByScript(project),
+    [project.characters, project.lines]
+  );
 
   const patchCharacterLink = (characterId, key, value) => updateProject((current) => ({
     ...current,
@@ -723,10 +746,10 @@ function LinksView({ project, updateProject, canEditScript = true }) {
       <details className="production-link-section production-folder-section">
         <summary>
           <div><FolderOpen size={20} /><div><h3>収録フォルダー一覧</h3><p>キャラクターごとのGoogle Drive録音先です。</p></div></div>
-          <span>{project.characters.length}フォルダー<ChevronDown size={18} /></span>
+          <span>{linkedCharacters.length}フォルダー<ChevronDown size={18} /></span>
         </summary>
         <div className="production-link-list">
-          {project.characters.map((character) => {
+          {linkedCharacters.map((character) => {
             const assignedMember = project.castMembers.find((member) => member.characterIds.includes(character.id));
             return (
               <article className="production-link-row" key={character.id} style={{ "--character-color": character.color }}>
@@ -748,7 +771,7 @@ function LinksView({ project, updateProject, canEditScript = true }) {
               </article>
             );
           })}
-          {!project.characters.length && <div className="production-empty-state"><FolderOpen size={30} /><b>収録フォルダーを設定するキャラクターがいません</b></div>}
+          {!linkedCharacters.length && <div className="production-empty-state"><FolderOpen size={30} /><b>現在の台本に登場するキャラクターがいません</b></div>}
         </div>
       </details>
 

@@ -908,6 +908,65 @@ h1 {
   gap: 12px;
 }
 
+.character-unlinked-section {
+  display: grid;
+  gap: 12px;
+}
+
+.character-unlinked-section > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  padding: 11px 13px;
+  border: 1px solid #d8cec1;
+  border-radius: 8px;
+  background: #f7f5f2;
+  cursor: pointer;
+  list-style: none;
+}
+
+.character-unlinked-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.character-unlinked-section > summary > div,
+.character-unlinked-section > summary > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.character-unlinked-section > summary h3,
+.character-unlinked-section > summary p {
+  margin: 0;
+}
+
+.character-unlinked-section > summary h3 {
+  color: #413a47;
+  font-size: 14px;
+}
+
+.character-unlinked-section > summary p,
+.character-unlinked-section > summary > span {
+  color: #776e7d;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.character-unlinked-section > summary svg:last-child {
+  transition: transform .16s ease;
+}
+
+.character-unlinked-section[open] > summary svg:last-child {
+  transform: rotate(180deg);
+}
+
+.character-unlinked-section > .character-editor-list {
+  padding-top: 12px;
+}
+
 .character-editor {
   display: grid;
   grid-template-columns: 172px minmax(0, 1fr);
@@ -918,6 +977,23 @@ h1 {
   border-radius: 8px;
   background: #fff;
   transition: border-color .16s ease, box-shadow .16s ease, opacity .16s ease;
+}
+
+.character-editor.script-unlinked {
+  border-color: #d7d3cd;
+  border-left-color: #8c858e;
+  background: #fbfaf8;
+}
+
+.character-script-state {
+  padding: 4px 7px;
+  border: 1px solid #cbc4cc;
+  border-radius: 5px;
+  background: #f1eef1;
+  color: #655d68;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .character-editor.dragging {
@@ -1923,6 +1999,7 @@ h1 {
   .material-toolbar,
   .production-link-section > header,
   .production-folder-section > summary,
+  .character-unlinked-section > summary,
   .production-dashboard-section > header,
   .cast-roster-panel > header,
   .schedule-section > header {
@@ -1930,7 +2007,8 @@ h1 {
     flex-direction: column;
   }
 
-  .production-folder-section > summary > span {
+  .production-folder-section > summary > span,
+  .character-unlinked-section > summary > span {
     align-self: flex-start;
   }
 
@@ -3469,9 +3547,26 @@ h1 {
 .script-line-sequence b {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 7px;
   overflow-wrap: anywhere;
   font-size: 13px;
+}
+
+.line-performance-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 3px 6px;
+  border: 1px solid #d8a7ba;
+  border-radius: 4px;
+  background: #fff4f7;
+  color: #8a3558;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .script-line-sequence b i {

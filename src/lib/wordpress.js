@@ -88,9 +88,9 @@ export const saveWordPressWorkspace = (data) => wordpressRequest("workspace", {
   body: JSON.stringify({ data })
 });
 
-export const updateWordPressRecordingLine = ({ projectId, lineId, patch }) => wordpressRequest("line", {
+export const updateWordPressRecordingLine = ({ projectId, lineId, patch, lineContext = null }) => wordpressRequest("line", {
   method: "POST",
-  body: JSON.stringify({ projectId, lineId, patch })
+  body: JSON.stringify({ projectId, lineId, patch, lineContext })
 });
 
 export const createWordPressQuestion = ({ projectId, lineId = "", body }) => wordpressRequest("question", {

@@ -7,14 +7,17 @@ import {
   archiveScriptVersion,
   getCharacterDialogueCounts,
   getCharacterImageCropStyle,
+  getFilteredRecordingLines,
   getRecordingDisplayProject,
   getRecordingProgress,
   getShareableRecordingProject,
   getScriptHierarchyRepairPlan,
   getScriptImportPlan,
   normalizeRecordingProject,
+  patchRecordingLineProgress,
   parseGoogleDocsScript,
   parseManualChapterBody,
+  partitionCharactersByScript,
   reorderProductionCharacters,
   reorderProductionMaterials,
   reorderProductionSharedLinks,
@@ -160,6 +163,10 @@ test("merges alternate performance labels into their canonical characters", () =
   assert.deepEqual(project.lines.map((line) => line.characterId), ["vel", "vel", "amamori", "amamori", "kara"]);
   assert.equal(project.lines[0].actorStatus, "収録済み");
   assert.equal(project.lines[0].reviewStatus, "OK");
+  assert.deepEqual(
+    project.lines.map((line) => line.performanceType),
+    ["イヤモニ", "心の声", "ナレーション", "ナレーション", "心の声"]
+  );
   assert.deepEqual(project.castMembers[0].characterIds, ["vel", "amamori"]);
   assert.equal(project.questions[0].characterId, "amamori");
 });
@@ -175,6 +182,7 @@ test("uses canonical character names while parsing performance labels", () => {
 「ヴェル、待っていて。」`, ["ヴェル", "アマモリ", "カーラ"]);
 
   assert.deepEqual(rows.map((row) => row.speaker), ["ヴェル", "ヴェル", "アマモリ", "カーラ"]);
+  assert.deepEqual(rows.map((row) => row.performanceType), ["イヤモニ", "心の声", "ナレーション", "心の声"]);
 });
 
 test("counts dialogue inside manually pasted chapter bodies without replacing the original text", () => {
@@ -199,6 +207,23 @@ test("counts dialogue inside manually pasted chapter bodies without replacing th
   assert.match(project.lines[1].text, /アマモリのナレーター/);
 });
 
+test("separates characters removed from the current script without deleting their settings", () => {
+  const project = normalizeRecordingProject({
+    characters: [
+      { id: "vel", name: "ヴェル", imageUrl: "vel.png" },
+      { id: "candidate", name: "候補者", recordingFolderUrl: "https://drive.example/candidate" }
+    ],
+    lines: [{ id: "vel_line", characterId: "vel", kind: "dialogue", text: "行こう。" }]
+  });
+
+  const groups = partitionCharactersByScript(project);
+
+  assert.deepEqual(groups.linkedCharacters.map((character) => character.id), ["vel"]);
+  assert.deepEqual(groups.unlinkedCharacters.map((character) => character.id), ["candidate"]);
+  assert.equal(groups.unlinkedCharacters[0].recordingFolderUrl, "https://drive.example/candidate");
+  assert.equal(project.characters.length, 2);
+});
+
 test("builds filterable display lines from a manually pasted chapter without changing stored lines", () => {
   const project = normalizeRecordingProject({
     characters: [
@@ -221,10 +246,80 @@ test("builds filterable display lines from a manually pasted chapter without cha
   const dialogue = displayProject.lines.filter((line) => line.kind === "dialogue");
 
   assert.deepEqual(dialogue.map((line) => line.characterId), ["vel", "amamori"]);
+  assert.deepEqual(dialogue.map((line) => line.performanceType), ["イヤモニ", "ナレーション"]);
   assert.ok(dialogue.every((line) => line.derivedFromManualBody));
   assert.equal(project.lines.length, 1);
   assert.equal(project.lines[0].manualBody, true);
   assert.match(project.lines[0].text, /ヴェルイヤモニ/);
+});
+
+test("selecting a character includes every performance type for that character", () => {
+  const project = getRecordingDisplayProject(normalizeRecordingProject({
+    characters: [
+      { id: "vel", name: "ヴェル" },
+      { id: "amamori", name: "アマモリ" }
+    ],
+    lines: [{
+      id: "chapter_body",
+      chapterId: "chapter_1",
+      chapterTitle: "第一章",
+      sceneId: "scene_1",
+      sceneTitle: "章の本文",
+      kind: "direction",
+      manualBody: true,
+      text: `ヴェル「通常の声。」
+ヴェルの心の声「心の声。」
+ヴェルイヤモニ「イヤモニの声。」
+アマモリのナレーター「雨が降っていた。」`
+    }]
+  }));
+
+  const filtered = getFilteredRecordingLines({
+    project,
+    selectedCharacterIds: ["vel"],
+    includeContext: false
+  });
+
+  assert.deepEqual(filtered.map((line) => line.characterId), ["vel", "vel", "vel"]);
+  assert.deepEqual(filtered.map((line) => line.performanceType), ["通常", "心の声", "イヤモニ"]);
+});
+
+test("keeps derived recording progress when unrelated chapter text is edited", () => {
+  const base = normalizeRecordingProject({
+    characters: [{ id: "vel", name: "ヴェル" }],
+    lines: [{
+      id: "chapter_body",
+      chapterId: "chapter_1",
+      chapterTitle: "第一章",
+      sceneId: "scene_1",
+      sceneTitle: "章の本文",
+      kind: "direction",
+      manualBody: true,
+      text: `ヴェル「行こう。」
+ヴェルの心の声「まだ終われない。」`
+    }]
+  });
+  const firstDisplay = getRecordingDisplayProject(base);
+  const innerLine = firstDisplay.lines.find((line) => line.performanceType === "心の声");
+  const recorded = patchRecordingLineProgress(base, innerLine.id, {
+    actorStatus: "収録済み",
+    updatedAt: "2026-07-26T12:00:00+09:00"
+  }, innerLine);
+  const edited = normalizeRecordingProject({
+    ...recorded,
+    lines: recorded.lines.map((line) => line.id === "chapter_body"
+      ? { ...line, text: `ヴェル「新しく追加したセリフ。」
+ヴェル「行こう。」
+ヴェルの心の声「まだ終われない。」` }
+      : line)
+  });
+  const secondDisplay = getRecordingDisplayProject(edited);
+  const preserved = secondDisplay.lines.find((line) => line.text === "まだ終われない。");
+
+  assert.equal(preserved.id, innerLine.id);
+  assert.equal(preserved.actorStatus, "収録済み");
+  assert.equal(getRecordingProgress(edited).recorded, 1);
+  assert.equal(getRecordingProgress(edited).total, 3);
 });
 
 test("splits a manually pasted chapter only at heading 2 markers", () => {

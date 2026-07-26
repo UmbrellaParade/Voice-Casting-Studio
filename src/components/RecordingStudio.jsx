@@ -45,10 +45,12 @@ import {
 import {
   ACTOR_RECORDING_STATUSES,
   DIRECTOR_REVIEW_STATUSES,
+  LINE_PERFORMANCE_TYPES,
   archiveScriptVersion,
   createRecordingAccessKey,
   createRecordingProject,
   addRubyNotation,
+  getCanonicalCharacterName,
   getCharacterName,
   getFilteredRecordingLines,
   getRecordingDisplayProject,
@@ -61,11 +63,13 @@ import {
   isScriptStructureLabel,
   makeRecordingShareUrl,
   mergeRemoteRecordingProject,
+  normalizeLinePerformanceType,
   normalizeRecordingProject,
   parseGoogleDocsScript,
   parseManualChapterBody,
   parseRubyText,
   parseScriptTable,
+  patchRecordingLineProgress,
   repairScriptHierarchy,
   hasRubyNotation,
   restoreScriptSnapshot,
@@ -525,7 +529,9 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
         <div className="script-line-sequence">
           <span>{String(line.displayOrder ?? line.order).padStart(3, "0")}</span>
           <b>
-            <i />{isManualBody ? "本文" : isDirection ? "ト書き" : character?.name || "話者未設定"}
+            <i />
+            <span>{isManualBody ? "本文" : isDirection ? "ト書き" : character?.name || "話者未設定"}</span>
+            {!isDirection && line.performanceType && line.performanceType !== "通常" && <em className="line-performance-badge">{line.performanceType}</em>}
           </b>
         </div>
         <div className="script-line-copy">
@@ -533,14 +539,14 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
           {line.direction && <small><MessageSquareText size={14} />{line.direction}</small>}
           {line.fileName && <code>{line.fileName}</code>}
         </div>
-        {!isDirection && !isDerivedFromManualBody && (
+        {!isDirection && (
           <div className="script-line-states">
             <StatusBadge status={line.actorStatus} type="actor" />
             <StatusBadge status={line.reviewStatus} type="review" />
           </div>
         )}
       </div>
-      {!line.isContext && !isDirection && !isDerivedFromManualBody && (
+      {!line.isContext && !isDirection && (
         <>
           <div className={`line-operation-row${line.recordingUrl ? " has-recording" : ""}`}>
             <RecordingPlayer url={line.recordingUrl} fileName={line.recordingFileName} />
@@ -566,22 +572,28 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
             </div>
           )}
           <div className="line-card-footer">
-            <span><Clock3 size={14} />{formatUpdatedAt(line.updatedAt)}</span>
+            <span>{isDerivedFromManualBody ? "章本文から表示" : <><Clock3 size={14} />{formatUpdatedAt(line.updatedAt)}</>}</span>
             <div>
               <button type="button" className="secondary compact" onClick={() => setDetailsOpen((current) => !current)}>
-                {detailsOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}{canEditScript ? "詳細編集" : "録音・確認メモ"}
+                {detailsOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}{canEditScript && !isDerivedFromManualBody ? "詳細編集" : "録音・確認メモ"}
               </button>
             </div>
           </div>
           {detailsOpen && (
             <div className="line-detail-editor">
-              {canEditScript && <>
+              {canEditScript && !isDerivedFromManualBody && <>
                 <Field label="章名" value={line.chapterTitle} onChange={(value) => patchLine(line.id, { chapterTitle: value })} />
                 <Field label="シーン名" value={line.sceneTitle} onChange={(value) => patchLine(line.id, { sceneTitle: value })} />
                 <label>
                   <span>話者</span>
                   <select value={line.characterId} onChange={(event) => patchLine(line.id, { characterId: event.target.value })}>
                     {project.characters.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>読み分け</span>
+                  <select value={line.performanceType || "通常"} onChange={(event) => patchLine(line.id, { performanceType: event.target.value })}>
+                    {LINE_PERFORMANCE_TYPES.map((type) => <option key={type}>{type}</option>)}
                   </select>
                 </label>
                 <TextArea label="セリフ" value={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
@@ -592,7 +604,7 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
               <Field label="録音URL" value={line.recordingUrl} onChange={(value) => patchLine(line.id, { recordingUrl: value })} />
               <TextArea label="声優さんのメモ" value={line.actorNote} onChange={(value) => patchLine(line.id, { actorNote: value })} />
               <TextArea label="確認・リテイクメモ" value={line.directorNote} onChange={(value) => patchLine(line.id, { directorNote: value })} />
-              {canEditScript && (
+              {canEditScript && !isDerivedFromManualBody && (
                 <button type="button" className="danger compact" onClick={() => removeLine(line.id)}>
                   <Trash2 size={15} />このセリフを削除
                 </button>
@@ -601,8 +613,8 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
           )}
         </>
       )}
-      {!line.isContext && isDerivedFromManualBody && (
-        <div className="line-card-footer derived-manual-footer"><span>章本文から表示</span></div>
+      {!line.isContext && isDirection && isDerivedFromManualBody && (
+        <div className="line-card-footer derived-manual-footer"><span>録音対象外・章本文から表示</span></div>
       )}
       {!line.isContext && isDirection && !isDerivedFromManualBody && (
         <>
@@ -833,10 +845,22 @@ function ScriptEditor({
   );
   const reviewedImportRows = useMemo(() => {
     const excluded = new Set(excludedImportRowKeys);
+    const knownCharacterNames = project.characters.map((character) => character.name);
     return importRowsWithKeys
       .filter((row) => !excluded.has(row.reviewKey))
-      .map((row) => ({ ...row, ...(importRowEdits[row.reviewKey] || {}) }));
-  }, [excludedImportRowKeys, importRowEdits, importRowsWithKeys]);
+      .map((row) => {
+        const edits = importRowEdits[row.reviewKey] || {};
+        const edited = { ...row, ...edits };
+        if (edited.sourceKind === "direction" || edited.speaker === "ト書き") return { ...edited, performanceType: "通常" };
+        const speakerLabel = Object.hasOwn(edits, "speaker") ? edited.speaker : edited.speakerLabel || edited.speaker;
+        return {
+          ...edited,
+          speakerLabel,
+          speaker: getCanonicalCharacterName(edited.speaker, knownCharacterNames),
+          performanceType: normalizeLinePerformanceType(edited.performanceType, speakerLabel)
+        };
+      });
+  }, [excludedImportRowKeys, importRowEdits, importRowsWithKeys, project.characters]);
   const importStats = useMemo(() => {
     const chapters = new Set(reviewedImportRows.map((row) => getScriptChapterKey(row.chapterTitle)));
     const scenes = new Set(reviewedImportRows.map((row) => `${getScriptChapterKey(row.chapterTitle)}\u0000${getScriptSceneKey(row.sceneTitle)}`));
@@ -1606,11 +1630,9 @@ export function RecordingStudio({
       : Object.fromEntries(Object.entries(patch).filter(([key]) => COLLABORATIVE_LINE_FIELDS.has(key)));
     if (!Object.keys(permittedPatch).length) return;
     const timestampedPatch = { ...permittedPatch, updatedAt: new Date().toISOString() };
-    updateProject(project.id, (current) => ({
-      ...current,
-      lines: current.lines.map((line) => line.id === lineId ? { ...line, ...timestampedPatch } : line)
-    }));
-    const shouldSync = project.sharedAt && Object.keys(permittedPatch).some((key) => COLLABORATIVE_LINE_FIELDS.has(key));
+    const displayLine = getRecordingDisplayProject(project).lines.find((line) => line.id === lineId);
+    updateProject(project.id, (current) => patchRecordingLineProgress(current, lineId, timestampedPatch, displayLine));
+    const shouldSync = !displayLine?.derivedFromManualBody && project.sharedAt && Object.keys(permittedPatch).some((key) => COLLABORATIVE_LINE_FIELDS.has(key));
     if (!shouldSync || !endpointUrl || !token) return;
     setSyncState({ busy: true, message: "変更を共有しています…", error: false });
     try {
@@ -1656,14 +1678,15 @@ export function RecordingStudio({
       const kind = draft.sourceKind === "direction" || draft.kind === "direction" ? "direction" : "dialogue";
       const speakerName = String(draft.speaker || "").trim();
       const characters = [...current.characters];
-      const speakerKey = speakerName.normalize("NFKC").toLocaleLowerCase("ja");
+      const canonicalSpeakerName = getCanonicalCharacterName(speakerName, characters.map((item) => item.name));
+      const speakerKey = canonicalSpeakerName.normalize("NFKC").toLocaleLowerCase("ja");
       let character = kind === "dialogue"
         ? characters.find((item) => item.name.normalize("NFKC").toLocaleLowerCase("ja") === speakerKey)
         : characters[0];
       if (kind === "dialogue" && !character) {
         character = {
           id: newId("character"),
-          name: speakerName || `登場人物${characters.length + 1}`,
+          name: canonicalSpeakerName || `登場人物${characters.length + 1}`,
           color: ["#168b9a", "#d65285", "#7a63ad", "#b57024", "#2f7d4a", "#5f6d7a"][characters.length % 6],
           imageUrl: "",
           profile: "",
@@ -1693,6 +1716,7 @@ export function RecordingStudio({
             order: current.lines.length + 1,
             characterId: character?.id || "",
             kind,
+            performanceType: kind === "dialogue" ? normalizeLinePerformanceType(draft.performanceType, speakerName) : "通常",
             text: String(draft.text || ""),
             direction: String(draft.direction || ""),
             fileName: String(draft.fileName || ""),
@@ -1791,6 +1815,7 @@ export function RecordingStudio({
           order: index + 1,
           characterId: character?.id || "",
           kind: isDirection ? "direction" : "dialogue",
+          performanceType: isDirection ? "通常" : normalizeLinePerformanceType(row.performanceType, row.speakerLabel || row.speaker),
           manualBody: Boolean(row.manualBody),
           text: row.text,
           direction: row.direction,
