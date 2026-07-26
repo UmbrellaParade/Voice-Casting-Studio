@@ -823,7 +823,17 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
               <label><span>担当声優</span><input value={actorNameDrafts[character.id] ?? assignedMember?.actorName ?? ""} placeholder="声優さんの名前を入力" readOnly={!canEditScript} onChange={(event) => setActorNameDrafts((current) => ({ ...current, [character.id]: event.target.value }))} onBlur={(event) => assignActorName(character.id, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>
               {renderSocialField(assignedMember)}
             </div>
-            <label className="character-folder-label"><span>収録フォルダー</span><div className="character-folder-field"><input value={character.recordingFolderUrl} placeholder="Google DriveフォルダーURL" readOnly={!canEditScript} onChange={(event) => patchCharacter(character.id, { recordingFolderUrl: event.target.value })} /><a className={`icon-button character-folder-open${isWebUrl(character.recordingFolderUrl) ? "" : " disabled"}`} href={isWebUrl(character.recordingFolderUrl) ? character.recordingFolderUrl : undefined} target="_blank" rel="noreferrer" aria-label={`${character.name}の収録フォルダーを開く`} aria-disabled={!isWebUrl(character.recordingFolderUrl)} title="収録フォルダーを開く"><FolderOpen size={16} /></a></div></label>
+            <div className="character-folder-column">
+              <label className="character-folder-label"><span>収録フォルダー</span><div className="character-folder-field"><input value={character.recordingFolderUrl} placeholder="Google DriveフォルダーURL" readOnly={!canEditScript} onChange={(event) => patchCharacter(character.id, { recordingFolderUrl: event.target.value })} /><a className={`icon-button character-folder-open${isWebUrl(character.recordingFolderUrl) ? "" : " disabled"}`} href={isWebUrl(character.recordingFolderUrl) ? character.recordingFolderUrl : undefined} target="_blank" rel="noreferrer" aria-label={`${character.name}の収録フォルダーを開く`} aria-disabled={!isWebUrl(character.recordingFolderUrl)} title="収録フォルダーを開く"><FolderOpen size={16} /></a></div></label>
+              <div className="recording-delivery-notes" role="note" aria-label="収録物の注意点">
+                <strong><AlertCircle size={15} />収録物の注意点</strong>
+                <ul>
+                  <li>形式：wav形式（モノラル）</li>
+                  <li>サンプリングレート：44.1kHz</li>
+                  <li>ファイル名に役名と氏名（SNS名）を記載</li>
+                </ul>
+              </div>
+            </div>
             <label className="wide"><span>設定・人物像</span><textarea value={character.profile} readOnly={!canEditScript} onChange={(event) => patchCharacter(character.id, { profile: event.target.value })} /></label>
           </div>
         </div>

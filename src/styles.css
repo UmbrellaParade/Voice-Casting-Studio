@@ -1370,6 +1370,45 @@ h1 {
   align-content: start;
 }
 
+.character-folder-column {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.recording-delivery-notes {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid #d9d1c5;
+  border-left: 3px solid var(--character-color);
+  border-radius: 6px;
+  background: #faf8f4;
+  color: #504958;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.recording-delivery-notes strong {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #2d2635;
+  font-size: 11px;
+}
+
+.recording-delivery-notes ul {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.recording-delivery-notes li {
+  margin: 0;
+}
+
 .character-social-open {
   display: inline-flex;
   align-items: center;
