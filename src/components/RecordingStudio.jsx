@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpenText,
   CheckCircle2,
@@ -13,6 +13,7 @@ import {
   FileText,
   FilePlus2,
   History,
+  Heading2,
   KeyRound,
   Link,
   ListFilter,
@@ -20,6 +21,7 @@ import {
   MessageSquareText,
   Mic2,
   Plus,
+  Pilcrow,
   RefreshCw,
   RotateCcw,
   Save,
@@ -60,6 +62,7 @@ import {
   mergeRemoteRecordingProject,
   normalizeRecordingProject,
   parseGoogleDocsScript,
+  parseManualChapterBody,
   parseRubyText,
   parseScriptTable,
   repairScriptHierarchy,
@@ -80,6 +83,47 @@ const COLLABORATIVE_LINE_FIELDS = new Set([
   "directorNote"
 ]);
 const BOARD_STATUS_FILTERS = ["すべて", "未収録", "収録済み", "未確認", "OK", "リテイク", "保留"];
+
+const GOOGLE_DOCS_HEADING_MARKER = "__VCS_HEADING_2__";
+
+const convertGoogleDocsHtmlToChapterText = (html = "", fallbackText = "") => {
+  if (!html || typeof DOMParser === "undefined") return String(fallbackText || "");
+  const markedHtml = String(html)
+    .replace(/<h2\b[^>]*>/gi, `\n${GOOGLE_DOCS_HEADING_MARKER}`)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:h[1-6]|p|div|li)>/gi, "\n")
+    .replace(/<(?:h1|h3|h4|h5|h6|p|div|li)\b[^>]*>/gi, "\n");
+  const parsed = new DOMParser().parseFromString(markedHtml, "text/html");
+  const converted = String(parsed.body.textContent || "")
+    .replace(new RegExp(GOOGLE_DOCS_HEADING_MARKER, "g"), "## ")
+    .replace(/\u00a0/g, " ")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return converted || String(fallbackText || "");
+};
+
+const getChapterEditorText = (project, chapterTitle) => {
+  const chapterKey = getScriptChapterKey(chapterTitle);
+  const lines = project.lines.filter((line) => getScriptChapterKey(line.chapterTitle) === chapterKey);
+  const scenes = [];
+  lines.forEach((line) => {
+    const lastScene = scenes.at(-1);
+    if (lastScene?.sceneId === line.sceneId) lastScene.lines.push(line);
+    else scenes.push({ sceneId: line.sceneId, title: line.sceneTitle, lines: [line] });
+  });
+  return scenes.map((scene, index) => {
+    const showHeading = scenes.length > 1 || !["章の本文", "章の冒頭"].includes(scene.title);
+    const body = scene.lines.map((line) => {
+      if (line.kind === "direction" || line.manualBody) return line.text;
+      return `${getCharacterName(project, line.characterId)}：${line.text}`;
+    }).filter(Boolean).join("\n\n");
+    return [showHeading ? `## ${scene.title || `シーン${index + 1}`}` : "", body].filter(Boolean).join("\n");
+  }).filter(Boolean).join("\n\n");
+};
 
 const formatUpdatedAt = (value) => {
   if (!value) return "更新履歴なし";
@@ -463,6 +507,7 @@ function StatusBadge({ status, type }) {
 function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) {
   const character = project.characters.find((item) => item.id === line.characterId);
   const isDirection = line.kind === "direction";
+  const isManualBody = isDirection && line.manualBody;
   const [detailsOpen, setDetailsOpen] = useState(false);
   const characterColor = character?.color || "#5f6d7a";
 
@@ -478,11 +523,11 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
         <div className="script-line-sequence">
           <span>{String(line.order).padStart(3, "0")}</span>
           <b>
-            <i />{isDirection ? "ト書き" : character?.name || "話者未設定"}
+            <i />{isManualBody ? "本文" : isDirection ? "ト書き" : character?.name || "話者未設定"}
           </b>
         </div>
         <div className="script-line-copy">
-          <p><RubyText text={line.text || "セリフ未入力"} /></p>
+          <p><RubyText text={line.text || (isManualBody ? "本文未入力" : "セリフ未入力")} /></p>
           {line.direction && <small><MessageSquareText size={14} />{line.direction}</small>}
           {line.fileName && <code>{line.fileName}</code>}
         </div>
@@ -570,10 +615,10 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
             <div className="line-detail-editor">
               <Field label="章名" value={line.chapterTitle} onChange={(value) => patchLine(line.id, { chapterTitle: value })} />
               <Field label="シーン名" value={line.sceneTitle} onChange={(value) => patchLine(line.id, { sceneTitle: value })} />
-              <TextArea label="ト書き" value={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
+              <TextArea label={isManualBody ? "本文" : "ト書き"} value={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
               <RubyEditor text={line.text} onChange={(value) => patchLine(line.id, { text: value })} />
               <button type="button" className="danger compact" onClick={() => removeLine(line.id)}>
-                <Trash2 size={15} />このト書きを削除
+                <Trash2 size={15} />この{isManualBody ? "本文" : "ト書き"}を削除
               </button>
             </div>
           )}
@@ -757,32 +802,15 @@ function ScriptEditor({
   const [importRowEdits, setImportRowEdits] = useState({});
   const [excludedImportRowKeys, setExcludedImportRowKeys] = useState([]);
   const [showImportReview, setShowImportReview] = useState(false);
-  const [showManualComposer, setShowManualComposer] = useState(false);
+  const [showAutomaticImport, setShowAutomaticImport] = useState(false);
   const [manualMessage, setManualMessage] = useState("");
   const [showAllLines, setShowAllLines] = useState(false);
   const [rubyLineId, setRubyLineId] = useState("");
-  const [manualLine, setManualLine] = useState(() => {
-    const lastLine = project.lines.at(-1);
-    return {
-      chapterTitle: lastLine?.chapterTitle || "第一章",
-      sceneTitle: lastLine?.sceneTitle || "シーン1",
-      sourceKind: "dialogue",
-      speaker: project.characters[0]?.name || "",
-      text: "",
-      direction: ""
-    };
-  });
+  const [manualChapter, setManualChapter] = useState({ chapterTitle: "", bodyText: "" });
+  const manualBodyRef = useRef(null);
 
   useEffect(() => {
-    const lastLine = project.lines.at(-1);
-    setManualLine({
-      chapterTitle: lastLine?.chapterTitle || "第一章",
-      sceneTitle: lastLine?.sceneTitle || "シーン1",
-      sourceKind: "dialogue",
-      speaker: project.characters[0]?.name || "",
-      text: "",
-      direction: ""
-    });
+    setManualChapter({ chapterTitle: "", bodyText: "" });
     setManualMessage("");
   }, [project.id]);
 
@@ -827,12 +855,16 @@ function ScriptEditor({
     () => [...new Set(project.lines.map((line) => line.chapterTitle).filter(Boolean))],
     [project.lines]
   );
-  const sceneOptions = useMemo(
-    () => [...new Set(project.lines
-      .filter((line) => getScriptChapterKey(line.chapterTitle) === getScriptChapterKey(manualLine.chapterTitle))
-      .map((line) => line.sceneTitle)
-      .filter(Boolean))],
-    [manualLine.chapterTitle, project.lines]
+  const manualChapterRows = useMemo(
+    () => parseManualChapterBody(manualChapter.bodyText, manualChapter.chapterTitle),
+    [manualChapter]
+  );
+  const manualHeadings = useMemo(
+    () => manualChapter.bodyText.split(/\r?\n/).map((line, index) => {
+      const match = line.match(/^\s*##\s+(.+?)\s*$/);
+      return match ? { title: match[1], lineIndex: index } : null;
+    }).filter(Boolean),
+    [manualChapter.bodyText]
   );
 
   const resetImportReview = () => {
@@ -895,22 +927,80 @@ function ScriptEditor({
     );
   };
 
-  const addManualScriptLine = () => {
-    const chapterTitle = String(manualLine.chapterTitle || "").trim();
-    const sceneTitle = String(manualLine.sceneTitle || "").trim();
-    const speaker = String(manualLine.speaker || "").trim();
-    const text = String(manualLine.text || "").trim();
-    if (!chapterTitle || !sceneTitle || !text) {
-      setManualMessage("章・シーン・本文を入力してください。");
+  const patchManualBody = (bodyText) => {
+    setManualChapter((current) => ({ ...current, bodyText }));
+    setManualMessage("");
+  };
+
+  const setManualTextStyle = (style) => {
+    const textarea = manualBodyRef.current;
+    if (!textarea) return;
+    const source = manualChapter.bodyText;
+    const selectionStart = textarea.selectionStart;
+    const selectionEnd = textarea.selectionEnd;
+    const blockStart = source.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
+    const nextBreak = source.indexOf("\n", selectionEnd);
+    const blockEnd = nextBreak < 0 ? source.length : nextBreak;
+    const selectedBlock = source.slice(blockStart, blockEnd);
+    const transformed = selectedBlock.split("\n").map((line) => {
+      if (style === "heading") return `## ${line.replace(/^\s*##\s*/, "")}`;
+      return line.replace(/^\s*##\s*/, "");
+    }).join("\n");
+    patchManualBody(`${source.slice(0, blockStart)}${transformed}${source.slice(blockEnd)}`);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(blockStart, blockStart + transformed.length);
+    });
+  };
+
+  const pasteManualChapter = (event) => {
+    const html = event.clipboardData?.getData("text/html") || "";
+    if (!html) return;
+    const plainText = event.clipboardData?.getData("text/plain") || "";
+    const pastedText = convertGoogleDocsHtmlToChapterText(html, plainText);
+    if (!pastedText) return;
+    event.preventDefault();
+    const textarea = manualBodyRef.current;
+    const start = textarea?.selectionStart ?? manualChapter.bodyText.length;
+    const end = textarea?.selectionEnd ?? start;
+    patchManualBody(`${manualChapter.bodyText.slice(0, start)}${pastedText}${manualChapter.bodyText.slice(end)}`);
+    requestAnimationFrame(() => {
+      textarea?.focus();
+      textarea?.setSelectionRange(start + pastedText.length, start + pastedText.length);
+    });
+  };
+
+  const loadManualChapter = (chapterTitle) => {
+    setManualChapter({ chapterTitle, bodyText: getChapterEditorText(project, chapterTitle) });
+    setManualMessage(`「${chapterTitle}」を本文欄へ読み込みました。`);
+    requestAnimationFrame(() => manualBodyRef.current?.focus());
+  };
+
+  const saveManualChapter = () => {
+    const chapterTitle = String(manualChapter.chapterTitle || "").trim();
+    const bodyText = String(manualChapter.bodyText || "").trim();
+    if (!chapterTitle || !bodyText || !manualChapterRows.length) {
+      setManualMessage("章名と本文を入力してください。");
       return;
     }
-    if (manualLine.sourceKind !== "direction" && (!speaker || isScriptStructureLabel(speaker))) {
-      setManualMessage("セリフの登場人物名を入力してください。章名やSEはト書きとして追加できます。");
-      return;
-    }
-    addLine({ ...manualLine, chapterTitle, sceneTitle, speaker, text });
-    setManualLine((current) => ({ ...current, text: "", direction: "" }));
-    setManualMessage(`${chapterTitle} / ${sceneTitle}へ追加しました。`);
+    const existingLines = project.lines.filter((line) => getScriptChapterKey(line.chapterTitle) === getScriptChapterKey(chapterTitle));
+    if (existingLines.length && !confirm(
+      `「${chapterTitle}」の本文を更新しますか？\n\n現在の${existingLines.length}件を、見出し2で分けた${manualChapterRows.length}シーンへ置き換えます。更新前の台本は保存版へ残ります。`
+    )) return;
+    importScriptRows(manualChapterRows, {
+      mode: "chapter",
+      targetChapterTitle: chapterTitle,
+      sourceText: bodyText
+    });
+    setManualMessage(`「${chapterTitle}」を${manualChapterRows.length}シーンで保存しました。`);
+  };
+
+  const focusManualHeading = (lineIndex) => {
+    const lines = manualChapter.bodyText.split(/\r?\n/);
+    const start = lines.slice(0, lineIndex).reduce((length, line) => length + line.length + 1, 0);
+    const end = start + (lines[lineIndex]?.length || 0);
+    manualBodyRef.current?.focus();
+    manualBodyRef.current?.setSelectionRange(start, end);
   };
 
   return (
@@ -923,7 +1013,7 @@ function ScriptEditor({
           </div>
         </div>
         <div className="form-grid">
-          <Field label="作品・台本名" value={project.title} onChange={(value) => patchProject({ title: value })} />
+          <Field label="収録プロジェクト名" value={project.title} onChange={(value) => patchProject({ title: value })} />
           <Field label="台本バージョン" value={project.scriptVersion} onChange={(value) => patchProject({ scriptVersion: value })} />
           <Field label="進行状態" value={project.status} onChange={(value) => patchProject({ status: value })} />
           <TextArea label="共有メモ" value={project.description} onChange={(value) => patchProject({ description: value })} />
@@ -957,10 +1047,15 @@ function ScriptEditor({
       <article className="panel script-import-panel">
         <div className="record-head">
           <div>
-            <h2>台本をまとめて取り込む</h2>
-            <p className="muted">原稿を貼り付け、判定結果を確認してから台本へ反映します。</p>
+            <h2>自動判定による取り込み</h2>
+            <p className="muted">必要な場合だけ、従来の話者・構成判定を使用できます。</p>
           </div>
+          <button type="button" className="secondary" onClick={() => setShowAutomaticImport((current) => !current)}>
+            {showAutomaticImport ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            {showAutomaticImport ? "閉じる" : "自動判定を開く"}
+          </button>
         </div>
+        {showAutomaticImport && <>
         <div className="script-import-mode segmented-control" aria-label="台本の取り込み元">
           <button type="button" className={importMode === "docs" ? "active" : ""} onClick={() => { setImportMode("docs"); setImportMessage(""); resetImportReview(); }}>
             <FileText size={15} />Google Docs
@@ -1093,65 +1188,83 @@ function ScriptEditor({
           </button>
         </div>
         {importMessage && <p className="hint-text">{importMessage}</p>}
+        </>}
       </article>
 
       <article className="panel manual-script-panel">
         <div className="record-head">
           <div>
-            <h2>章・シーン・本文を手動で追加</h2>
-            <p className="muted">既存の名前を選ぶほか、新しい章名やシーン名、登場人物名をそのまま入力できます。</p>
+            <h2>章ごとの本文</h2>
+            <p className="muted">章名を入力し、Googleドキュメントから章全体を貼り付けます。</p>
           </div>
-          <button type="button" className="secondary" onClick={() => setShowManualComposer((current) => !current)}>
-            {showManualComposer ? <ChevronUp size={16} /> : <FilePlus2 size={16} />}
-            {showManualComposer ? "閉じる" : "手動入力"}
+          <button type="button" className="secondary" onClick={() => {
+            setManualChapter({ chapterTitle: "", bodyText: "" });
+            setManualMessage("");
+          }}>
+            <FilePlus2 size={16} />新しい章
           </button>
         </div>
-        {showManualComposer && (
-          <div className="manual-script-composer">
-            <div className="manual-script-fields">
-              <label>
-                <span>章</span>
-                <input list={`manual-chapter-options-${project.id}`} value={manualLine.chapterTitle} onChange={(event) => setManualLine((current) => ({ ...current, chapterTitle: event.target.value }))} placeholder="第一章" />
-              </label>
-              <label>
-                <span>シーン</span>
-                <input list={`manual-scene-options-${project.id}`} value={manualLine.sceneTitle} onChange={(event) => setManualLine((current) => ({ ...current, sceneTitle: event.target.value }))} placeholder="シーン1" />
-              </label>
-              <label>
-                <span>種類</span>
-                <select value={manualLine.sourceKind} onChange={(event) => setManualLine((current) => ({ ...current, sourceKind: event.target.value }))}>
-                  <option value="dialogue">セリフ</option>
-                  <option value="direction">ト書き</option>
-                </select>
-              </label>
-              {manualLine.sourceKind === "dialogue" && (
-                <label>
-                  <span>登場人物</span>
-                  <input list={`manual-character-options-${project.id}`} value={manualLine.speaker} onChange={(event) => setManualLine((current) => ({ ...current, speaker: event.target.value }))} placeholder="ヴェル" />
-                </label>
-              )}
+        <div className="manual-script-composer chapter-body-composer">
+          {chapterOptions.length > 0 && (
+            <div className="manual-existing-chapters" aria-label="登録済みの章">
+              <span>登録済みの章</span>
+              <div>
+                {chapterOptions.map((chapterTitle) => (
+                  <button type="button" className="secondary compact" key={chapterTitle} onClick={() => loadManualChapter(chapterTitle)}>
+                    <FileText size={15} />{chapterTitle}
+                  </button>
+                ))}
+              </div>
             </div>
-            <label className="manual-script-copy">
-              <span>{manualLine.sourceKind === "direction" ? "ト書き本文" : "セリフ本文"}</span>
-              <textarea value={manualLine.text} onChange={(event) => setManualLine((current) => ({ ...current, text: event.target.value }))} placeholder="本文を入力" />
-            </label>
-            {manualLine.sourceKind === "dialogue" && (
+          )}
+          <label className="manual-chapter-title">
+            <span>章名</span>
+            <input
+              value={manualChapter.chapterTitle}
+              onChange={(event) => {
+                setManualChapter((current) => ({ ...current, chapterTitle: event.target.value }));
+                setManualMessage("");
+              }}
+              placeholder="例：第一章　雨の街"
+            />
+          </label>
+          <div className="manual-chapter-editor-grid">
+            <div className="manual-chapter-editor">
+              <div className="manual-chapter-toolbar" role="toolbar" aria-label="本文の書式">
+                <button type="button" className="secondary compact" onClick={() => setManualTextStyle("body")} title="選択した行を本文にする">
+                  <Pilcrow size={16} />本文
+                </button>
+                <button type="button" className="secondary compact" onClick={() => setManualTextStyle("heading")} title="選択した行を見出し2にする">
+                  <Heading2 size={17} />見出し2
+                </button>
+              </div>
               <label className="manual-script-copy">
-                <span>演技指示</span>
-                <input value={manualLine.direction} onChange={(event) => setManualLine((current) => ({ ...current, direction: event.target.value }))} placeholder="任意" />
+                <span>本文</span>
+                <textarea
+                  ref={manualBodyRef}
+                  value={manualChapter.bodyText}
+                  onChange={(event) => patchManualBody(event.target.value)}
+                  onPaste={pasteManualChapter}
+                  placeholder="Googleドキュメントの本文をここへ貼り付け"
+                />
               </label>
-            )}
-            <div className="manual-script-submit">
-              <span>{manualMessage}</span>
-              <button type="button" className="primary" onClick={addManualScriptLine} disabled={!manualLine.text.trim()}>
-                <Plus size={16} />台本へ追加
-              </button>
             </div>
-            <datalist id={`manual-chapter-options-${project.id}`}>{chapterOptions.map((chapter) => <option key={chapter} value={chapter} />)}</datalist>
-            <datalist id={`manual-scene-options-${project.id}`}>{sceneOptions.map((scene) => <option key={scene} value={scene} />)}</datalist>
-            <datalist id={`manual-character-options-${project.id}`}>{project.characters.map((character) => <option key={character.id} value={character.name} />)}</datalist>
+            <aside className="manual-heading-preview">
+              <div><Heading2 size={17} /><b>シーン目次</b><span>{manualHeadings.length || 1}</span></div>
+              {manualHeadings.length ? manualHeadings.map((heading) => (
+                <button type="button" key={`${heading.title}-${heading.lineIndex}`} onClick={() => focusManualHeading(heading.lineIndex)}>
+                  {heading.title}
+                </button>
+              )) : <p>章の本文</p>}
+            </aside>
           </div>
-        )}
+          <div className="manual-script-submit">
+            <span>{manualMessage || `${manualChapterRows.length || 1}シーンとして保存`}</span>
+            <button type="button" className="primary" onClick={saveManualChapter} disabled={!manualChapter.chapterTitle.trim() || !manualChapter.bodyText.trim()}>
+              <Save size={16} />{chapterOptions.some((title) => getScriptChapterKey(title) === getScriptChapterKey(manualChapter.chapterTitle)) ? "この章を更新" : "この章を追加"}
+            </button>
+          </div>
+        </div>
       </article>
 
       <article className="panel script-history-panel">
@@ -1192,13 +1305,14 @@ function ScriptEditor({
         </div>
       </article>
 
-      <article className="panel">
+      <article className="panel script-lines-panel">
         <div className="record-head">
           <div>
             <h2>セリフ一覧</h2>
             <p className="muted">
               {project.lines.filter((line) => line.kind !== "direction").length}セリフ
-              {project.lines.some((line) => line.kind === "direction") && `・${project.lines.filter((line) => line.kind === "direction").length}件のト書き`}。
+              {project.lines.some((line) => line.manualBody) && `・${project.lines.filter((line) => line.manualBody).length}件の本文`}
+              {project.lines.some((line) => line.kind === "direction" && !line.manualBody) && `・${project.lines.filter((line) => line.kind === "direction" && !line.manualBody).length}件のト書き`}。
               詳細な進捗操作は「進行ボード」で行えます。
             </p>
           </div>
@@ -1333,14 +1447,13 @@ function CastAndSharing({
                   className="icon-button danger-icon"
                   title="登場人物を削除"
                   onClick={() => removeCharacter(character.id)}
-                  disabled={project.lines.some((line) => line.characterId === character.id)}
                 >
                   <Trash2 size={16} />
                 </button>
               )}
             </div>
           ))}
-          {!project.characters.length && <p className="muted">台本を貼り付けると、話者から登場人物を自動作成します。</p>}
+          {!project.characters.length && <p className="muted">登場人物は「登場人物」ボタンから手動で追加できます。</p>}
         </div>
       </article>
 
@@ -1606,23 +1719,34 @@ export function RecordingStudio({
     });
   };
 
-  const importScriptRows = (rows, { mode = "merge", sourceText = "" } = {}) => {
+  const importScriptRows = (rows, { mode = "merge", sourceText = "", targetChapterTitle = "" } = {}) => {
     if (!project || !canEditScript) return;
     updateProject(project.id, (current) => {
-      const replacesCurrentLines = mode === "merge" || mode === "replace";
+      const targetChapterKey = getScriptChapterKey(targetChapterTitle || rows[0]?.chapterTitle || "");
+      const currentChapterLines = mode === "chapter"
+        ? current.lines.filter((line) => getScriptChapterKey(line.chapterTitle) === targetChapterKey)
+        : [];
+      const replacesCurrentLines = mode === "merge" || mode === "replace" || (mode === "chapter" && currentChapterLines.length > 0);
       const working = replacesCurrentLines && current.lines.length
         ? archiveScriptVersion(current, {
           label: `${current.scriptVersion || "現在版"}（更新前）`,
-          reason: mode === "replace" ? "台本を完全に入れ替える直前" : "台本を差分更新する直前"
+          reason: mode === "replace"
+            ? "台本を完全に入れ替える直前"
+            : mode === "chapter"
+              ? `「${targetChapterTitle || rows[0]?.chapterTitle || "章"}」を更新する直前`
+              : "台本を差分更新する直前"
         })
         : current;
       const characters = [...working.characters];
       const characterByName = new Map(characters.map((character) => [character.name.normalize("NFKC").toLocaleLowerCase("ja"), character]));
-      const baseLines = mode === "append" ? working.lines : [];
       const locationSource = mode === "replace" ? [] : working.lines;
       const chapterByTitle = new Map(locationSource.map((line) => [getScriptChapterKey(line.chapterTitle || "第一章"), line.chapterId]));
       const sceneByScope = new Map(locationSource.map((line) => [`${getScriptChapterKey(line.chapterTitle || "第一章")}\u0000${getScriptSceneKey(line.sceneTitle)}`, line.sceneId]));
-      const importPlan = mode === "merge" ? getScriptImportPlan(current, rows) : { matches: [] };
+      const importPlan = mode === "merge"
+        ? getScriptImportPlan(current, rows)
+        : mode === "chapter"
+          ? getScriptImportPlan({ ...current, lines: currentChapterLines }, rows)
+          : { matches: [] };
       const nextLines = rows.map((row, index) => {
         const isDirection = row.sourceKind === "direction" || row.speaker === "ト書き";
         const matchedLine = importPlan.matches[index];
@@ -1658,9 +1782,10 @@ export function RecordingStudio({
           chapterTitle,
           sceneId,
           sceneTitle,
-          order: baseLines.length + index + 1,
+          order: index + 1,
           characterId: character?.id || "",
           kind: isDirection ? "direction" : "dialogue",
+          manualBody: Boolean(row.manualBody),
           text: row.text,
           direction: row.direction,
           fileName: row.fileName,
@@ -1673,10 +1798,30 @@ export function RecordingStudio({
           updatedAt: matchedLine?.updatedAt || ""
         };
       });
+      let combinedLines;
+      if (mode === "append") {
+        combinedLines = [...working.lines, ...nextLines];
+      } else if (mode === "chapter") {
+        const firstTargetIndex = working.lines.findIndex((line) => getScriptChapterKey(line.chapterTitle) === targetChapterKey);
+        if (firstTargetIndex < 0) combinedLines = [...working.lines, ...nextLines];
+        else {
+          const before = working.lines.slice(0, firstTargetIndex).filter((line) => getScriptChapterKey(line.chapterTitle) !== targetChapterKey);
+          const after = working.lines.slice(firstTargetIndex).filter((line) => getScriptChapterKey(line.chapterTitle) !== targetChapterKey);
+          combinedLines = [...before, ...nextLines, ...after];
+        }
+      } else {
+        combinedLines = nextLines;
+      }
+      combinedLines = combinedLines.map((line, index) => ({ ...line, order: index + 1 }));
+      const nextProject = { ...working, characters, lines: combinedLines };
       const nextSourceText = mode === "append"
         ? [working.sourceScriptText, sourceText].filter((value) => String(value || "").trim()).join("\n\n")
-        : sourceText;
-      return { ...working, characters, lines: [...baseLines, ...nextLines], sourceScriptText: nextSourceText };
+        : mode === "chapter"
+          ? [...new Set(combinedLines.map((line) => line.chapterTitle))]
+            .map((chapterTitle) => `${chapterTitle}\n${getChapterEditorText(nextProject, chapterTitle)}`)
+            .join("\n\n")
+          : sourceText;
+      return { ...nextProject, sourceScriptText: nextSourceText };
     });
   };
 
@@ -1722,15 +1867,29 @@ export function RecordingStudio({
 
   const removeCharacter = (characterId) => {
     if (!canEditScript) return;
-    if (project.lines.some((line) => line.characterId === characterId)) return;
-    updateProject(project.id, (current) => ({
-      ...current,
-      characters: current.characters.filter((character) => character.id !== characterId),
-      castMembers: current.castMembers.map((member) => ({
-        ...member,
-        characterIds: member.characterIds.filter((id) => id !== characterId)
-      }))
-    }));
+    const character = project.characters.find((item) => item.id === characterId);
+    const linkedLines = project.lines.filter((line) => line.characterId === characterId);
+    const lineNotice = linkedLines.length
+      ? `\n\n紐づいている${linkedLines.length}件は本文として残します。削除前の状態は保存版から復元できます。`
+      : "";
+    if (!confirm(`「${character?.name || "この登場人物"}」を削除しますか？${lineNotice}`)) return;
+    updateProject(project.id, (current) => {
+      const working = linkedLines.length
+        ? archiveScriptVersion(current, {
+          label: `${current.scriptVersion || "現在版"}（登場人物削除前）`,
+          reason: `「${character?.name || "登場人物"}」を削除する直前`
+        })
+        : current;
+      return {
+        ...working,
+        characters: working.characters.filter((item) => item.id !== characterId),
+        lines: working.lines.map((line) => line.characterId === characterId ? { ...line, characterId: "", kind: "direction" } : line),
+        castMembers: working.castMembers.map((member) => ({
+          ...member,
+          characterIds: member.characterIds.filter((id) => id !== characterId)
+        }))
+      };
+    });
   };
 
   const addCastMember = () => {
@@ -1840,6 +1999,12 @@ export function RecordingStudio({
               {projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
             </select>
           </label>
+          {canEditScript && (
+            <label className="recording-project-name-field">
+              <span>プロジェクト名</span>
+              <input value={project.title} onChange={(event) => patchProject({ title: event.target.value })} />
+            </label>
+          )}
           <span className="recording-version">{project.scriptVersion}</span>
           <span className="recording-project-status">{project.status}</span>
         </div>
@@ -1918,6 +2083,7 @@ export function RecordingStudio({
 function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, uploadRecording, busy }) {
   const character = project.characters.find((item) => item.id === line.characterId);
   const isDirection = line.kind === "direction";
+  const isManualBody = isDirection && line.manualBody;
   const [editorOpen, setEditorOpen] = useState(false);
   const characterColor = character?.color || "#5f6d7a";
   return (
@@ -1931,7 +2097,7 @@ function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, 
       <div className="script-line-main">
         <div className="script-line-sequence">
           <span>{String(line.order).padStart(3, "0")}</span>
-          <b><i />{isDirection ? "ト書き" : character?.name || "話者未設定"}</b>
+          <b><i />{isManualBody ? "本文" : isDirection ? "ト書き" : character?.name || "話者未設定"}</b>
         </div>
         <div className="script-line-copy">
           <p><RubyText text={line.text} /></p>

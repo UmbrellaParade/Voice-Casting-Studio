@@ -1,6 +1,8 @@
 import React, { useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
+  ArrowDown,
+  ArrowUp,
   CalendarClock,
   CheckCircle2,
   CircleHelp,
@@ -35,9 +37,11 @@ import {
   PRODUCTION_QUESTION_STATUSES,
   PRODUCTION_SCHEDULE_STATUSES,
   PRODUCTION_SCHEDULE_TYPES,
+  archiveScriptVersion,
   getCharacterName,
   getRecordingProgress,
   parseRubyText,
+  reorderProductionCharacters,
   reorderProductionMaterials
 } from "../lib/recording.js";
 import { getWordPressRuntime, uploadWordPressImage } from "../lib/wordpress.js";
@@ -92,15 +96,23 @@ function RubyText({ text = "" }) {
   );
 }
 
-function ProjectBar({ projects, project, selectedProjectId, setSelectedProjectId }) {
+function ProjectBar({ projects, project, selectedProjectId, setSelectedProjectId, updateProject, canEditScript }) {
   return (
     <div className="production-project-bar">
-      <label>
-        <span>表示中の作品</span>
-        <select value={selectedProjectId} onChange={(event) => setSelectedProjectId(event.target.value)}>
-          {projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
-        </select>
-      </label>
+      <div className="production-project-fields">
+        <label>
+          <span>表示中の作品</span>
+          <select value={selectedProjectId} onChange={(event) => setSelectedProjectId(event.target.value)}>
+            {projects.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+          </select>
+        </label>
+        {canEditScript && (
+          <label>
+            <span>収録プロジェクト名</span>
+            <input value={project.title} onChange={(event) => updateProject((current) => ({ ...current, title: event.target.value }))} />
+          </label>
+        )}
+      </div>
       <div className="production-project-meta" aria-label="作品情報">
         <span>{project.scriptVersion}</span>
         <span>{project.status}</span>
@@ -287,6 +299,12 @@ function CharacterImage({ character, patchCharacter }) {
 }
 
 function CharactersView({ project, updateProject, siteUsers = [], canEditScript = true }) {
+  const [actorNameDrafts, setActorNameDrafts] = useState({});
+  const [draggingCharacterId, setDraggingCharacterId] = useState("");
+  const [dragOverCharacterId, setDragOverCharacterId] = useState("");
+  const [message, setMessage] = useState("");
+  const pointerDragRef = useRef(null);
+
   const patchCharacter = (characterId, patch) => updateProject((current) => ({
     ...current,
     characters: current.characters.map((character) => character.id === characterId ? {
@@ -295,15 +313,82 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
     } : character)
   }));
 
-  const assignActor = (characterId, castMemberId) => updateProject((current) => ({
-    ...current,
-    castMembers: current.castMembers.map((member) => ({
-      ...member,
-      characterIds: member.id === castMemberId
-        ? [...new Set([...member.characterIds, characterId])]
-        : member.characterIds.filter((id) => id !== characterId)
-    }))
-  }));
+  const assignActorName = (characterId, actorName) => {
+    const name = String(actorName || "").trim();
+    updateProject((current) => {
+      const unassignedMembers = current.castMembers.map((member) => ({
+        ...member,
+        characterIds: member.characterIds.filter((id) => id !== characterId)
+      }));
+      if (!name) return { ...current, castMembers: unassignedMembers };
+      const actorKey = name.normalize("NFKC").toLocaleLowerCase("ja");
+      const existing = unassignedMembers.find((member) => member.actorName.normalize("NFKC").toLocaleLowerCase("ja") === actorKey);
+      const castMembers = existing
+        ? unassignedMembers.map((member) => member.id === existing.id
+          ? { ...member, characterIds: [...new Set([...member.characterIds, characterId])] }
+          : member)
+        : [...unassignedMembers, {
+          id: newId("cast"),
+          actorName: name,
+          contact: "",
+          characterIds: [characterId],
+          wpUserId: 0,
+          accessKey: ""
+        }];
+      return { ...current, castMembers };
+    });
+    setActorNameDrafts((current) => ({ ...current, [characterId]: name }));
+  };
+
+  const moveCharacter = (sourceId, targetId) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const character = project.characters.find((item) => item.id === sourceId);
+    updateProject((current) => ({
+      ...current,
+      characters: reorderProductionCharacters(current.characters, sourceId, targetId)
+    }));
+    setMessage(`「${character?.name || "登場人物"}」の並び順を保存しました。`);
+  };
+
+  const resetCharacterDrag = () => {
+    pointerDragRef.current = null;
+    setDraggingCharacterId("");
+    setDragOverCharacterId("");
+  };
+
+  const beginCharacterDrag = (event, characterId) => {
+    if (event.button !== 0) return;
+    pointerDragRef.current = {
+      sourceId: characterId,
+      startX: event.clientX,
+      startY: event.clientY,
+      targetId: "",
+      moved: false
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const trackCharacterDrag = (event) => {
+    const drag = pointerDragRef.current;
+    if (!drag) return;
+    if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
+    event.preventDefault();
+    drag.moved = true;
+    setDraggingCharacterId(drag.sourceId);
+    if (event.clientY < 72) window.scrollBy({ top: -18 });
+    if (event.clientY > window.innerHeight - 72) window.scrollBy({ top: 18 });
+    const targetId = document.elementFromPoint(event.clientX, event.clientY)?.closest?.("[data-character-id]")?.dataset.characterId || "";
+    drag.targetId = targetId && targetId !== drag.sourceId ? targetId : "";
+    setDragOverCharacterId(drag.targetId);
+  };
+
+  const finishCharacterDrag = (event) => {
+    const drag = pointerDragRef.current;
+    if (!drag) return;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (drag.moved && drag.targetId) moveCharacter(drag.sourceId, drag.targetId);
+    resetCharacterDrag();
+  };
 
   const addCharacter = () => {
     if (!canEditScript) return;
@@ -324,13 +409,29 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
 
   const removeCharacter = (characterId) => {
     if (!canEditScript) return;
-    if (project.lines.some((line) => line.characterId === characterId)) return;
-    if (!confirm("この登場人物を削除しますか？")) return;
-    updateProject((current) => ({
-      ...current,
-      characters: current.characters.filter((character) => character.id !== characterId),
-      castMembers: current.castMembers.map((member) => ({ ...member, characterIds: member.characterIds.filter((id) => id !== characterId) }))
-    }));
+    const character = project.characters.find((item) => item.id === characterId);
+    const linkedLines = project.lines.filter((line) => line.characterId === characterId);
+    const lineNotice = linkedLines.length
+      ? `\n\n紐づいている${linkedLines.length}件は本文として残します。削除前の状態は保存版から復元できます。`
+      : "";
+    if (!confirm(`「${character?.name || "この登場人物"}」を削除しますか？${lineNotice}`)) return;
+    updateProject((current) => {
+      const working = linkedLines.length
+        ? archiveScriptVersion(current, {
+          label: `${current.scriptVersion || "現在版"}（登場人物削除前）`,
+          reason: `「${character?.name || "登場人物"}」を削除する直前`
+        })
+        : current;
+      return {
+        ...working,
+        characters: working.characters.filter((item) => item.id !== characterId),
+        lines: working.lines.map((line) => line.characterId === characterId
+          ? { ...line, characterId: "", kind: "direction" }
+          : line),
+        castMembers: working.castMembers.map((member) => ({ ...member, characterIds: member.characterIds.filter((id) => id !== characterId) }))
+      };
+    });
+    setMessage(`「${character?.name || "登場人物"}」を削除しました。`);
   };
 
   const addCastMember = () => updateProject((current) => ({
@@ -349,12 +450,18 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
         <div><Users size={19} /><span>{project.characters.length}人の登場人物</span></div>
         {canEditScript && <button type="button" className="primary" onClick={addCharacter}><Plus size={16} />登場人物</button>}
       </div>
+      {message && <p className="production-inline-message">{message}</p>}
       <div className="character-editor-list">
-        {project.characters.map((character) => {
+        {project.characters.map((character, characterIndex) => {
           const assignedMember = project.castMembers.find((member) => member.characterIds.includes(character.id));
           const lineCount = project.lines.filter((line) => line.kind !== "direction" && line.characterId === character.id).length;
           return (
-            <article className="character-editor" key={character.id} style={{ "--character-color": character.color }}>
+            <article
+              className={`character-editor${draggingCharacterId === character.id ? " dragging" : ""}${dragOverCharacterId === character.id ? " drag-over" : ""}`}
+              data-character-id={character.id}
+              key={character.id}
+              style={{ "--character-color": character.color }}
+            >
               <CharacterImage character={character} patchCharacter={(patch) => patchCharacter(character.id, patch)} />
               <div className="character-editor-fields">
                 <header>
@@ -362,10 +469,28 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
                     <label><span>名前</span><input value={character.name} readOnly={!canEditScript} onChange={(event) => patchCharacter(character.id, { name: event.target.value })} /></label>
                     <label className="character-color-field"><span>セリフ色</span><input type="color" value={character.color} onChange={(event) => patchCharacter(character.id, { color: event.target.value })} /></label>
                   </div>
-                  <div className="character-line-count"><strong>{lineCount}</strong><span>セリフ</span></div>
+                  <div className="character-header-actions">
+                    <div className="character-line-count"><strong>{lineCount}</strong><span>セリフ</span></div>
+                    {canEditScript && (
+                      <div className="character-order-controls" aria-label={`${character.name}の並び替え`}>
+                        <button
+                          type="button"
+                          className="icon-button character-drag-handle"
+                          title="ドラッグして並べ替え"
+                          aria-label={`${character.name}をドラッグして並べ替え`}
+                          onPointerDown={(event) => beginCharacterDrag(event, character.id)}
+                          onPointerMove={trackCharacterDrag}
+                          onPointerUp={finishCharacterDrag}
+                          onPointerCancel={resetCharacterDrag}
+                        ><GripVertical size={17} /></button>
+                        <button type="button" className="icon-button" title="一つ上へ" aria-label={`${character.name}を一つ上へ`} disabled={characterIndex === 0} onClick={() => moveCharacter(character.id, project.characters[characterIndex - 1]?.id)}><ArrowUp size={16} /></button>
+                        <button type="button" className="icon-button" title="一つ下へ" aria-label={`${character.name}を一つ下へ`} disabled={characterIndex === project.characters.length - 1} onClick={() => moveCharacter(character.id, project.characters[characterIndex + 1]?.id)}><ArrowDown size={16} /></button>
+                      </div>
+                    )}
+                  </div>
                 </header>
                 <div className="character-field-grid">
-                  <label><span>担当声優</span><select value={assignedMember?.id || ""} onChange={(event) => assignActor(character.id, event.target.value)}><option value="">未割り当て</option>{project.castMembers.map((member) => <option key={member.id} value={member.id}>{member.actorName}</option>)}</select></label>
+                  <label><span>担当声優</span><input value={actorNameDrafts[character.id] ?? assignedMember?.actorName ?? ""} placeholder="声優さんの名前を入力" onChange={(event) => setActorNameDrafts((current) => ({ ...current, [character.id]: event.target.value }))} onBlur={(event) => assignActorName(character.id, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>
                   <label><span>キャラクター画像URL</span><input value={character.imageUrl.startsWith("data:") ? "" : character.imageUrl} placeholder={character.imageUrl.startsWith("data:") ? "画像を登録済み" : "https://..."} onChange={(event) => patchCharacter(character.id, { imageUrl: event.target.value })} /></label>
                   <label className="wide"><span>設定・人物像</span><textarea value={character.profile} onChange={(event) => patchCharacter(character.id, { profile: event.target.value })} /></label>
                   <label className="wide"><span>バックグラウンド</span><textarea value={character.background} onChange={(event) => patchCharacter(character.id, { background: event.target.value })} /></label>
@@ -375,7 +500,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
                   <div className="character-link-actions">
                     <a className={!isWebUrl(character.recordingFolderUrl) ? "disabled" : ""} href={isWebUrl(character.recordingFolderUrl) ? character.recordingFolderUrl : undefined} target="_blank" rel="noreferrer"><FolderOpen size={16} />収録フォルダー</a>
                   </div>
-                  {canEditScript && <button type="button" className="icon-button danger-icon" title={lineCount ? "セリフがあるため削除できません" : "登場人物を削除"} disabled={Boolean(lineCount)} onClick={() => removeCharacter(character.id)}><Trash2 size={16} /></button>}
+                  {canEditScript && <button type="button" className="icon-button danger-icon" title="登場人物を削除" onClick={() => removeCharacter(character.id)}><Trash2 size={16} /></button>}
                 </footer>
               </div>
             </article>
@@ -812,7 +937,14 @@ export function ProductionWorkspace({
   return (
     <div className="view-stack production-workspace">
       <SectionTitle title={title} subtitle={subtitle} />
-      <ProjectBar projects={projects} project={project} selectedProjectId={project.id} setSelectedProjectId={setSelectedProjectId} />
+      <ProjectBar
+        projects={projects}
+        project={project}
+        selectedProjectId={project.id}
+        setSelectedProjectId={setSelectedProjectId}
+        updateProject={updateProject}
+        canEditScript={canEditScript}
+      />
       {view === "home" && <ProductionHome project={project} setActive={setActive} />}
       {view === "characters" && <CharactersView project={project} updateProject={updateProject} siteUsers={siteUsers} canEditScript={canEditScript} />}
       {view === "links" && <LinksView project={project} updateProject={updateProject} />}

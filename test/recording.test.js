@@ -11,6 +11,8 @@ import {
   getScriptImportPlan,
   normalizeRecordingProject,
   parseGoogleDocsScript,
+  parseManualChapterBody,
+  reorderProductionCharacters,
   reorderProductionMaterials,
   repairScriptHierarchy,
   restoreScriptSnapshot
@@ -33,6 +35,26 @@ test("reorders production materials without changing their contents", () => {
   assert.deepEqual(reordered.map((material) => material.id), ["complete", "theme", "se"]);
   assert.equal(reordered[0], materials[2]);
   assert.deepEqual(materials.map((material) => material.id), ["theme", "se", "complete"]);
+});
+
+test("reorders characters without changing ids used by the script", () => {
+  const characters = [
+    { id: "vel", name: "ヴェル" },
+    { id: "amamori", name: "アマモリ" },
+    { id: "narration", name: "ナレーション" }
+  ];
+  const reordered = reorderProductionCharacters(characters, "narration", "vel");
+  assert.deepEqual(reordered.map((character) => character.id), ["narration", "vel", "amamori"]);
+  assert.deepEqual(characters.map((character) => character.id), ["vel", "amamori", "narration"]);
+});
+
+test("splits a manually pasted chapter only at heading 2 markers", () => {
+  const rows = parseManualChapterBody(`章の導入文です。\n\n## 雨上がり\nヴェル「行こう。」\nアマモリ「待って。」\n\n## 出発\n駅へ向かう。`, "第一章");
+
+  assert.deepEqual(rows.map((row) => row.sceneTitle), ["章の本文", "雨上がり", "出発"]);
+  assert.equal(rows[1].text, "ヴェル「行こう。」\nアマモリ「待って。」");
+  assert.equal(rows[2].manualBody, true);
+  assert.ok(rows.every((row) => row.sourceKind === "direction" && row.chapterTitle === "第一章"));
 });
 
 test("parses a Google Docs voice drama script without losing ruby or stage directions", () => {

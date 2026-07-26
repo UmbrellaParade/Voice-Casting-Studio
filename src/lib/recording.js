@@ -6,14 +6,59 @@ export const PRODUCTION_QUESTION_STATUSES = ["未回答", "回答済み", "解�
 export const PRODUCTION_SCHEDULE_TYPES = ["収録締切", "公開予定", "編集", "収録", "その他"];
 export const PRODUCTION_SCHEDULE_STATUSES = ["予定", "進行中", "完了", "延期"];
 
-export const reorderProductionMaterials = (materials = [], sourceId = "", targetId = "") => {
-  const sourceIndex = materials.findIndex((material) => material.id === sourceId);
-  const targetIndex = materials.findIndex((material) => material.id === targetId);
-  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return materials;
-  const next = [...materials];
+const reorderProductionItems = (items = [], sourceId = "", targetId = "") => {
+  const sourceIndex = items.findIndex((item) => item.id === sourceId);
+  const targetIndex = items.findIndex((item) => item.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return items;
+  const next = [...items];
   const [moved] = next.splice(sourceIndex, 1);
   next.splice(targetIndex, 0, moved);
   return next;
+};
+
+export const reorderProductionMaterials = (materials = [], sourceId = "", targetId = "") =>
+  reorderProductionItems(materials, sourceId, targetId);
+
+export const reorderProductionCharacters = (characters = [], sourceId = "", targetId = "") =>
+  reorderProductionItems(characters, sourceId, targetId);
+
+export const parseManualChapterBody = (bodyText = "", chapterTitle = "") => {
+  const chapter = String(chapterTitle || "").trim();
+  const rows = [];
+  let sceneTitle = "章の本文";
+  let bodyLines = [];
+  let sceneStarted = false;
+
+  const flushScene = ({ keepEmpty = false } = {}) => {
+    const text = bodyLines.join("\n").trim();
+    if (text || keepEmpty) {
+      rows.push({
+        chapterTitle: chapter,
+        sceneTitle,
+        sourceKind: "direction",
+        speaker: "ト書き",
+        text,
+        direction: "",
+        fileName: "",
+        manualBody: true
+      });
+    }
+    bodyLines = [];
+  };
+
+  String(bodyText || "").replace(/\r\n?/g, "\n").split("\n").forEach((line) => {
+    const heading = line.match(/^\s*##\s+(.+?)\s*$/);
+    if (!heading) {
+      bodyLines.push(line);
+      return;
+    }
+    if (sceneStarted || bodyLines.some((item) => item.trim())) flushScene({ keepEmpty: sceneStarted });
+    sceneTitle = heading[1].trim() || "無題のシーン";
+    sceneStarted = true;
+  });
+  flushScene({ keepEmpty: sceneStarted });
+
+  return rows;
 };
 
 const RUBY_SOURCE = "(?:[|｜]([^《\\n]+)《([^》\\n]+)》|\\{([^|{}\\n]+)\\|([^{}\\n]+)\\})";
@@ -50,6 +95,7 @@ const cloneScriptLines = (lines = []) => (Array.isArray(lines) ? lines : [])
     order: Number.isFinite(Number(line.order)) ? Number(line.order) : index + 1,
     characterId: String(line.characterId || ""),
     kind: line.kind === "direction" ? "direction" : "dialogue",
+    manualBody: Boolean(line.manualBody),
     text: String(line.text || line.line || ""),
     direction: String(line.direction || line.note || ""),
     fileName: String(line.fileName || ""),
@@ -530,6 +576,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       order: Number.isFinite(Number(line.order)) ? Number(line.order) : lineIndex + 1,
       characterId,
       kind: line.kind === "direction" || structuralSpeaker ? "direction" : "dialogue",
+      manualBody: Boolean(line.manualBody),
       text: String(line.text || line.line || ""),
       direction: String(line.direction || line.note || ""),
       fileName: String(line.fileName || ""),
