@@ -6,6 +6,7 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronDown,
+  ClipboardCopy,
   CircleHelp,
   ExternalLink,
   FileAudio,
@@ -15,6 +16,7 @@ import {
   ImagePlus,
   LayoutDashboard,
   Link,
+  KeyRound,
   Megaphone,
   MessageSquareText,
   Move,
@@ -42,6 +44,7 @@ import {
   PRODUCTION_SCHEDULE_TYPES,
   SHARED_LINK_COLORS,
   archiveScriptVersion,
+  createRecordingAccessKey,
   getCharacterImageCropStyle,
   getCharacterName,
   getCharacterScriptName,
@@ -58,7 +61,7 @@ import {
   reorderProductionSharedLinks,
   sortProductionScheduleItems
 } from "../lib/recording.js";
-import { getWordPressRuntime, uploadWordPressImage } from "../lib/wordpress.js";
+import { getWordPressRuntime, makeWordPressMemberShareUrl, uploadWordPressImage } from "../lib/wordpress.js";
 import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
 import { SectionTitle } from "./ui.jsx";
 
@@ -546,7 +549,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
           socialUrl: "",
           characterIds: [characterId],
           wpUserId: 0,
-          accessKey: ""
+          accessKey: createRecordingAccessKey()
         }];
       return { ...current, castMembers };
     });
@@ -653,13 +656,31 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
 
   const addCastMember = () => updateProject((current) => ({
     ...current,
-    castMembers: [...current.castMembers, { id: newId("cast"), actorName: "声優さん", contact: "", socialUrl: "", characterIds: [], wpUserId: 0, accessKey: "" }]
+    castMembers: [...current.castMembers, { id: newId("cast"), actorName: "声優さん", contact: "", socialUrl: "", characterIds: [], wpUserId: 0, accessKey: createRecordingAccessKey() }]
   }));
 
   const patchCastMember = (memberId, patch) => updateProject((current) => ({
     ...current,
     castMembers: current.castMembers.map((member) => member.id === memberId ? { ...member, ...patch } : member)
   }));
+
+  const copyMemberShareUrl = async (member) => {
+    const shareUrl = makeWordPressMemberShareUrl({
+      projectId: project.id,
+      memberId: member.id,
+      accessKey: member.accessKey
+    });
+    if (!shareUrl) {
+      setMessage("共有URLを作成できませんでした。アクセスキーを再発行してください。");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setMessage(`${member.actorName || "声優さん"}用のログイン不要URLをコピーしました。`);
+    } catch {
+      setMessage("共有URLをコピーできませんでした。ブラウザのクリップボード許可をご確認ください。");
+    }
+  };
 
   const renderCharacterEditor = (character, characterIndex, orderedCharacters, isLinked = true) => {
     const assignedMember = project.castMembers.find((member) => member.characterIds.includes(character.id));
@@ -765,7 +786,9 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
       <section className="panel cast-roster-panel">
         <header><div><UserPlus size={19} /><div><h3>担当声優</h3><p>登場人物へ割り当てるメンバーを管理します。</p></div></div><button type="button" className="secondary" onClick={addCastMember}><Plus size={16} />声優さん</button></header>
         <div className="cast-roster-list">
-          {project.castMembers.map((member) => (
+          {project.castMembers.map((member) => {
+            const shareUrl = makeWordPressMemberShareUrl({ projectId: project.id, memberId: member.id, accessKey: member.accessKey });
+            return (
             <div className={siteUsers.length ? "has-wordpress-users" : ""} key={member.id}>
               <label><span>表示名</span><input value={member.actorName} onChange={(event) => patchCastMember(member.id, { actorName: event.target.value })} /></label>
               <label><span>連絡先メモ</span><input value={member.contact} onChange={(event) => patchCastMember(member.id, { contact: event.target.value })} /></label>
@@ -777,8 +800,19 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
                 if (!confirm(`${member.actorName}を担当声優一覧から削除しますか？`)) return;
                 updateProject((current) => ({ ...current, castMembers: current.castMembers.filter((item) => item.id !== member.id) }));
               }}><Trash2 size={16} /></button>
+              {canEditScript && getWordPressRuntime() && (
+                <div className="cast-member-share-field">
+                  <input value={shareUrl} readOnly aria-label={`${member.actorName || "声優さん"}用のログイン不要共有URL`} />
+                  <button type="button" className="secondary" disabled={!shareUrl} onClick={() => copyMemberShareUrl(member)}><ClipboardCopy size={16} />URLをコピー</button>
+                  <button type="button" className="icon-button" title="共有URLを再発行" aria-label={`${member.actorName || "声優さん"}用の共有URLを再発行`} onClick={() => {
+                    if (!confirm("現在の共有URLは使えなくなります。再発行しますか？")) return;
+                    patchCastMember(member.id, { accessKey: createRecordingAccessKey() });
+                  }}><KeyRound size={16} /></button>
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
           {!project.castMembers.length && <p className="production-list-empty">担当声優はまだ登録されていません。</p>}
         </div>
       </section>

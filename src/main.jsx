@@ -476,7 +476,8 @@ function App() {
     message: WORDPRESS_RUNTIME ? "WordPressから作品データを読み込んでいます…" : "",
     users: [],
     version: 0,
-    canEditScript: WORDPRESS_RUNTIME ? Boolean(WORDPRESS_RUNTIME.canEditScript) : true
+    canEditScript: WORDPRESS_RUNTIME ? Boolean(WORDPRESS_RUNTIME.canEditScript) : true,
+    currentUser: WORDPRESS_RUNTIME?.currentUser || null
   }));
   const [syncState, setSyncState] = useState({ busy: false, message: "" });
   const [packExportMessage, setPackExportMessage] = useState("");
@@ -497,7 +498,8 @@ function App() {
       message: result.data ? "WordPressと同期しています。" : "新しい制作ワークスペースを準備しました。",
       users: Array.isArray(result.users) ? result.users : [],
       version: Number(result.version) || 0,
-      canEditScript: Boolean(result.canEditScript ?? WORDPRESS_RUNTIME?.canEditScript)
+      canEditScript: Boolean(result.canEditScript ?? WORDPRESS_RUNTIME?.canEditScript),
+      currentUser: result.currentUser || WORDPRESS_RUNTIME?.currentUser || null
     });
   };
 
@@ -567,7 +569,8 @@ function App() {
           message: error.message,
           users: [],
           version: 0,
-          canEditScript: Boolean(WORDPRESS_RUNTIME?.canEditScript)
+          canEditScript: Boolean(WORDPRESS_RUNTIME?.canEditScript),
+          currentUser: WORDPRESS_RUNTIME?.currentUser || null
         });
       });
     return () => {
@@ -1859,7 +1862,7 @@ ${socialRows || "-"}
       <WordPressMemberPortal
         logoSrc={logoSrc}
         data={data}
-        runtime={WORDPRESS_RUNTIME}
+        runtime={{ ...WORDPRESS_RUNTIME, currentUser: wordpressState.currentUser || WORDPRESS_RUNTIME.currentUser }}
         appTitle={APP_DISPLAY_NAME}
         connectionState={wordpressState}
         onRefresh={refreshWordPressData}

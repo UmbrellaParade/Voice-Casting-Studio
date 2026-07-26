@@ -90,13 +90,13 @@ function vcs_maybe_upgrade_roles(): void
 }
 add_action('init', 'vcs_maybe_upgrade_roles', 1);
 
-function vcs_require_login(): void
+function vcs_prepare_anonymous_member_portal(): void
 {
     if (!is_user_logged_in()) {
-        auth_redirect();
+        nocache_headers();
     }
 }
-add_action('template_redirect', 'vcs_require_login');
+add_action('template_redirect', 'vcs_prepare_anonymous_member_portal');
 
 function vcs_enqueue_application(): void
 {
@@ -124,9 +124,14 @@ function vcs_enqueue_application(): void
         'mode' => 'wordpress',
         'assetBaseUrl' => trailingslashit($theme_uri . '/assets'),
         'restUrl' => trailingslashit(rest_url(VCS_REST_NAMESPACE)),
-        'nonce' => wp_create_nonce('wp_rest'),
+        'nonce' => is_user_logged_in() ? wp_create_nonce('wp_rest') : '',
         'siteName' => get_bloginfo('name') ?: 'Voice Cast Studio',
-        'logoutUrl' => wp_logout_url(home_url('/')),
+        'logoutUrl' => is_user_logged_in() ? wp_logout_url(home_url('/')) : '',
+        'shareAccess' => !is_user_logged_in() ? [
+            'projectId' => sanitize_text_field((string) wp_unslash($_GET['vcs_project'] ?? '')),
+            'memberId' => sanitize_text_field((string) wp_unslash($_GET['vcs_member'] ?? '')),
+            'accessKey' => sanitize_text_field((string) wp_unslash($_GET['vcs_key'] ?? '')),
+        ] : null,
         'currentUser' => [
             'id' => (int) $user->ID,
             'name' => $user->display_name,
@@ -258,6 +263,59 @@ function vcs_rest_logged_in(): bool
 function vcs_rest_can_manage(): bool
 {
     return is_user_logged_in() && current_user_can(VCS_MANAGER_CAPABILITY);
+}
+
+function vcs_request_share_reference(WP_REST_Request $request): array
+{
+    return [
+        'projectId' => sanitize_text_field((string) $request->get_header('X-VCS-Project')),
+        'memberId' => sanitize_text_field((string) $request->get_header('X-VCS-Member')),
+        'accessKey' => sanitize_text_field((string) $request->get_header('X-VCS-Key')),
+    ];
+}
+
+function vcs_get_share_context(WP_REST_Request $request, ?array $workspace = null): ?array
+{
+    $reference = vcs_request_share_reference($request);
+    if ('' === $reference['projectId'] || '' === $reference['memberId'] || '' === $reference['accessKey']) {
+        return null;
+    }
+    $workspace ??= vcs_decode_workspace(vcs_get_workspace_post(false));
+    foreach (($workspace['recordingProjects'] ?? []) as $project_index => $project) {
+        if (!is_array($project) || (string) ($project['id'] ?? '') !== $reference['projectId']) {
+            continue;
+        }
+        foreach (($project['castMembers'] ?? []) as $member) {
+            if (!is_array($member)) {
+                continue;
+            }
+            $stored_key = (string) ($member['accessKey'] ?? '');
+            if ((string) ($member['id'] ?? '') !== $reference['memberId']
+                || '' === $stored_key
+                || !hash_equals($stored_key, $reference['accessKey'])) {
+                continue;
+            }
+            return [
+                'projectIndex' => (int) $project_index,
+                'project' => $project,
+                'member' => $member,
+                'characterIds' => array_values(array_filter(array_map('strval', $member['characterIds'] ?? []))),
+            ];
+        }
+    }
+    return null;
+}
+
+function vcs_rest_actor_access(WP_REST_Request $request): bool|WP_Error
+{
+    if (is_user_logged_in() || vcs_get_share_context($request)) {
+        return true;
+    }
+    return new WP_Error(
+        'vcs_member_link_required',
+        '声優さん専用の共有URLから開いてください。制作担当者へ共有URLをご確認ください。',
+        ['status' => 401]
+    );
 }
 
 function vcs_canonicalize_value(mixed $value): mixed
@@ -411,7 +469,7 @@ function vcs_extract_script_structure(array $data): array
     ];
 }
 
-function vcs_filter_project_for_actor(array $project, int $user_id, array $character_ids): array
+function vcs_filter_project_for_actor(array $project, int $user_id, array $character_ids, string $member_id = ''): array
 {
     unset($project['scriptSnapshots'], $project['sourceScriptText']);
     $project['castMembers'] = array_values(array_map(
@@ -421,7 +479,9 @@ function vcs_filter_project_for_actor(array $project, int $user_id, array $chara
         },
         array_filter(
             $project['castMembers'] ?? [],
-            static fn(array $member): bool => (int) ($member['wpUserId'] ?? 0) === $user_id
+            static fn(array $member): bool => '' !== $member_id
+                ? (string) ($member['id'] ?? '') === $member_id
+                : (int) ($member['wpUserId'] ?? 0) === $user_id
         )
     ));
     $project['characters'] = array_values(array_map(
@@ -455,26 +515,46 @@ function vcs_filter_project_for_actor(array $project, int $user_id, array $chara
     $project['derivedLineProgress'] = $derived_progress;
     $project['questions'] = array_values(array_filter(
         $project['questions'] ?? [],
-        static function (array $question) use ($user_id, $character_ids): bool {
+        static function (array $question) use ($user_id, $character_ids, $member_id): bool {
+            if ('' !== $member_id && (string) ($question['castMemberId'] ?? '') === $member_id) {
+                return true;
+            }
             $question_user_id = (int) ($question['wpUserId'] ?? 0);
-            if ($question_user_id === $user_id) {
+            if ($user_id > 0 && $question_user_id === $user_id) {
                 return true;
             }
             return 0 === $question_user_id
+                && '' === (string) ($question['castMemberId'] ?? '')
                 && in_array((string) ($question['characterId'] ?? ''), $character_ids, true);
         }
     ));
     return $project;
 }
 
-function vcs_rest_get_workspace(): WP_REST_Response
+function vcs_rest_get_workspace(WP_REST_Request $request): WP_REST_Response
 {
     $post = vcs_get_workspace_post(false);
     $user = wp_get_current_user();
     $can_manage = current_user_can(VCS_MANAGER_CAPABILITY);
     $can_edit_script = current_user_can(VCS_SCRIPT_CAPABILITY);
     $workspace = $post ? vcs_decode_workspace($post) : null;
-    if (is_array($workspace) && !$can_manage) {
+    if (is_array($workspace) && !$can_manage && !is_user_logged_in()) {
+        $share_context = vcs_get_share_context($request, $workspace);
+        $member = $share_context['member'] ?? [];
+        $workspace = $share_context ? [
+            'studioConcept' => vcs_normalize_studio_concept($workspace),
+            'recordingProjects' => [vcs_filter_project_for_actor(
+                $share_context['project'],
+                (int) ($member['wpUserId'] ?? 0),
+                $share_context['characterIds'],
+                (string) ($member['id'] ?? '')
+            )],
+        ] : null;
+        $user = (object) [
+            'ID' => 0,
+            'display_name' => (string) ($member['actorName'] ?? '声優さん'),
+        ];
+    } elseif (is_array($workspace) && !$can_manage) {
         $assigned_projects = [];
         foreach (($workspace['recordingProjects'] ?? []) as $project) {
             $character_ids = vcs_user_character_ids($project, (int) $user->ID);
@@ -737,7 +817,13 @@ function vcs_rest_update_line(WP_REST_Request $request): WP_REST_Response|WP_Err
         $line = $project['lines'][$line_index];
     }
     if (!$can_manage) {
-        $character_ids = vcs_user_character_ids($project, get_current_user_id());
+        $share_context = !is_user_logged_in() ? vcs_get_share_context($request, $data) : null;
+        if ($share_context && (string) ($share_context['project']['id'] ?? '') !== $project_id) {
+            return new WP_Error('vcs_line_forbidden', 'This line is not assigned to this shared link.', ['status' => 403]);
+        }
+        $character_ids = $share_context
+            ? $share_context['characterIds']
+            : vcs_user_character_ids($project, get_current_user_id());
         if (!in_array((string) ($line['characterId'] ?? ''), $character_ids, true)) {
             return new WP_Error('vcs_line_forbidden', 'This line is not assigned to the current user.', ['status' => 403]);
         }
@@ -806,7 +892,13 @@ function vcs_rest_create_question(WP_REST_Request $request): WP_REST_Response|WP
     }
     $project = $data['recordingProjects'][$project_index];
     $can_manage = current_user_can(VCS_MANAGER_CAPABILITY);
-    $character_ids = vcs_user_character_ids($project, get_current_user_id());
+    $share_context = !$can_manage && !is_user_logged_in() ? vcs_get_share_context($request, $data) : null;
+    if ($share_context && (string) ($share_context['project']['id'] ?? '') !== $project_id) {
+        return new WP_Error('vcs_question_forbidden', 'This project is not assigned to this shared link.', ['status' => 403]);
+    }
+    $character_ids = $share_context
+        ? $share_context['characterIds']
+        : vcs_user_character_ids($project, get_current_user_id());
     if (!$can_manage && !$character_ids) {
         return new WP_Error('vcs_question_forbidden', 'This project is not assigned to the current user.', ['status' => 403]);
     }
@@ -826,13 +918,15 @@ function vcs_rest_create_question(WP_REST_Request $request): WP_REST_Response|WP
         return new WP_Error('vcs_question_forbidden', 'Questions can only be linked to assigned lines.', ['status' => 403]);
     }
     $user = wp_get_current_user();
+    $share_member = $share_context['member'] ?? [];
     $now = current_time('c');
     $question = [
         'id' => 'question_' . wp_generate_uuid4(),
         'lineId' => $line_id,
         'characterId' => $character_id,
-        'authorName' => $user->display_name,
+        'authorName' => $share_context ? (string) ($share_member['actorName'] ?? '声優さん') : $user->display_name,
         'wpUserId' => (int) $user->ID,
+        'castMemberId' => $share_context ? (string) ($share_member['id'] ?? '') : '',
         'body' => $body,
         'answer' => '',
         'status' => '未回答',
@@ -879,7 +973,18 @@ function vcs_rest_resolve_question(WP_REST_Request $request): WP_REST_Response|W
 
     $question = $data['recordingProjects'][$project_index]['questions'][$question_index];
     $question_user_id = (int) ($question['wpUserId'] ?? 0);
-    if ($question_user_id <= 0 || $question_user_id !== get_current_user_id()) {
+    $share_context = !is_user_logged_in() ? vcs_get_share_context($request, $data) : null;
+    $share_member = $share_context['member'] ?? [];
+    $is_share_questioner = $share_context
+        && (string) ($share_context['project']['id'] ?? '') === $project_id
+        && (
+            (string) ($question['castMemberId'] ?? '') === (string) ($share_member['id'] ?? '')
+            || ($question_user_id > 0 && $question_user_id === (int) ($share_member['wpUserId'] ?? 0))
+        );
+    $is_logged_in_questioner = is_user_logged_in()
+        && $question_user_id > 0
+        && $question_user_id === get_current_user_id();
+    if (!$is_share_questioner && !$is_logged_in_questioner) {
         return new WP_Error('vcs_question_resolve_forbidden', 'Only the person who asked this question can resolve it.', ['status' => 403]);
     }
     if ('解決済み' === ($question['status'] ?? '')) {
@@ -929,7 +1034,7 @@ function vcs_register_rest_routes(): void
         [
             'methods' => WP_REST_Server::READABLE,
             'callback' => 'vcs_rest_get_workspace',
-            'permission_callback' => 'vcs_rest_logged_in',
+            'permission_callback' => 'vcs_rest_actor_access',
         ],
         [
             'methods' => WP_REST_Server::CREATABLE,
@@ -940,17 +1045,17 @@ function vcs_register_rest_routes(): void
     register_rest_route(VCS_REST_NAMESPACE, '/line', [
         'methods' => WP_REST_Server::CREATABLE,
         'callback' => 'vcs_rest_update_line',
-        'permission_callback' => 'vcs_rest_logged_in',
+        'permission_callback' => 'vcs_rest_actor_access',
     ]);
     register_rest_route(VCS_REST_NAMESPACE, '/question', [
         'methods' => WP_REST_Server::CREATABLE,
         'callback' => 'vcs_rest_create_question',
-        'permission_callback' => 'vcs_rest_logged_in',
+        'permission_callback' => 'vcs_rest_actor_access',
     ]);
     register_rest_route(VCS_REST_NAMESPACE, '/question/resolve', [
         'methods' => WP_REST_Server::CREATABLE,
         'callback' => 'vcs_rest_resolve_question',
-        'permission_callback' => 'vcs_rest_logged_in',
+        'permission_callback' => 'vcs_rest_actor_access',
     ]);
     register_rest_route(VCS_REST_NAMESPACE, '/image', [
         'methods' => WP_REST_Server::CREATABLE,

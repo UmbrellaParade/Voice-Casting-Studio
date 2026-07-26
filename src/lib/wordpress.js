@@ -50,11 +50,17 @@ const wordpressRequest = async (path, options = {}) => {
     }
     if (path === "image") return { id: 0, url: "" };
   }
+  const shareHeaders = runtime.shareAccess?.accessKey ? {
+    "X-VCS-Project": runtime.shareAccess.projectId,
+    "X-VCS-Member": runtime.shareAccess.memberId,
+    "X-VCS-Key": runtime.shareAccess.accessKey
+  } : {};
   const response = await fetch(`${runtime.restUrl}${String(path || "").replace(/^\/+/, "")}`, {
     credentials: "same-origin",
     ...options,
     headers: {
-      "X-WP-Nonce": runtime.nonce,
+      ...(runtime.nonce ? { "X-WP-Nonce": runtime.nonce } : {}),
+      ...shareHeaders,
       ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...(options.headers || {})
     }
@@ -82,6 +88,17 @@ const wordpressRequest = async (path, options = {}) => {
     throw new Error("WordPressから正しい形式の応答を受け取れませんでした。");
   }
   return payload;
+};
+
+export const makeWordPressMemberShareUrl = ({ projectId, memberId, accessKey }) => {
+  if (!globalThis.location?.href || !projectId || !memberId || !accessKey) return "";
+  const url = new URL(globalThis.location.href);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("vcs_project", projectId);
+  url.searchParams.set("vcs_member", memberId);
+  url.searchParams.set("vcs_key", accessKey);
+  return url.toString();
 };
 
 export const loadWordPressWorkspace = () => wordpressRequest("workspace", { method: "GET" });
