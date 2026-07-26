@@ -5,6 +5,9 @@ import { makeGoogleDrivePreviewUrl, makePlayableEmbedUrl } from "../src/lib/core
 
 import {
   archiveScriptVersion,
+  getCharacterDialogueCounts,
+  getCharacterImageCropStyle,
+  getRecordingDisplayProject,
   getRecordingProgress,
   getShareableRecordingProject,
   getScriptHierarchyRepairPlan,
@@ -51,16 +54,39 @@ test("reorders characters without changing ids used by the script", () => {
 test("normalizes and preserves character image positions", () => {
   const project = normalizeRecordingProject({
     characters: [
-      { id: "vel", name: "ヴェル", imagePositionX: -12, imagePositionY: 132 },
+      { id: "vel", name: "ヴェル", imagePositionX: -12, imagePositionY: 132, imageScale: 4 },
       { id: "amamori", name: "アマモリ" }
     ]
   });
 
   assert.equal(project.characters[0].imagePositionX, 0);
   assert.equal(project.characters[0].imagePositionY, 100);
+  assert.equal(project.characters[0].imageScale, 2.4);
   assert.equal(project.characters[1].imagePositionX, 50);
   assert.equal(project.characters[1].imagePositionY, 50);
+  assert.equal(project.characters[1].imageScale, 1.12);
   assert.equal(archiveScriptVersion(project).scriptSnapshots[0].characters[0].imagePositionY, 100);
+  assert.equal(archiveScriptVersion(project).scriptSnapshots[0].characters[0].imageScale, 2.4);
+  assert.deepEqual(getCharacterImageCropStyle(project.characters[1]), {
+    width: "112%",
+    height: "112%",
+    left: "-6%",
+    top: "-6%",
+    objectPosition: "50% 50%"
+  });
+});
+
+test("normalizes freely configurable shared URLs", () => {
+  const project = normalizeRecordingProject({
+    sharedLinks: [{ id: "line", label: "LINEオープンチャット", url: "https://line.me/example", description: "全体連絡" }]
+  });
+
+  assert.deepEqual(project.sharedLinks, [{
+    id: "line",
+    title: "LINEオープンチャット",
+    url: "https://line.me/example",
+    notes: "全体連絡"
+  }]);
 });
 
 test("assigns a different color whenever character colors overlap", () => {
@@ -123,6 +149,56 @@ test("uses canonical character names while parsing performance labels", () => {
 「ヴェル、待っていて。」`, ["ヴェル", "アマモリ", "カーラ"]);
 
   assert.deepEqual(rows.map((row) => row.speaker), ["ヴェル", "ヴェル", "アマモリ", "カーラ"]);
+});
+
+test("counts dialogue inside manually pasted chapter bodies without replacing the original text", () => {
+  const project = normalizeRecordingProject({
+    characters: [
+      { id: "vel", name: "ヴェル" },
+      { id: "amamori", name: "アマモリ" }
+    ],
+    lines: [
+      { id: "structured", characterId: "amamori", kind: "dialogue", text: "構造化済みのセリフ" },
+      {
+        id: "manual",
+        kind: "direction",
+        manualBody: true,
+        text: `アマモリ「一つ目。」\nアマモリのナレーター\n「二つ目。」\nヴェル「返事。」`
+      }
+    ]
+  });
+
+  assert.deepEqual(getCharacterDialogueCounts(project), { vel: 1, amamori: 3 });
+  assert.equal(project.lines[1].manualBody, true);
+  assert.match(project.lines[1].text, /アマモリのナレーター/);
+});
+
+test("builds filterable display lines from a manually pasted chapter without changing stored lines", () => {
+  const project = normalizeRecordingProject({
+    characters: [
+      { id: "vel", name: "ヴェル" },
+      { id: "amamori", name: "アマモリ" }
+    ],
+    lines: [{
+      id: "chapter_body",
+      chapterId: "chapter_1",
+      chapterTitle: "第一章",
+      sceneId: "scene_1",
+      sceneTitle: "章の本文",
+      kind: "direction",
+      manualBody: true,
+      text: `## 雨上がり\nヴェルイヤモニ「聞こえるか。」\nアマモリのナレーター\n「雨が止みました。」`
+    }]
+  });
+
+  const displayProject = getRecordingDisplayProject(project);
+  const dialogue = displayProject.lines.filter((line) => line.kind === "dialogue");
+
+  assert.deepEqual(dialogue.map((line) => line.characterId), ["vel", "amamori"]);
+  assert.ok(dialogue.every((line) => line.derivedFromManualBody));
+  assert.equal(project.lines.length, 1);
+  assert.equal(project.lines[0].manualBody, true);
+  assert.match(project.lines[0].text, /ヴェルイヤモニ/);
 });
 
 test("splits a manually pasted chapter only at heading 2 markers", () => {

@@ -275,16 +275,6 @@ function vcs_extract_script_structure(array $data): array
         if (!is_array($project)) {
             continue;
         }
-        $characters = [];
-        foreach (($project['characters'] ?? []) as $character) {
-            if (!is_array($character)) {
-                continue;
-            }
-            $characters[] = [
-                'id' => (string) ($character['id'] ?? ''),
-                'name' => (string) ($character['name'] ?? ''),
-            ];
-        }
         $lines = [];
         foreach (($project['lines'] ?? []) as $line) {
             if (!is_array($line)) {
@@ -307,10 +297,19 @@ function vcs_extract_script_structure(array $data): array
         $projects[] = [
             'id' => (string) ($project['id'] ?? ''),
             'title' => (string) ($project['title'] ?? ''),
+            'status' => (string) ($project['status'] ?? ''),
             'scriptVersion' => (string) ($project['scriptVersion'] ?? '初稿'),
             'sourceScriptText' => (string) ($project['sourceScriptText'] ?? ''),
             'scriptSnapshots' => vcs_canonicalize_value($project['scriptSnapshots'] ?? []),
-            'characters' => $characters,
+            'recordingDeadline' => (string) ($project['recordingDeadline'] ?? ''),
+            'releaseDate' => (string) ($project['releaseDate'] ?? ''),
+            'editingStatus' => (string) ($project['editingStatus'] ?? ''),
+            'characters' => vcs_canonicalize_value($project['characters'] ?? []),
+            'castMembers' => vcs_canonicalize_value($project['castMembers'] ?? []),
+            'materials' => vcs_canonicalize_value($project['materials'] ?? []),
+            'scheduleItems' => vcs_canonicalize_value($project['scheduleItems'] ?? []),
+            'announcements' => vcs_canonicalize_value($project['announcements'] ?? []),
+            'sharedLinks' => vcs_canonicalize_value($project['sharedLinks'] ?? []),
             'lines' => $lines,
         ];
     }

@@ -40,14 +40,18 @@ import {
   PRODUCTION_SCHEDULE_STATUSES,
   PRODUCTION_SCHEDULE_TYPES,
   archiveScriptVersion,
+  getCharacterDialogueCounts,
+  getCharacterImageCropStyle,
   getCharacterName,
   getRecordingProgress,
   normalizeImagePosition,
+  normalizeImageScale,
   parseRubyText,
   reorderProductionCharacters,
   reorderProductionMaterials
 } from "../lib/recording.js";
 import { getWordPressRuntime, uploadWordPressImage } from "../lib/wordpress.js";
+import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
 import { SectionTitle } from "./ui.jsx";
 
 const EDITING_STATUS_OPTIONS = ["未着手", "脚本・配役調整中", "収録中", "音声編集中", "確認中", "公開準備中", "完了"];
@@ -266,11 +270,17 @@ function CharacterImage({ character, patchCharacter }) {
   const imageUrl = getImageUrl(character.imageUrl);
   const imagePositionX = normalizeImagePosition(character.imagePositionX);
   const imagePositionY = normalizeImagePosition(character.imagePositionY);
+  const imageScale = normalizeImageScale(character.imageScale);
 
-  const patchImagePosition = (x, y) => patchCharacter({
-    imagePositionX: Math.round(normalizeImagePosition(x)),
-    imagePositionY: Math.round(normalizeImagePosition(y))
-  });
+  const patchImagePosition = (x, y) => {
+    const nextX = Math.round(normalizeImagePosition(x));
+    const nextY = Math.round(normalizeImagePosition(y));
+    patchCharacter({
+      imagePositionX: nextX,
+      imagePositionY: nextY,
+      imageScale: imageScale <= 1 && (nextX !== 50 || nextY !== 50) ? 1.12 : imageScale
+    });
+  };
 
   const beginPositionDrag = (event) => {
     if (!imageUrl || event.button !== 0) return;
@@ -308,7 +318,7 @@ function CharacterImage({ character, patchCharacter }) {
       const imageUrl = runtime
         ? (await uploadWordPressImage(file)).url
         : await readFileAsDataUrl(file);
-      patchCharacter({ imageUrl });
+      patchCharacter({ imageUrl, imagePositionX: 50, imagePositionY: 50, imageScale: 1.12 });
       setMessage("");
     } catch (error) {
       setMessage(error.message);
@@ -325,7 +335,7 @@ function CharacterImage({ character, patchCharacter }) {
         onPointerUp={finishPositionDrag}
         onPointerCancel={finishPositionDrag}
       >
-        {imageUrl ? <img src={imageUrl} alt={`${character.name}のキャラクター画像`} draggable="false" style={{ objectPosition: `${imagePositionX}% ${imagePositionY}%` }} /> : <Users size={34} />}
+        {imageUrl ? <img src={imageUrl} alt={`${character.name}のキャラクター画像`} draggable="false" style={getCharacterImageCropStyle(character)} /> : <Users size={34} />}
         {imageUrl && <span className="character-image-move-icon" title="画像位置をドラッグで調整"><Move size={15} /></span>}
       </div>
       <label className="secondary character-image-upload">
@@ -346,7 +356,11 @@ function CharacterImage({ character, patchCharacter }) {
             <span>縦位置</span>
             <input type="range" min="0" max="100" value={imagePositionY} aria-label={`${character.name}の画像の縦位置`} onChange={(event) => patchImagePosition(imagePositionX, event.target.value)} />
           </label>
-          <button type="button" className="icon-button" title="画像位置を中央に戻す" aria-label={`${character.name}の画像位置を中央に戻す`} onClick={() => patchImagePosition(50, 50)}><RotateCcw size={15} /></button>
+          <label>
+            <span>拡大</span>
+            <input type="range" min="100" max="200" value={Math.round(imageScale * 100)} aria-label={`${character.name}の画像の拡大率`} onChange={(event) => patchCharacter({ imageScale: normalizeImageScale(Number(event.target.value) / 100) })} />
+          </label>
+          <button type="button" className="icon-button" title="画像位置を中央に戻す" aria-label={`${character.name}の画像位置を中央に戻す`} onClick={() => patchCharacter({ imagePositionX: 50, imagePositionY: 50, imageScale: 1.12 })}><RotateCcw size={15} /></button>
         </div>
       )}
       {message && <small className="production-field-error">{message}</small>}
@@ -360,6 +374,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
   const [dragOverCharacterId, setDragOverCharacterId] = useState("");
   const [message, setMessage] = useState("");
   const pointerDragRef = useRef(null);
+  const dialogueCounts = useMemo(() => getCharacterDialogueCounts(project), [project.characters, project.lines]);
 
   const patchCharacter = (characterId, patch) => updateProject((current) => ({
     ...current,
@@ -457,6 +472,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
         imageUrl: "",
         imagePositionX: 50,
         imagePositionY: 50,
+        imageScale: 1.12,
         profile: "",
         background: "",
         recordingFolderUrl: "",
@@ -512,7 +528,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
       <div className="character-editor-list">
         {project.characters.map((character, characterIndex) => {
           const assignedMember = project.castMembers.find((member) => member.characterIds.includes(character.id));
-          const lineCount = project.lines.filter((line) => line.kind !== "direction" && line.characterId === character.id).length;
+          const lineCount = dialogueCounts[character.id] || 0;
           return (
             <article
               className={`character-editor${draggingCharacterId === character.id ? " dragging" : ""}${dragOverCharacterId === character.id ? " drag-over" : ""}`}
@@ -590,7 +606,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
   );
 }
 
-function CharacterLinkField({ icon: Icon, label, service, value = "", placeholder, onChange }) {
+function CharacterLinkField({ icon: Icon, label, service, value = "", placeholder, onChange, readOnly = false }) {
   const canOpen = isWebUrl(value);
   return (
     <div className="production-link-field">
@@ -599,7 +615,7 @@ function CharacterLinkField({ icon: Icon, label, service, value = "", placeholde
         <div><b>{label}</b><span>{service}</span></div>
       </div>
       <div className="production-link-control">
-        <input type="url" aria-label={label} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
+        <input type="url" aria-label={label} value={value} placeholder={placeholder} readOnly={readOnly} onChange={(event) => onChange(event.target.value)} />
         <a
           className={`icon-button production-link-open${canOpen ? "" : " disabled"}`}
           href={canOpen ? value : undefined}
@@ -617,7 +633,7 @@ function CharacterLinkField({ icon: Icon, label, service, value = "", placeholde
   );
 }
 
-function LinksView({ project, updateProject }) {
+function LinksView({ project, updateProject, canEditScript = true }) {
   const patchCharacterLink = (characterId, key, value) => updateProject((current) => ({
     ...current,
     characters: current.characters.map((character) => character.id === characterId
@@ -625,43 +641,85 @@ function LinksView({ project, updateProject }) {
       : character)
   }));
 
+  const addSharedLink = () => updateProject((current) => ({
+    ...current,
+    sharedLinks: [...(current.sharedLinks || []), {
+      id: newId("shared_link"),
+      title: "新しい共有URL",
+      url: "",
+      notes: ""
+    }]
+  }));
+
+  const patchSharedLink = (linkId, patch) => updateProject((current) => ({
+    ...current,
+    sharedLinks: (current.sharedLinks || []).map((link) => link.id === linkId ? { ...link, ...patch } : link)
+  }));
+
+  const removeSharedLink = (linkId) => updateProject((current) => ({
+    ...current,
+    sharedLinks: (current.sharedLinks || []).filter((link) => link.id !== linkId)
+  }));
+
   return (
     <div className="production-page-stack">
-      <div className="production-section-toolbar">
-        <div><Link size={19} /><span>{project.characters.length}人の連絡・共有先</span></div>
-      </div>
-      <div className="production-link-list">
-        {project.characters.map((character) => {
-          const assignedMember = project.castMembers.find((member) => member.characterIds.includes(character.id));
-          return (
-            <article className="production-link-row" key={character.id} style={{ "--character-color": character.color }}>
-              <header className="production-link-character">
-                <i />
-                <div><h3>{character.name}</h3><span>{assignedMember?.actorName || "担当声優未設定"}</span></div>
-              </header>
-              <div className="production-link-fields">
-                <CharacterLinkField
-                  icon={FolderOpen}
-                  label="収録フォルダー"
-                  service="Google Drive"
-                  value={character.recordingFolderUrl}
-                  placeholder="https://drive.google.com/..."
-                  onChange={(value) => patchCharacterLink(character.id, "recordingFolderUrl", value)}
-                />
-                <CharacterLinkField
-                  icon={MessageSquareText}
-                  label="LINEオープンチャット"
-                  service="連絡・相談"
-                  value={character.openChatUrl}
-                  placeholder="https://line.me/..."
-                  onChange={(value) => patchCharacterLink(character.id, "openChatUrl", value)}
-                />
-              </div>
-            </article>
-          );
-        })}
-        {!project.characters.length && <div className="production-empty-state"><Link size={30} /><b>共有先を設定するキャラクターがいません</b></div>}
-      </div>
+      <section className="production-link-section">
+        <header>
+          <div><FolderOpen size={20} /><div><h3>収録フォルダー一覧</h3><p>キャラクターごとのGoogle Drive録音先です。</p></div></div>
+          <span>{project.characters.length}フォルダー</span>
+        </header>
+        <div className="production-link-list">
+          {project.characters.map((character) => {
+            const assignedMember = project.castMembers.find((member) => member.characterIds.includes(character.id));
+            return (
+              <article className="production-link-row" key={character.id} style={{ "--character-color": character.color }}>
+                <header className="production-link-character">
+                  <i />
+                  <div><h3>{character.name}</h3><span>{assignedMember?.actorName || "担当声優未設定"}</span></div>
+                </header>
+                <div className="production-link-fields">
+                  <CharacterLinkField
+                    icon={FolderOpen}
+                    label="収録フォルダー"
+                    service="Google Drive"
+                    value={character.recordingFolderUrl}
+                    placeholder="https://drive.google.com/..."
+                    readOnly={!canEditScript}
+                    onChange={(value) => patchCharacterLink(character.id, "recordingFolderUrl", value)}
+                  />
+                </div>
+              </article>
+            );
+          })}
+          {!project.characters.length && <div className="production-empty-state"><FolderOpen size={30} /><b>収録フォルダーを設定するキャラクターがいません</b></div>}
+        </div>
+      </section>
+
+      <section className="production-link-section">
+        <header>
+          <div><Link size={20} /><div><h3>共有URL</h3><p>作品全体で共有する連絡先や資料へのリンクです。</p></div></div>
+          {canEditScript && <button type="button" className="primary" onClick={addSharedLink}><Plus size={16} />共有URL</button>}
+        </header>
+        <div className="production-shared-url-list">
+          {(project.sharedLinks || []).map((link) => {
+            const canOpen = isWebUrl(link.url);
+            return (
+              <article className="production-shared-url-row" key={link.id}>
+                <div className="production-shared-url-fields">
+                  <label><span>リンク名</span><input value={link.title} readOnly={!canEditScript} onChange={(event) => patchSharedLink(link.id, { title: event.target.value })} /></label>
+                  <label className="wide"><span>URL</span><input type="url" value={link.url} placeholder="https://..." readOnly={!canEditScript} onChange={(event) => patchSharedLink(link.id, { url: event.target.value })} /></label>
+                  <label className="wide"><span>補足</span><input value={link.notes} placeholder="用途や共有先" readOnly={!canEditScript} onChange={(event) => patchSharedLink(link.id, { notes: event.target.value })} /></label>
+                </div>
+                <div className="production-shared-url-actions">
+                  <a className={`icon-button${canOpen ? "" : " disabled"}`} href={canOpen ? link.url : undefined} target="_blank" rel="noreferrer" title={canOpen ? "共有URLを開く" : "URLが未登録です"} aria-label={`${link.title || "共有URL"}を開く`} aria-disabled={!canOpen}><ExternalLink size={16} /></a>
+                  {canEditScript && <button type="button" className="icon-button danger-icon" title="共有URLを削除" aria-label={`${link.title || "共有URL"}を削除`} onClick={() => removeSharedLink(link.id)}><Trash2 size={16} /></button>}
+                </div>
+              </article>
+            );
+          })}
+          {!project.sharedLinks?.length && <div className="production-empty-state"><Link size={30} /><b>共有URLはまだありません</b></div>}
+        </div>
+      </section>
     </div>
   );
 }
@@ -671,10 +729,10 @@ function MaterialPreview({ material }) {
   if (material.category === "サムネイル") {
     return <div className={`material-preview ratio-${material.aspectRatio.replace(":", "-") || "16-9"}`}><img src={getImageUrl(material.url)} alt={material.title} /></div>;
   }
-  return <MiniAudioPlayer url={material.url} fileName={material.fileName || material.title} />;
+  return <PersistentAudioButton material={material} />;
 }
 
-function MaterialsView({ project, updateProject }) {
+function MaterialsView({ project, updateProject, canEditScript = true }) {
   const [filter, setFilter] = useState("すべて");
   const [message, setMessage] = useState("");
   const [draggingMaterialId, setDraggingMaterialId] = useState("");
@@ -767,7 +825,7 @@ function MaterialsView({ project, updateProject }) {
             <button type="button" className={filter === category ? "active" : ""} key={category} onClick={() => setFilter(category)}>{category}<span>{category === "すべて" ? project.materials.length : project.materials.filter((material) => material.category === category).length}</span></button>
           ))}
         </div>
-        <button type="button" className="primary" onClick={() => addMaterial()}><Plus size={16} />素材</button>
+        {canEditScript && <button type="button" className="primary" onClick={() => addMaterial()}><Plus size={16} />素材</button>}
       </div>
       {message && <p className="production-inline-message">{message}</p>}
       <div className="material-library-grid">
@@ -778,7 +836,7 @@ function MaterialsView({ project, updateProject }) {
             key={material.id}
           >
             <header>
-              <button
+              {canEditScript && <button
                 type="button"
                 className="icon-button material-drag-handle"
                 aria-label={`「${material.title}」を並べ替え`}
@@ -794,36 +852,36 @@ function MaterialsView({ project, updateProject }) {
                   const target = visibleMaterials[visibleIndex + (event.key === "ArrowUp" ? -1 : 1)];
                   if (target) moveMaterial(material.id, target.id);
                 }}
-              ><GripVertical size={17} /></button>
+              ><GripVertical size={17} /></button>}
               <span className={`material-category category-${material.category}`}>{material.category}</span>
-              <select aria-label="素材の状態" value={material.status} onChange={(event) => patchMaterial(material.id, { status: event.target.value })}>{PRODUCTION_MATERIAL_STATUSES.map((status) => <option key={status}>{status}</option>)}</select>
-              <button type="button" className="icon-button danger-icon" title="素材を削除" onClick={() => {
+              <select aria-label="素材の状態" value={material.status} disabled={!canEditScript} onChange={(event) => patchMaterial(material.id, { status: event.target.value })}>{PRODUCTION_MATERIAL_STATUSES.map((status) => <option key={status}>{status}</option>)}</select>
+              {canEditScript && <button type="button" className="icon-button danger-icon" title="素材を削除" onClick={() => {
                 if (!confirm(`「${material.title}」を削除しますか？`)) return;
                 updateProject((current) => ({ ...current, materials: current.materials.filter((item) => item.id !== material.id) }));
-              }}><Trash2 size={16} /></button>
+              }}><Trash2 size={16} /></button>}
             </header>
             <MaterialPreview material={material} />
             <div className="material-fields">
-              <label><span>素材名</span><input value={material.title} onChange={(event) => patchMaterial(material.id, { title: event.target.value })} /></label>
-              <label><span>種類</span><select value={material.category} onChange={(event) => patchMaterial(material.id, { category: event.target.value, aspectRatio: event.target.value === "サムネイル" ? material.aspectRatio || "16:9" : "" })}>{PRODUCTION_MATERIAL_CATEGORIES.map((category) => <option key={category}>{category}</option>)}</select></label>
-              {material.category === "サムネイル" && <label><span>比率</span><select value={material.aspectRatio} onChange={(event) => patchMaterial(material.id, { aspectRatio: event.target.value })}>{MATERIAL_ASPECT_RATIOS.filter(Boolean).map((ratio) => <option key={ratio}>{ratio}</option>)}</select></label>}
-              <label className="wide"><span>{material.category === "サムネイル" ? "画像URL" : "Google Drive共有URL"}</span><input value={material.url.startsWith("data:") ? "" : material.url} placeholder={material.url.startsWith("data:") ? `${material.fileName} を登録済み` : "https://drive.google.com/..."} onChange={(event) => patchMaterial(material.id, { url: event.target.value, fileName: "" })} /></label>
-              <label className="wide"><span>メモ</span><textarea value={material.notes} onChange={(event) => patchMaterial(material.id, { notes: event.target.value })} /></label>
+              <label><span>素材名</span><input value={material.title} readOnly={!canEditScript} onChange={(event) => patchMaterial(material.id, { title: event.target.value })} /></label>
+              <label><span>種類</span><select value={material.category} disabled={!canEditScript} onChange={(event) => patchMaterial(material.id, { category: event.target.value, aspectRatio: event.target.value === "サムネイル" ? material.aspectRatio || "16:9" : "" })}>{PRODUCTION_MATERIAL_CATEGORIES.map((category) => <option key={category}>{category}</option>)}</select></label>
+              {material.category === "サムネイル" && <label><span>比率</span><select value={material.aspectRatio} disabled={!canEditScript} onChange={(event) => patchMaterial(material.id, { aspectRatio: event.target.value })}>{MATERIAL_ASPECT_RATIOS.filter(Boolean).map((ratio) => <option key={ratio}>{ratio}</option>)}</select></label>}
+              <label className="wide"><span>{material.category === "サムネイル" ? "画像URL" : "Google Drive共有URL"}</span><input value={material.url.startsWith("data:") ? "" : material.url} placeholder={material.url.startsWith("data:") ? `${material.fileName} を登録済み` : "https://drive.google.com/..."} readOnly={!canEditScript} onChange={(event) => patchMaterial(material.id, { url: event.target.value, fileName: "" })} /></label>
+              <label className="wide"><span>メモ</span><textarea value={material.notes} readOnly={!canEditScript} onChange={(event) => patchMaterial(material.id, { notes: event.target.value })} /></label>
             </div>
             <footer>
-              {material.category === "サムネイル" ? (
+              {canEditScript && (material.category === "サムネイル" ? (
                 <label className="secondary material-upload-button"><Upload size={16} /><span>画像を選択</span><input type="file" accept={WORDPRESS_IMAGE_ACCEPT} onChange={(event) => {
                   const file = event.target.files?.[0];
                   if (file) uploadMaterial(material, file);
                   event.target.value = "";
                 }} /></label>
-              ) : <span className="material-drive-note"><FolderOpen size={16} />音声はGoogle Driveで管理</span>}
-              {material.url && !material.url.startsWith("data:") && <a href={material.url} target="_blank" rel="noreferrer"><ExternalLink size={16} />元ファイル</a>}
+              ) : <span className="material-drive-note"><FolderOpen size={16} />音声はGoogle Driveで管理</span>)}
+              {canEditScript && material.url && !material.url.startsWith("data:") && <a href={material.url} target="_blank" rel="noreferrer"><ExternalLink size={16} />元ファイル</a>}
             </footer>
           </article>
         ))}
       </div>
-      {!visibleMaterials.length && <div className="production-empty-state"><Music2 size={30} /><b>{filter === "すべて" ? "素材はまだありません" : `${filter}はまだありません`}</b><button type="button" className="secondary" onClick={() => addMaterial()}>追加する</button></div>}
+      {!visibleMaterials.length && <div className="production-empty-state"><Music2 size={30} /><b>{filter === "すべて" ? "素材はまだありません" : `${filter}はまだありません`}</b>{canEditScript && <button type="button" className="secondary" onClick={() => addMaterial()}>追加する</button>}</div>}
     </div>
   );
 }
@@ -905,7 +963,7 @@ function QuestionsView({ project, updateProject }) {
   );
 }
 
-function ScheduleView({ project, updateProject }) {
+function ScheduleView({ project, updateProject, canEditScript = true }) {
   const patchScheduleItem = (itemId, patch) => updateProject((current) => ({
     ...current,
     scheduleItems: current.scheduleItems.map((item) => item.id === itemId ? { ...item, ...patch } : item)
@@ -918,22 +976,22 @@ function ScheduleView({ project, updateProject }) {
   return (
     <div className="production-page-stack schedule-workspace">
       <section className="production-key-dates">
-        <label><span>作品全体の収録締切</span><input type="date" value={project.recordingDeadline} onChange={(event) => updateProject({ recordingDeadline: event.target.value })} /></label>
-        <label><span>公開予定日</span><input type="date" value={project.releaseDate} onChange={(event) => updateProject({ releaseDate: event.target.value })} /></label>
-        <label><span>現在の編集状況</span><select value={project.editingStatus} onChange={(event) => updateProject({ editingStatus: event.target.value })}>{EDITING_STATUS_OPTIONS.map((status) => <option key={status}>{status}</option>)}</select></label>
+        <label><span>作品全体の収録締切</span><input type="date" value={project.recordingDeadline} disabled={!canEditScript} onChange={(event) => updateProject({ recordingDeadline: event.target.value })} /></label>
+        <label><span>公開予定日</span><input type="date" value={project.releaseDate} disabled={!canEditScript} onChange={(event) => updateProject({ releaseDate: event.target.value })} /></label>
+        <label><span>現在の編集状況</span><select value={project.editingStatus} disabled={!canEditScript} onChange={(event) => updateProject({ editingStatus: event.target.value })}>{EDITING_STATUS_OPTIONS.map((status) => <option key={status}>{status}</option>)}</select></label>
       </section>
 
       <section className="schedule-section">
-        <header><div><CalendarClock size={20} /><div><h3>制作予定</h3><p>収録、編集、公開までの予定を全員で確認します。</p></div></div><button type="button" className="primary" onClick={() => updateProject((current) => ({ ...current, scheduleItems: [...current.scheduleItems, { id: newId("schedule"), type: "収録", title: "新しい予定", date: "", status: "予定", notes: "" }] }))}><Plus size={16} />予定</button></header>
+        <header><div><CalendarClock size={20} /><div><h3>制作予定</h3><p>収録、編集、公開までの予定を全員で確認します。</p></div></div>{canEditScript && <button type="button" className="primary" onClick={() => updateProject((current) => ({ ...current, scheduleItems: [...current.scheduleItems, { id: newId("schedule"), type: "収録", title: "新しい予定", date: "", status: "予定", notes: "" }] }))}><Plus size={16} />予定</button>}</header>
         <div className="schedule-editor-list">
           {[...project.scheduleItems].sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999")).map((item) => (
             <article key={item.id}>
-              <label><span>日付</span><input type="date" value={item.date} onChange={(event) => patchScheduleItem(item.id, { date: event.target.value })} /></label>
-              <label><span>種類</span><select value={item.type} onChange={(event) => patchScheduleItem(item.id, { type: event.target.value })}>{PRODUCTION_SCHEDULE_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
-              <label className="schedule-title-field"><span>予定名</span><input value={item.title} onChange={(event) => patchScheduleItem(item.id, { title: event.target.value })} /></label>
-              <label><span>状態</span><select value={item.status} onChange={(event) => patchScheduleItem(item.id, { status: event.target.value })}>{PRODUCTION_SCHEDULE_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label>
-              <label className="wide"><span>共有メモ</span><textarea value={item.notes} onChange={(event) => patchScheduleItem(item.id, { notes: event.target.value })} /></label>
-              <button type="button" className="icon-button danger-icon" title="予定を削除" onClick={() => updateProject((current) => ({ ...current, scheduleItems: current.scheduleItems.filter((currentItem) => currentItem.id !== item.id) }))}><Trash2 size={16} /></button>
+              <label><span>日付</span><input type="date" value={item.date} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { date: event.target.value })} /></label>
+              <label><span>種類</span><select value={item.type} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { type: event.target.value })}>{PRODUCTION_SCHEDULE_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
+              <label className="schedule-title-field"><span>予定名</span><input value={item.title} readOnly={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { title: event.target.value })} /></label>
+              <label><span>状態</span><select value={item.status} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { status: event.target.value })}>{PRODUCTION_SCHEDULE_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label>
+              <label className="wide"><span>共有メモ</span><textarea value={item.notes} readOnly={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { notes: event.target.value })} /></label>
+              {canEditScript && <button type="button" className="icon-button danger-icon" title="予定を削除" onClick={() => updateProject((current) => ({ ...current, scheduleItems: current.scheduleItems.filter((currentItem) => currentItem.id !== item.id) }))}><Trash2 size={16} /></button>}
             </article>
           ))}
           {!project.scheduleItems.length && <p className="production-list-empty">制作予定はまだ登録されていません。</p>}
@@ -941,17 +999,17 @@ function ScheduleView({ project, updateProject }) {
       </section>
 
       <section className="schedule-section announcements-editor">
-        <header><div><Megaphone size={20} /><div><h3>メンバー全体へのお知らせ</h3><p>ホームの上部に表示する連絡事項です。</p></div></div><button type="button" className="secondary" onClick={() => updateProject((current) => ({ ...current, announcements: [{ id: newId("announcement"), title: "新しいお知らせ", body: "", priority: "通常", publishedAt: new Date().toISOString() }, ...current.announcements] }))}><Plus size={16} />お知らせ</button></header>
+        <header><div><Megaphone size={20} /><div><h3>メンバー全体へのお知らせ</h3><p>ホームの上部に表示する連絡事項です。</p></div></div>{canEditScript && <button type="button" className="secondary" onClick={() => updateProject((current) => ({ ...current, announcements: [{ id: newId("announcement"), title: "新しいお知らせ", body: "", priority: "通常", publishedAt: new Date().toISOString() }, ...current.announcements] }))}><Plus size={16} />お知らせ</button>}</header>
         <div className="announcement-editor-list">
           {project.announcements.map((announcement) => (
             <article className={announcement.priority === "重要" ? "important" : ""} key={announcement.id}>
               <div className="announcement-editor-head">
-                <label><span>見出し</span><input value={announcement.title} onChange={(event) => patchAnnouncement(announcement.id, { title: event.target.value })} /></label>
-                <label><span>優先度</span><select value={announcement.priority} onChange={(event) => patchAnnouncement(announcement.id, { priority: event.target.value })}><option>通常</option><option>重要</option></select></label>
-                <label><span>掲載日</span><input type="date" value={toDateInputValue(announcement.publishedAt)} onChange={(event) => patchAnnouncement(announcement.id, { publishedAt: event.target.value ? `${event.target.value}T09:00:00.000Z` : "" })} /></label>
-                <button type="button" className="icon-button danger-icon" title="お知らせを削除" onClick={() => updateProject((current) => ({ ...current, announcements: current.announcements.filter((item) => item.id !== announcement.id) }))}><Trash2 size={16} /></button>
+                <label><span>見出し</span><input value={announcement.title} readOnly={!canEditScript} onChange={(event) => patchAnnouncement(announcement.id, { title: event.target.value })} /></label>
+                <label><span>優先度</span><select value={announcement.priority} disabled={!canEditScript} onChange={(event) => patchAnnouncement(announcement.id, { priority: event.target.value })}><option>通常</option><option>重要</option></select></label>
+                <label><span>掲載日</span><input type="date" value={toDateInputValue(announcement.publishedAt)} disabled={!canEditScript} onChange={(event) => patchAnnouncement(announcement.id, { publishedAt: event.target.value ? `${event.target.value}T09:00:00.000Z` : "" })} /></label>
+                {canEditScript && <button type="button" className="icon-button danger-icon" title="お知らせを削除" onClick={() => updateProject((current) => ({ ...current, announcements: current.announcements.filter((item) => item.id !== announcement.id) }))}><Trash2 size={16} /></button>}
               </div>
-              <label><span>本文</span><textarea value={announcement.body} onChange={(event) => patchAnnouncement(announcement.id, { body: event.target.value })} /></label>
+              <label><span>本文</span><textarea value={announcement.body} readOnly={!canEditScript} onChange={(event) => patchAnnouncement(announcement.id, { body: event.target.value })} /></label>
             </article>
           ))}
           {!project.announcements.length && <p className="production-list-empty">お知らせはまだありません。</p>}
@@ -964,7 +1022,7 @@ function ScheduleView({ project, updateProject }) {
 const PAGE_COPY = {
   home: ["ホーム", "収録、確認、質問、締切を作品単位でまとめて確認します。"],
   characters: ["キャラクター", "人物設定、担当声優、セリフ色と収録フォルダーを管理します。"],
-  links: ["連絡・共有リンク", "キャラクターごとの収録フォルダーと連絡先をまとめて管理します。"],
+  links: ["共有リンク", "キャラクター別の収録フォルダーと作品全体の共有URLを管理します。"],
   materials: ["素材", "音源とサムネイルを種類別に登録し、その場で確認します。"],
   questions: ["質問", "作品やセリフに紐づく質問と回答状況を共有します。"],
   schedule: ["予定", "収録締切、公開予定、編集状況と全体連絡を管理します。"]
@@ -1001,10 +1059,10 @@ export function ProductionWorkspace({
       />
       {view === "home" && <ProductionHome project={project} setActive={setActive} />}
       {view === "characters" && <CharactersView project={project} updateProject={updateProject} siteUsers={siteUsers} canEditScript={canEditScript} />}
-      {view === "links" && <LinksView project={project} updateProject={updateProject} />}
-      {view === "materials" && <MaterialsView project={project} updateProject={updateProject} />}
+      {view === "links" && <LinksView project={project} updateProject={updateProject} canEditScript={canEditScript} />}
+      {view === "materials" && <MaterialsView project={project} updateProject={updateProject} canEditScript={canEditScript} />}
       {view === "questions" && <QuestionsView project={project} updateProject={updateProject} />}
-      {view === "schedule" && <ScheduleView project={project} updateProject={updateProject} />}
+      {view === "schedule" && <ScheduleView project={project} updateProject={updateProject} canEditScript={canEditScript} />}
     </div>
   );
 }

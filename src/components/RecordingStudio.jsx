@@ -51,6 +51,7 @@ import {
   addRubyNotation,
   getCharacterName,
   getFilteredRecordingLines,
+  getRecordingDisplayProject,
   getRecordingProgress,
   getShareableRecordingProject,
   getScriptChapterKey,
@@ -508,12 +509,13 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
   const character = project.characters.find((item) => item.id === line.characterId);
   const isDirection = line.kind === "direction";
   const isManualBody = isDirection && line.manualBody;
+  const isDerivedFromManualBody = Boolean(line.derivedFromManualBody);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const characterColor = character?.color || "#5f6d7a";
 
   return (
     <article
-      className={`script-line-card${line.isContext ? " context-line" : ""}${isDirection ? " stage-direction-line" : ""}`}
+      className={`script-line-card${line.isContext ? " context-line" : ""}${isDirection ? " stage-direction-line" : ""}${isDerivedFromManualBody ? " derived-manual-line" : ""}`}
       style={{
         "--character-color": characterColor,
         "--character-background": makeCharacterTint(characterColor, line.isContext ? 0.055 : 0.11)
@@ -521,7 +523,7 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
     >
       <div className="script-line-main">
         <div className="script-line-sequence">
-          <span>{String(line.order).padStart(3, "0")}</span>
+          <span>{String(line.displayOrder ?? line.order).padStart(3, "0")}</span>
           <b>
             <i />{isManualBody ? "本文" : isDirection ? "ト書き" : character?.name || "話者未設定"}
           </b>
@@ -531,14 +533,14 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
           {line.direction && <small><MessageSquareText size={14} />{line.direction}</small>}
           {line.fileName && <code>{line.fileName}</code>}
         </div>
-        {!isDirection && (
+        {!isDirection && !isDerivedFromManualBody && (
           <div className="script-line-states">
             <StatusBadge status={line.actorStatus} type="actor" />
             <StatusBadge status={line.reviewStatus} type="review" />
           </div>
         )}
       </div>
-      {!line.isContext && !isDirection && (
+      {!line.isContext && !isDirection && !isDerivedFromManualBody && (
         <>
           <div className={`line-operation-row${line.recordingUrl ? " has-recording" : ""}`}>
             <RecordingPlayer url={line.recordingUrl} fileName={line.recordingFileName} />
@@ -599,7 +601,10 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
           )}
         </>
       )}
-      {!line.isContext && isDirection && (
+      {!line.isContext && isDerivedFromManualBody && (
+        <div className="line-card-footer derived-manual-footer"><span>章本文から表示</span></div>
+      )}
+      {!line.isContext && isDirection && !isDerivedFromManualBody && (
         <>
           <div className="line-card-footer stage-direction-footer">
             <span>録音対象外</span>
@@ -629,7 +634,8 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
 }
 
 function RecordingBoardView({ project, patchLine, removeLine, canEditScript }) {
-  const allChapters = useMemo(() => getChapterGroups(project.lines), [project.lines]);
+  const displayProject = useMemo(() => getRecordingDisplayProject(project), [project]);
+  const allChapters = useMemo(() => getChapterGroups(displayProject.lines), [displayProject.lines]);
   const [selectedChapterId, setSelectedChapterId] = useState("");
   const [selectedSceneId, setSelectedSceneId] = useState("");
   const [selectedCharacterIds, setSelectedCharacterIds] = useState([]);
@@ -640,13 +646,13 @@ function RecordingBoardView({ project, patchLine, removeLine, canEditScript }) {
   const [openSceneIds, setOpenSceneIds] = useState(() => new Set(project.lines[0]?.sceneId ? [project.lines[0].sceneId] : []));
   const [openChapterIds, setOpenChapterIds] = useState(() => new Set(project.lines[0]?.chapterId ? [project.lines[0].chapterId] : []));
   const scopedProject = useMemo(() => ({
-    ...project,
-    lines: project.lines.filter((line) => {
+    ...displayProject,
+    lines: displayProject.lines.filter((line) => {
       if (selectedSceneId) return line.sceneId === selectedSceneId;
       if (selectedChapterId) return line.chapterId === selectedChapterId;
       return true;
     })
-  }), [project, selectedChapterId, selectedSceneId]);
+  }), [displayProject, selectedChapterId, selectedSceneId]);
   const chapterSignature = allChapters.map((chapter) => `${chapter.chapterId}:${chapter.scenes.map((scene) => scene.sceneId).join(",")}`).join("|");
   const characterScopeSignature = scopedProject.lines
     .map((line) => `${line.id}:${line.kind}:${line.characterId}`)
@@ -762,7 +768,7 @@ function RecordingBoardView({ project, patchLine, removeLine, canEditScript }) {
                   >
                     <div className="script-line-list">
                       {scene.lines.map((line) => (
-                        <AdminLineCard key={line.id} project={project} line={line} patchLine={patchLine} removeLine={removeLine} canEditScript={canEditScript} />
+                        <AdminLineCard key={line.id} project={displayProject} line={line} patchLine={patchLine} removeLine={removeLine} canEditScript={canEditScript} />
                       ))}
                     </div>
                   </ScriptSceneSection>

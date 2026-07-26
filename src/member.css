@@ -413,6 +413,7 @@
 }
 
 .member-character-image {
+  position: relative;
   display: grid;
   place-items: center;
   aspect-ratio: 1;
@@ -423,8 +424,9 @@
 }
 
 .member-character-image img {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  max-width: none;
+  max-height: none;
   object-fit: cover;
 }
 
@@ -499,6 +501,47 @@
   gap: 8px;
   min-width: 0;
   padding: 12px 14px;
+}
+
+.member-links-page,
+.member-link-section {
+  display: grid;
+  gap: 10px;
+}
+
+.member-link-section > header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+}
+
+.member-link-section > header > svg {
+  flex: 0 0 auto;
+  color: #167680;
+}
+
+.member-link-section > header h3,
+.member-link-section > header p {
+  margin: 0;
+}
+
+.member-link-section > header h3 {
+  color: #352e3c;
+  font-size: 16px;
+}
+
+.member-link-section > header p {
+  margin-top: 2px;
+  color: #776e7d;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.member-global-link-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .member-shared-link {
@@ -653,6 +696,10 @@
 
   .member-shared-link-list {
     padding: 10px;
+  }
+
+  .member-global-link-list {
+    grid-template-columns: 1fr;
   }
 
   .member-character-image {

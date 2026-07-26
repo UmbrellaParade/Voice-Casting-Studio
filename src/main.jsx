@@ -32,6 +32,7 @@ import {
   ZoomIn
 } from "lucide-react";
 import "./styles.css";
+import { PersistentAudioProvider } from "./components/PersistentAudioPlayer.jsx";
 import { postToGasEndpoint, getFromGasEndpoint, loadAppConfig } from "./lib/gas.js";
 import {
   createWordPressQuestion,
@@ -4133,5 +4134,9 @@ function SettingsPanel({
 }
 
 
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(
+  <PersistentAudioProvider>
+    <App />
+  </PersistentAudioProvider>
+);
 

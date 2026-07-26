@@ -19,7 +19,8 @@ import {
   Users
 } from "lucide-react";
 import { getGoogleDriveFileId, isWebUrl, makeDirectAudioDownloadUrl, makeGoogleDrivePreviewUrl, makeImagePreviewUrl } from "../lib/core.js";
-import { getCharacterName, getRecordingProgress, parseRubyText } from "../lib/recording.js";
+import { getCharacterImageCropStyle, getCharacterName, getRecordingDisplayProject, getRecordingProgress, parseRubyText } from "../lib/recording.js";
+import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
 import { Header, SectionTitle } from "./ui.jsx";
 import { getScriptSceneAnchorId, ScriptSceneToc } from "./ScriptSceneToc.jsx";
 
@@ -159,10 +160,11 @@ function MemberLine({ project, line, editable, onSave }) {
     }
   };
   return (
-    <article className={`member-script-line${editable ? " assigned" : " context"}${line.kind === "direction" ? " direction" : ""}`} style={{ "--character-color": character?.color || "#5f6d7a", "--character-background": makeTint(character?.color) }}>
-      <header><span>{String(line.order).padStart(3, "0")}</span><b>{line.kind === "direction" ? "ト書き" : character?.name || "話者未設定"}</b>{line.kind !== "direction" && <div><span>{line.actorStatus}</span><span>{line.reviewStatus}</span></div>}</header>
+    <article className={`member-script-line${editable ? " assigned" : " context"}${line.kind === "direction" ? " direction" : ""}${line.derivedFromManualBody ? " derived-manual-line" : ""}`} style={{ "--character-color": character?.color || "#5f6d7a", "--character-background": makeTint(character?.color) }}>
+      <header><span>{String(line.displayOrder ?? line.order).padStart(3, "0")}</span><b>{line.kind === "direction" ? "ト書き" : character?.name || "話者未設定"}</b>{line.kind !== "direction" && !line.derivedFromManualBody && <div><span>{line.actorStatus}</span><span>{line.reviewStatus}</span></div>}</header>
       <p><RubyText text={line.text} /></p>
       {line.direction && <small>{line.direction}</small>}
+      {line.derivedFromManualBody && <small className="derived-manual-note">章本文から表示</small>}
       {editable && line.kind !== "direction" && (
         <div className="member-line-submission">
           <AudioPlayer url={line.recordingUrl} label={`${character?.name || "担当"}の録音`} />
@@ -178,14 +180,18 @@ function MemberLine({ project, line, editable, onSave }) {
 }
 
 function MemberScript({ project, assignedCharacterIds, onUpdateLine }) {
-  const chapters = useMemo(() => getChapters(project.lines), [project.lines]);
+  const displayProject = useMemo(() => getRecordingDisplayProject(project), [project]);
+  const chapters = useMemo(() => getChapters(displayProject.lines), [displayProject.lines]);
   const [chapterId, setChapterId] = useState("");
   const [sceneId, setSceneId] = useState("");
   const [characterIds, setCharacterIds] = useState([]);
   const chapter = chapters.find((item) => item.id === chapterId);
-  const scopedLines = project.lines.filter((line) => {
+  const characterScopeLines = displayProject.lines.filter((line) => {
     if (sceneId && line.sceneId !== sceneId) return false;
     if (!sceneId && chapterId && line.chapterId !== chapterId) return false;
+    return true;
+  });
+  const scopedLines = characterScopeLines.filter((line) => {
     if (characterIds.length && line.kind !== "direction" && !characterIds.includes(line.characterId)) return false;
     return !characterIds.length || line.kind !== "direction";
   });
@@ -194,7 +200,7 @@ function MemberScript({ project, assignedCharacterIds, onUpdateLine }) {
     ? visibleChapters.find((item) => item.id === chapterId)
     : null;
   const tocScopeId = `member-${project.id}-${chapterId || "all"}`;
-  const availableCharacters = project.characters.filter((character) => project.lines.some((line) => line.kind !== "direction" && line.characterId === character.id));
+  const availableCharacters = displayProject.characters.filter((character) => characterScopeLines.some((line) => line.kind !== "direction" && line.characterId === character.id));
   const toggleCharacter = (id) => setCharacterIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const selectChapter = (id) => { setChapterId(id); setSceneId(""); setCharacterIds([]); };
   return (
@@ -214,7 +220,7 @@ function MemberScript({ project, assignedCharacterIds, onUpdateLine }) {
               {chapterGroup.scenes.map((scene) => (
                 <details id={getScriptSceneAnchorId(tocScopeId, scene.id)} className="member-scene" key={scene.id} open>
                   <summary><strong>{scene.title}</strong><span>{scene.lines.filter((line) => line.kind !== "direction").length}セリフ</span></summary>
-                  <div className="member-line-list">{scene.lines.map((line) => <MemberLine key={line.id} project={project} line={line} editable={assignedCharacterIds.has(line.characterId)} onSave={(lineId, patch) => onUpdateLine(project.id, lineId, patch)} />)}</div>
+                  <div className="member-line-list">{scene.lines.map((line) => <MemberLine key={line.id} project={displayProject} line={line} editable={!line.derivedFromManualBody && assignedCharacterIds.has(line.characterId)} onSave={(lineId, patch) => onUpdateLine(project.id, lineId, patch)} />)}</div>
                 </details>
               ))}
             </details>
@@ -230,7 +236,7 @@ function MemberCharacters({ project, assignedCharacterIds }) {
     <div className="member-character-grid">
       {project.characters.map((character) => (
         <article key={character.id} style={{ "--character-color": character.color }}>
-          <div className="member-character-image">{character.imageUrl ? <img src={makeImagePreviewUrl(character.imageUrl) || character.imageUrl} alt={character.name} style={{ objectPosition: `${character.imagePositionX ?? 50}% ${character.imagePositionY ?? 50}%` }} /> : <Users size={32} />}</div>
+          <div className="member-character-image">{character.imageUrl ? <img src={makeImagePreviewUrl(character.imageUrl) || character.imageUrl} alt={character.name} style={getCharacterImageCropStyle(character)} /> : <Users size={32} />}</div>
           <div>
             <header><h3>{character.name}</h3>{assignedCharacterIds.has(character.id) && <span>担当</span>}</header>
             {character.profile && <p>{character.profile}</p>}
@@ -261,27 +267,40 @@ function MemberSharedLink({ icon: Icon, label, detail, url }) {
 
 function MemberLinks({ project, assignedCharacterIds }) {
   const characters = project.characters.filter((character) => assignedCharacterIds.has(character.id));
+  const sharedLinks = (project.sharedLinks || []).filter((link) => link.title || link.url);
   return (
-    <div className="production-link-list member-link-list">
-      {characters.map((character) => (
-        <article className="production-link-row" key={character.id} style={{ "--character-color": character.color }}>
-          <header className="production-link-character">
-            <i />
-            <div><h3>{character.name}</h3><span>担当キャラクター</span></div>
-          </header>
-          <div className="member-shared-link-list">
-            <MemberSharedLink icon={FolderOpen} label="収録フォルダー" detail="Google Drive" url={character.recordingFolderUrl} />
-            <MemberSharedLink icon={MessageSquareText} label="LINEオープンチャット" detail="連絡・相談" url={character.openChatUrl} />
-          </div>
-        </article>
-      ))}
-      {!characters.length && <div className="production-empty-state"><Link size={30} /><b>担当キャラクターの共有先はまだありません</b></div>}
+    <div className="production-page-stack member-links-page">
+      <section className="member-link-section">
+        <header><FolderOpen size={20} /><div><h3>収録フォルダー</h3><p>担当キャラクターの録音アップロード先</p></div></header>
+        <div className="production-link-list member-link-list">
+          {characters.map((character) => (
+            <article className="production-link-row" key={character.id} style={{ "--character-color": character.color }}>
+              <header className="production-link-character">
+                <i />
+                <div><h3>{character.name}</h3><span>担当キャラクター</span></div>
+              </header>
+              <div className="member-shared-link-list">
+                <MemberSharedLink icon={FolderOpen} label="収録フォルダー" detail="Google Drive" url={character.recordingFolderUrl} />
+              </div>
+            </article>
+          ))}
+          {!characters.length && <div className="production-empty-state"><FolderOpen size={30} /><b>担当キャラクターの収録フォルダーはまだありません</b></div>}
+        </div>
+      </section>
+
+      <section className="member-link-section">
+        <header><Link size={20} /><div><h3>共有URL</h3><p>作品全体の連絡先と共有資料</p></div></header>
+        <div className="member-global-link-list">
+          {sharedLinks.map((link) => <MemberSharedLink key={link.id} icon={Link} label={link.title || "共有URL"} detail={link.notes || "共有URL"} url={link.url} />)}
+          {!sharedLinks.length && <div className="production-empty-state"><Link size={30} /><b>共有URLはまだありません</b></div>}
+        </div>
+      </section>
     </div>
   );
 }
 
 function MemberMaterials({ project }) {
-  return <div className="material-library-grid member-materials">{project.materials.map((material) => <article className="material-editor" key={material.id}><header><span className="material-category">{material.category}</span><span>{material.status}</span></header>{material.category === "サムネイル" ? <div className={`material-preview ratio-${material.aspectRatio.replace(":", "-") || "16-9"}`}>{material.url ? <img src={makeImagePreviewUrl(material.url) || material.url} alt={material.title} /> : null}</div> : <AudioPlayer url={material.url} label={material.title} />}<h3>{material.title}</h3>{material.notes && <p>{material.notes}</p>}</article>)}{!project.materials.length && <div className="production-empty-state"><Music2 size={30} /><b>素材はまだありません</b></div>}</div>;
+  return <div className="material-library-grid member-materials">{project.materials.map((material) => <article className="material-editor" key={material.id}><header><span className="material-category">{material.category}</span><span>{material.status}</span></header>{material.category === "サムネイル" ? <div className={`material-preview ratio-${material.aspectRatio.replace(":", "-") || "16-9"}`}>{material.url ? <img src={makeImagePreviewUrl(material.url) || material.url} alt={material.title} /> : null}</div> : <PersistentAudioButton material={material} />}<h3>{material.title}</h3>{material.notes && <p>{material.notes}</p>}</article>)}{!project.materials.length && <div className="production-empty-state"><Music2 size={30} /><b>素材はまだありません</b></div>}</div>;
 }
 
 function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQuestion }) {

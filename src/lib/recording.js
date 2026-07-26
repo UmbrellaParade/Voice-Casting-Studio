@@ -176,6 +176,26 @@ export const normalizeImagePosition = (value, fallback = 50) => {
   return Number.isFinite(position) ? Math.min(100, Math.max(0, position)) : fallback;
 };
 
+export const normalizeImageScale = (value, fallback = 1.12) => {
+  const scale = Number(value);
+  return Number.isFinite(scale) ? Math.min(2.4, Math.max(1, scale)) : fallback;
+};
+
+export const getCharacterImageCropStyle = (character = {}) => {
+  const positionX = normalizeImagePosition(character.imagePositionX);
+  const positionY = normalizeImagePosition(character.imagePositionY);
+  const scale = normalizeImageScale(character.imageScale);
+  const overflow = (scale - 1) * 100;
+  const percentage = (value) => `${Number(value.toFixed(4))}%`;
+  return {
+    width: percentage(scale * 100),
+    height: percentage(scale * 100),
+    left: percentage(-(overflow * positionX / 100)),
+    top: percentage(-(overflow * positionY / 100)),
+    objectPosition: `${positionX}% ${positionY}%`
+  };
+};
+
 const createLocalId = (prefix) => {
   if (globalThis.crypto?.randomUUID) return `${prefix}_${globalThis.crypto.randomUUID().slice(0, 8)}`;
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
@@ -190,6 +210,7 @@ const cloneScriptCharacters = (characters = []) => (Array.isArray(characters) ? 
     imageUrl: String(character.imageUrl || ""),
     imagePositionX: normalizeImagePosition(character.imagePositionX),
     imagePositionY: normalizeImagePosition(character.imagePositionY),
+    imageScale: normalizeImageScale(character.imageScale),
     profile: String(character.profile || character.setting || ""),
     background: String(character.background || character.backstory || ""),
     recordingFolderUrl: String(character.recordingFolderUrl || character.driveFolderUrl || ""),
@@ -352,6 +373,7 @@ export const createRecordingProject = ({ episodeId = "", title = "新しい収�
   questions: [],
   scheduleItems: [],
   announcements: [],
+  sharedLinks: [],
   sharedAt: "",
   updatedAt: new Date().toISOString()
 });
@@ -607,6 +629,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       imageUrl: String(character.imageUrl || ""),
       imagePositionX: normalizeImagePosition(character.imagePositionX),
       imagePositionY: normalizeImagePosition(character.imagePositionY),
+      imageScale: normalizeImageScale(character.imageScale),
       profile: String(character.profile || character.setting || ""),
       background: String(character.background || character.backstory || ""),
       recordingFolderUrl: String(character.recordingFolderUrl || character.driveFolderUrl || ""),
@@ -644,6 +667,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       imageUrl: imageSource.imageUrl,
       imagePositionX: imageSource.imagePositionX,
       imagePositionY: imageSource.imagePositionY,
+      imageScale: imageSource.imageScale,
       profile: target.profile || firstValue("profile"),
       background: target.background || firstValue("background"),
       recordingFolderUrl: target.recordingFolderUrl || firstValue("recordingFolderUrl"),
@@ -670,6 +694,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
         imageUrl: "",
         imagePositionX: 50,
         imagePositionY: 50,
+        imageScale: 1.12,
         profile: "",
         background: "",
         recordingFolderUrl: "",
@@ -820,6 +845,12 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       body: String(announcement.body || ""),
       priority: announcement.priority === "重要" ? "重要" : "通常",
       publishedAt: String(announcement.publishedAt || new Date().toISOString())
+    })),
+    sharedLinks: (Array.isArray(project.sharedLinks) ? project.sharedLinks : []).map((link, linkIndex) => ({
+      id: link.id || createLocalId("shared_link"),
+      title: String(link.title || link.label || `共有URL ${linkIndex + 1}`),
+      url: String(link.url || ""),
+      notes: String(link.notes || link.description || "")
     })),
     sharedAt: project.sharedAt || "",
     updatedAt: project.updatedAt || ""
@@ -1576,6 +1607,78 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
   }
 
   return rows;
+};
+
+export const getCharacterDialogueCounts = (project = {}) => {
+  const characters = Array.isArray(project.characters) ? project.characters : [];
+  const lines = Array.isArray(project.lines) ? project.lines : [];
+  const counts = Object.fromEntries(characters.map((character) => [character.id, 0]));
+  const knownNames = characters.map((character) => character.name);
+  const characterIdByName = new Map(characters.map((character) => [
+    normalizeCharacterNameKey(getCanonicalCharacterName(character.name, knownNames)),
+    character.id
+  ]));
+
+  lines.forEach((line) => {
+    if (line.kind !== "direction" && Object.hasOwn(counts, line.characterId)) {
+      counts[line.characterId] += 1;
+    }
+    if (!line.manualBody || !String(line.text || "").trim()) return;
+    parseGoogleDocsScript(line.text, knownNames).forEach((row) => {
+      if (row.sourceKind === "direction" || row.speaker === "ト書き") return;
+      const canonicalName = getCanonicalCharacterName(row.speaker, knownNames);
+      const characterId = characterIdByName.get(normalizeCharacterNameKey(canonicalName));
+      if (characterId) counts[characterId] += 1;
+    });
+  });
+
+  return counts;
+};
+
+export const getRecordingDisplayProject = (project = {}) => {
+  const characters = Array.isArray(project.characters) ? project.characters : [];
+  const knownNames = characters.map((character) => character.name);
+  const characterIdByName = new Map(characters.map((character) => [
+    normalizeCharacterNameKey(getCanonicalCharacterName(character.name, knownNames)),
+    character.id
+  ]));
+  const lines = (Array.isArray(project.lines) ? project.lines : []).flatMap((line) => {
+    if (!line.manualBody || !String(line.text || "").trim()) return [line];
+    const parsedRows = parseGoogleDocsScript(line.text, knownNames);
+    const resolvedRows = parsedRows.map((row, rowIndex) => {
+      const isDirection = row.sourceKind === "direction" || row.speaker === "ト書き";
+      const canonicalName = isDirection ? "" : getCanonicalCharacterName(row.speaker, knownNames);
+      const characterId = canonicalName
+        ? characterIdByName.get(normalizeCharacterNameKey(canonicalName)) || ""
+        : "";
+      const resolvedAsDialogue = Boolean(characterId) && !isDirection;
+      const fallbackPrefix = !isDirection && !characterId && row.speaker ? `${row.speaker}：` : "";
+      return {
+        ...line,
+        id: `${line.id}__display_${row.sourceOrder ?? rowIndex}`,
+        characterId: resolvedAsDialogue ? characterId : "",
+        kind: resolvedAsDialogue ? "dialogue" : "direction",
+        manualBody: false,
+        derivedFromManualBody: true,
+        sourceLineId: line.id,
+        text: `${fallbackPrefix}${row.text || ""}`.trim(),
+        direction: resolvedAsDialogue ? String(row.direction || "") : "",
+        fileName: "",
+        recordingUrl: "",
+        recordingFileName: "",
+        actorNote: "",
+        directorNote: ""
+      };
+    });
+    return resolvedRows.some((row) => row.kind === "dialogue") ? resolvedRows : [line];
+  });
+
+  return {
+    ...project,
+    lines: lines.map((line, index) => line.derivedFromManualBody
+      ? { ...line, displayOrder: index + 1 }
+      : line)
+  };
 };
 
 const normalizeParsedTableRow = (row = {}) => {
