@@ -1748,6 +1748,10 @@ function TasksView({
     try {
       const result = await onCreateAuditionForm(project.id, character.id);
       const imageFiles = Array.isArray(result.imageFiles) ? result.imageFiles : [];
+      if (!imageFiles.length) {
+        setAutomationMessage(`${character.name}の作成済みフォームを確認し、ツールへ反映しました。`);
+        return;
+      }
       const saveResult = await saveAuditionImageFiles(imageFiles);
       if (!saveResult.saved && imageFiles.length) downloadAuditionImageFiles(imageFiles);
       setAutomationMessage(saveResult.saved

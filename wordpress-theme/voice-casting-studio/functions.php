@@ -1503,7 +1503,7 @@ function vcs_crop_audition_header(array $generated): array|WP_Error
     }
 }
 
-function vcs_call_audition_apps_script(string $url, string $secret, array $payload): array|WP_Error
+function vcs_call_audition_apps_script(string $url, string $secret, string $action, array $payload): array|WP_Error
 {
     $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
     if ('https' !== wp_parse_url($url, PHP_URL_SCHEME) || 'script.google.com' !== $host) {
@@ -1511,23 +1511,91 @@ function vcs_call_audition_apps_script(string $url, string $secret, array $paylo
     }
     $response = wp_remote_post($url, [
         'timeout' => 150,
-        'redirection' => 5,
+        'redirection' => 0,
         'headers' => ['Content-Type' => 'application/json; charset=utf-8'],
-        'body' => wp_json_encode(['secret' => $secret, 'action' => 'createAuditionForm'] + $payload),
+        'body' => wp_json_encode(['secret' => $secret, 'action' => $action] + $payload),
         'data_format' => 'body',
     ]);
     if (is_wp_error($response)) {
         return new WP_Error('vcs_apps_script_unreachable', 'Google Driveへ接続できませんでした。', ['status' => 502]);
     }
-    $result = json_decode(wp_remote_retrieve_body($response), true);
-    if (wp_remote_retrieve_response_code($response) < 200
-        || wp_remote_retrieve_response_code($response) >= 300
+
+    $response_code = wp_remote_retrieve_response_code($response);
+    if ($response_code >= 300 && $response_code < 400) {
+        $redirect_url = wp_remote_retrieve_header($response, 'location');
+        $redirect_host = strtolower((string) wp_parse_url($redirect_url, PHP_URL_HOST));
+        if ('https' !== wp_parse_url($redirect_url, PHP_URL_SCHEME)
+            || 'script.googleusercontent.com' !== $redirect_host) {
+            return new WP_Error('vcs_apps_script_redirect_invalid', 'Google連携から安全な応答を受け取れませんでした。', ['status' => 502]);
+        }
+        $response = wp_remote_get($redirect_url, [
+            'timeout' => 150,
+            'redirection' => 2,
+        ]);
+        if (is_wp_error($response)) {
+            return new WP_Error('vcs_apps_script_unreachable', 'Google Driveから作成結果を受け取れませんでした。', ['status' => 502]);
+        }
+        $response_code = wp_remote_retrieve_response_code($response);
+    }
+
+    $response_body = wp_remote_retrieve_body($response);
+    $result = json_decode($response_body, true);
+    if ($response_code < 200
+        || $response_code >= 300
         || !is_array($result)
         || empty($result['ok'])) {
-        $message = sanitize_text_field((string) ($result['error'] ?? 'Googleフォームを作成できませんでした。'));
+        $message = sanitize_text_field((string) ($result['error'] ?? 'Google連携から作成結果を受け取れませんでした。'));
         return new WP_Error('vcs_apps_script_error', $message, ['status' => 502]);
     }
     return $result;
+}
+
+function vcs_store_audition_form_result(
+    array $data,
+    int $project_index,
+    array $project,
+    string $character_id,
+    array $google_result,
+    array $image_files = []
+): WP_REST_Response|WP_Error {
+    $progress_items = is_array($project['auditionRoleProgress'] ?? null) ? $project['auditionRoleProgress'] : [];
+    $existing_progress = [];
+    foreach ($progress_items as $progress) {
+        if (is_array($progress) && (string) ($progress['characterId'] ?? '') === $character_id) {
+            $existing_progress = $progress;
+            break;
+        }
+    }
+    $progress = array_merge($existing_progress, [
+        'characterId' => $character_id,
+        'formCreated' => true,
+        'recruitmentStarted' => (bool) ($existing_progress['recruitmentStarted'] ?? false),
+        'formEditUrl' => esc_url_raw((string) ($google_result['formEditUrl'] ?? '')),
+        'formResponderUrl' => esc_url_raw((string) ($google_result['formResponderUrl'] ?? '')),
+        'headerImageUrl' => esc_url_raw((string) ($google_result['headerImageUrl'] ?? '')),
+        'socialImageUrl' => esc_url_raw((string) ($google_result['socialImageUrl'] ?? '')),
+        'createdAt' => sanitize_text_field((string) ($google_result['createdAt'] ?? current_time('c'))),
+        'updatedAt' => current_time('c'),
+    ]);
+    $found_progress = false;
+    foreach ($progress_items as $index => $item) {
+        if (is_array($item) && (string) ($item['characterId'] ?? '') === $character_id) {
+            $progress_items[$index] = $progress;
+            $found_progress = true;
+        }
+    }
+    if (!$found_progress) $progress_items[] = $progress;
+    $data['recordingProjects'][$project_index]['auditionRoleProgress'] = array_values($progress_items);
+    $write = vcs_write_workspace($data);
+    if (is_wp_error($write)) return $write;
+
+    return rest_ensure_response([
+        'ok' => true,
+        'progress' => $progress,
+        'imageFiles' => $image_files,
+        'recovered' => !empty($google_result['recovered']),
+        'headerThemeNeedsManualSelection' => true,
+    ]);
 }
 
 function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Response|WP_Error
@@ -1588,13 +1656,30 @@ function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Respon
     set_transient($lock_key, '1', 10 * MINUTE_IN_SECONDS);
 
     try {
+        $project_title = trim((string) ($project['title'] ?? 'Voice Cast Studio'));
+        $request_key = substr(hash_hmac('sha256', $project_id . '|' . $character_id, $apps_script_secret), 0, 48);
+        $lookup_result = vcs_call_audition_apps_script($apps_script_url, $apps_script_secret, 'lookupAuditionForm', [
+            'requestKey' => $request_key,
+            'projectTitle' => $project_title,
+            'roleName' => $role_name,
+        ]);
+        if (is_wp_error($lookup_result)) return $lookup_result;
+        if (!empty($lookup_result['found'])) {
+            return vcs_store_audition_form_result(
+                $data,
+                $project_index,
+                $project,
+                $character_id,
+                $lookup_result
+            );
+        }
+
         $character_image = vcs_load_audition_image((string) ($character['imageUrl'] ?? ''));
         if (is_wp_error($character_image)) return $character_image;
         $logo_image = vcs_get_audition_logo_image();
         if (is_wp_error($logo_image)) return $logo_image;
         $profile = trim(wp_strip_all_tags((string) ($character['profile'] ?? '')));
         $profile = function_exists('mb_substr') ? mb_substr($profile, 0, 700) : substr($profile, 0, 700);
-        $project_title = trim((string) ($project['title'] ?? 'Voice Cast Studio'));
         $common_prompt = "Input image 1 is the official character reference. Preserve the same character identity, face, hairstyle, outfit, colors, and overall design. Input image 2 is the official Umbrella Parade logo; reproduce it faithfully without changing its lettering or proportions. Do not add other characters, third-party logos, watermarks, or unreadable decorative text. Project: {$project_title}. Role: {$role_name}. Character notes: {$profile}.";
 
         $header_prompt = $common_prompt . " Create polished Japanese voice-actor audition key art for a Google Forms header. Use a cinematic but readable composition with the character as the clear subject and the Umbrella Parade logo visibly integrated. Include the exact Japanese title 『{$role_name}』役オーディション, spelled exactly. Keep every essential face, logo, and title element inside the central horizontal 4:1 safe band because the generated 1600x544 image will be center-cropped to 1600x400. Balanced contrast, professional production artwork.";
@@ -1607,8 +1692,7 @@ function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Respon
         $social_image = vcs_generate_audition_image($api_key, $social_prompt, '1792x1008', [$character_image, $logo_image]);
         if (is_wp_error($social_image)) return $social_image;
 
-        $request_key = substr(hash_hmac('sha256', $project_id . '|' . $character_id, $apps_script_secret), 0, 48);
-        $google_result = vcs_call_audition_apps_script($apps_script_url, $apps_script_secret, [
+        $google_result = vcs_call_audition_apps_script($apps_script_url, $apps_script_secret, 'createAuditionForm', [
             'requestKey' => $request_key,
             'projectTitle' => $project_title,
             'roleName' => $role_name,
@@ -1617,47 +1701,18 @@ function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Respon
         ]);
         if (is_wp_error($google_result)) return $google_result;
 
-        $progress_items = is_array($project['auditionRoleProgress'] ?? null) ? $project['auditionRoleProgress'] : [];
-        $existing_progress = [];
-        foreach ($progress_items as $progress) {
-            if (is_array($progress) && (string) ($progress['characterId'] ?? '') === $character_id) {
-                $existing_progress = $progress;
-                break;
-            }
-        }
-        $progress = array_merge($existing_progress, [
-            'characterId' => $character_id,
-            'formCreated' => true,
-            'recruitmentStarted' => (bool) ($existing_progress['recruitmentStarted'] ?? false),
-            'formEditUrl' => esc_url_raw((string) ($google_result['formEditUrl'] ?? '')),
-            'formResponderUrl' => esc_url_raw((string) ($google_result['formResponderUrl'] ?? '')),
-            'headerImageUrl' => esc_url_raw((string) ($google_result['headerImageUrl'] ?? '')),
-            'socialImageUrl' => esc_url_raw((string) ($google_result['socialImageUrl'] ?? '')),
-            'createdAt' => sanitize_text_field((string) ($google_result['createdAt'] ?? current_time('c'))),
-            'updatedAt' => current_time('c'),
-        ]);
-        $found_progress = false;
-        foreach ($progress_items as $index => $item) {
-            if (is_array($item) && (string) ($item['characterId'] ?? '') === $character_id) {
-                $progress_items[$index] = $progress;
-                $found_progress = true;
-            }
-        }
-        if (!$found_progress) $progress_items[] = $progress;
-        $data['recordingProjects'][$project_index]['auditionRoleProgress'] = array_values($progress_items);
-        $write = vcs_write_workspace($data);
-        if (is_wp_error($write)) return $write;
-
         $safe_role_name = preg_replace('/[\\\\\/:*?"<>|]+/u', '_', $role_name);
-        return rest_ensure_response([
-            'ok' => true,
-            'progress' => $progress,
-            'imageFiles' => [
+        return vcs_store_audition_form_result(
+            $data,
+            $project_index,
+            $project,
+            $character_id,
+            $google_result,
+            [
                 ['fileName' => $safe_role_name . '_Googleフォームヘッダー_1600x400.png', 'mimeType' => 'image/png', 'base64' => $header_image['base64']],
                 ['fileName' => $safe_role_name . '_SNS_16x9.png', 'mimeType' => 'image/png', 'base64' => $social_image['base64']],
-            ],
-            'headerThemeNeedsManualSelection' => true,
-        ]);
+            ]
+        );
     } finally {
         delete_transient($lock_key);
     }
