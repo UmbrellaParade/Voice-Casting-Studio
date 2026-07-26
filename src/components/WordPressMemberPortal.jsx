@@ -256,7 +256,6 @@ function MemberCharacters({ project, assignedCharacterIds }) {
           <div>
             <header><h3>{character.name}</h3>{assignedCharacterIds.has(character.id) && <span>担当</span>}</header>
             {character.profile && <p>{character.profile}</p>}
-            {character.background && <details><summary>バックグラウンド</summary><p>{character.background}</p></details>}
             {assignedCharacterIds.has(character.id) && character.recordingFolderUrl && (
               <footer><a href={character.recordingFolderUrl} target="_blank" rel="noreferrer"><FolderOpen size={16} />収録フォルダー</a></footer>
             )}

@@ -1752,7 +1752,6 @@ export function RecordingStudio({
           color: ["#168b9a", "#d65285", "#7a63ad", "#b57024", "#2f7d4a", "#5f6d7a"][characters.length % 6],
           imageUrl: "",
           profile: "",
-          background: "",
           recordingFolderUrl: "",
           openChatUrl: ""
         };
@@ -2024,6 +2023,7 @@ export function RecordingStudio({
           id: newId("cast"),
           actorName: "声優さん",
           contact: "",
+          socialUrl: "",
           characterIds: [],
           wpUserId: 0,
           accessKey: createRecordingAccessKey()

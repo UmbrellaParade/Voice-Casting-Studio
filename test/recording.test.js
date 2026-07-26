@@ -38,6 +38,17 @@ test("only lets the questioner resolve an answered question", () => {
   assert.equal(canResolveProductionQuestion({ ...answered, status: "解決済み" }, 11), false);
 });
 
+test("merges legacy character backgrounds and keeps actor social links", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "vel", name: "ヴェル", profile: "人物像", background: "これまでの経歴" }],
+    castMembers: [{ id: "cast_vel", actorName: "声優さん", snsUrl: "https://x.com/example", characterIds: ["vel"] }]
+  });
+
+  assert.equal(project.characters[0].profile, "人物像\n\nこれまでの経歴");
+  assert.equal(project.characters[0].background, "");
+  assert.equal(project.castMembers[0].socialUrl, "https://x.com/example");
+});
+
 test("builds an embeddable Google Drive audio preview URL", () => {
   const sharedUrl = "https://drive.google.com/file/d/abc_DEF-123/view?usp=sharing";
   const previewUrl = "https://drive.google.com/file/d/abc_DEF-123/preview";

@@ -340,6 +340,14 @@ const createLocalId = (prefix) => {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
 };
 
+const mergeCharacterProfile = (profileValue = "", backgroundValue = "") => {
+  const profile = String(profileValue || "").trim();
+  const background = String(backgroundValue || "").trim();
+  if (!background || profile.includes(background)) return profile;
+  if (!profile || background.includes(profile)) return background;
+  return profile ? `${profile}\n\n${background}` : background;
+};
+
 const cloneScriptCharacters = (characters = []) => (Array.isArray(characters) ? characters : [])
   .filter((character) => character && typeof character === "object")
   .map((character, index) => ({
@@ -352,8 +360,8 @@ const cloneScriptCharacters = (characters = []) => (Array.isArray(characters) ? 
     imagePositionX: normalizeImagePosition(character.imagePositionX),
     imagePositionY: normalizeImagePosition(character.imagePositionY),
     imageScale: normalizeImageScale(character.imageScale),
-    profile: String(character.profile || character.setting || ""),
-    background: String(character.background || character.backstory || ""),
+    profile: mergeCharacterProfile(character.profile || character.setting, character.background || character.backstory),
+    background: "",
     recordingFolderUrl: String(character.recordingFolderUrl || character.driveFolderUrl || ""),
     openChatUrl: String(character.openChatUrl || character.lineOpenChatUrl || "")
   }));
@@ -550,8 +558,8 @@ export const sampleRecordingProjects = [
         name: "ヴェル",
         color: "#168b9a",
         imageUrl: "",
-        profile: "静かな決意を内側に秘めた主人公。強がりすぎず、相手へのやさしさが声に残る人物。",
-        background: "大切な人を守るため、雨の街を離れる決意をした。",
+        profile: "静かな決意を内側に秘めた主人公。強がりすぎず、相手へのやさしさが声に残る人物。\n\n大切な人を守るため、雨の街を離れる決意をした。",
+        background: "",
         recordingFolderUrl: "",
         openChatUrl: ""
       },
@@ -560,8 +568,8 @@ export const sampleRecordingProjects = [
         name: "アマモリ",
         color: "#d65285",
         imageUrl: "",
-        profile: "ヴェルの決意を心配しながらも、最後には背中を押す相棒。",
-        background: "ヴェルとは幼い頃から雨の街で過ごしてきた。",
+        profile: "ヴェルの決意を心配しながらも、最後には背中を押す相棒。\n\nヴェルとは幼い頃から雨の街で過ごしてきた。",
+        background: "",
         recordingFolderUrl: "",
         openChatUrl: ""
       },
@@ -581,6 +589,7 @@ export const sampleRecordingProjects = [
         id: "cast_vel",
         actorName: "ヴェル役 声優さん",
         contact: "",
+        socialUrl: "",
         characterIds: ["character_vel"],
         accessKey: ""
       },
@@ -588,6 +597,7 @@ export const sampleRecordingProjects = [
         id: "cast_amamori",
         actorName: "アマモリ役 声優さん",
         contact: "",
+        socialUrl: "",
         characterIds: ["character_amamori"],
         accessKey: ""
       }
@@ -790,8 +800,8 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       imagePositionX: normalizeImagePosition(character.imagePositionX),
       imagePositionY: normalizeImagePosition(character.imagePositionY),
       imageScale: normalizeImageScale(character.imageScale),
-      profile: String(character.profile || character.setting || ""),
-      background: String(character.background || character.backstory || ""),
+      profile: mergeCharacterProfile(character.profile || character.setting, character.background || character.backstory),
+      background: "",
       recordingFolderUrl: String(character.recordingFolderUrl || character.driveFolderUrl || ""),
       openChatUrl: String(character.openChatUrl || character.lineOpenChatUrl || "")
     };
@@ -839,7 +849,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       imagePositionY: imageSource.imagePositionY,
       imageScale: imageSource.imageScale,
       profile: target.profile || firstValue("profile"),
-      background: target.background || firstValue("background"),
+      background: "",
       recordingFolderUrl: target.recordingFolderUrl || firstValue("recordingFolderUrl"),
       openChatUrl: target.openChatUrl || firstValue("openChatUrl")
     };
@@ -1005,6 +1015,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       id: member.id || createLocalId("cast"),
       actorName: member.actorName || `声優さん${memberIndex + 1}`,
       contact: member.contact || "",
+      socialUrl: String(member.socialUrl || member.snsUrl || member.socialMediaUrl || ""),
       characterIds: [...new Set(
         (Array.isArray(member.characterIds) ? member.characterIds : [])
           .map((id) => characterIdAliases.get(id) || id)

@@ -483,6 +483,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
           id: newId("cast"),
           actorName: name,
           contact: "",
+          socialUrl: "",
           characterIds: [characterId],
           wpUserId: 0,
           accessKey: ""
@@ -557,7 +558,6 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
         imagePositionY: 50,
         imageScale: 1.12,
         profile: "",
-        background: "",
         recordingFolderUrl: "",
         openChatUrl: ""
       }]
@@ -593,7 +593,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
 
   const addCastMember = () => updateProject((current) => ({
     ...current,
-    castMembers: [...current.castMembers, { id: newId("cast"), actorName: "声優さん", contact: "", characterIds: [], wpUserId: 0, accessKey: "" }]
+    castMembers: [...current.castMembers, { id: newId("cast"), actorName: "声優さん", contact: "", socialUrl: "", characterIds: [], wpUserId: 0, accessKey: "" }]
   }));
 
   const patchCastMember = (memberId, patch) => updateProject((current) => ({
@@ -665,10 +665,12 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
             </div>
           </header>
           <div className="character-field-grid">
-            <label><span>担当声優</span><input value={actorNameDrafts[character.id] ?? assignedMember?.actorName ?? ""} placeholder="声優さんの名前を入力" onChange={(event) => setActorNameDrafts((current) => ({ ...current, [character.id]: event.target.value }))} onBlur={(event) => assignActorName(character.id, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>
+            <div className="character-actor-fields">
+              <label><span>担当声優</span><input value={actorNameDrafts[character.id] ?? assignedMember?.actorName ?? ""} placeholder="声優さんの名前を入力" onChange={(event) => setActorNameDrafts((current) => ({ ...current, [character.id]: event.target.value }))} onBlur={(event) => assignActorName(character.id, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>
+              <label><span>担当者SNS</span><div className="character-social-field"><input value={assignedMember?.socialUrl || ""} placeholder={assignedMember ? "https://x.com/..." : "担当声優を先に入力"} disabled={!assignedMember} onChange={(event) => patchCastMember(assignedMember.id, { socialUrl: event.target.value })} /><a className={`icon-button character-social-open${isWebUrl(assignedMember?.socialUrl) ? "" : " disabled"}`} href={isWebUrl(assignedMember?.socialUrl) ? assignedMember.socialUrl : undefined} target="_blank" rel="noreferrer" aria-label="担当者SNSを開く" aria-disabled={!isWebUrl(assignedMember?.socialUrl)} title="担当者SNSを開く"><ExternalLink size={16} /></a></div></label>
+            </div>
             <label><span>キャラクター画像URL</span><input value={character.imageUrl.startsWith("data:") ? "" : character.imageUrl} placeholder={character.imageUrl.startsWith("data:") ? "画像を登録済み" : "https://..."} onChange={(event) => patchCharacter(character.id, { imageUrl: event.target.value })} /></label>
             <label className="wide"><span>設定・人物像</span><textarea value={character.profile} onChange={(event) => patchCharacter(character.id, { profile: event.target.value })} /></label>
-            <label className="wide"><span>バックグラウンド</span><textarea value={character.background} onChange={(event) => patchCharacter(character.id, { background: event.target.value })} /></label>
             <label><span>収録フォルダー</span><input value={character.recordingFolderUrl} placeholder="Google DriveフォルダーURL" onChange={(event) => patchCharacter(character.id, { recordingFolderUrl: event.target.value })} /></label>
           </div>
           <footer>
@@ -1285,7 +1287,7 @@ function ScheduleView({ project, updateProject, canEditScript = true }) {
 
 const PAGE_COPY = {
   home: ["ホーム", "収録、確認、質問、締切を作品単位でまとめて確認します。"],
-  characters: ["キャラクター", "人物設定、担当声優、セリフ色と収録フォルダーを管理します。"],
+  characters: ["キャラクター", "人物設定、担当声優、担当者SNSと収録フォルダーを管理します。"],
   links: ["共有リンク", "キャラクター別の収録フォルダーと作品全体の共有URLを管理します。"],
   materials: ["素材", "音源とサムネイルを種類別に登録し、その場で確認します。"],
   questions: ["質問", "作品やセリフに紐づく質問と回答状況を共有します。"],
