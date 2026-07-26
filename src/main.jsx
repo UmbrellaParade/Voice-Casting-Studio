@@ -447,7 +447,7 @@ function App() {
   const logoSrc = publicAsset("assets/umbrella-parade-logo.png");
   const [data, setData] = useState(() => WORDPRESS_RUNTIME ? sampleData : loadData());
   const [initialUiState] = useState(readUiState);
-  const [active, setActive] = useState(() => (MAIN_NAV_KEYS.has(initialUiState.active) ? initialUiState.active : "home"));
+  const [active, setActive] = useState("recording");
   const [selectedEpisodeId, setSelectedEpisodeId] = useState(() =>
     data.episodes.some((episode) => episode.id === initialUiState.selectedEpisodeId)
       ? initialUiState.selectedEpisodeId
@@ -584,7 +584,7 @@ function App() {
   }, [active, selectedEpisodeId, selectedRecordingProjectId, collapsibleState, sharedPayload, restorePayload]);
 
   useEffect(() => {
-    if (!MAIN_NAV_KEYS.has(active)) setActive("home");
+    if (!MAIN_NAV_KEYS.has(active)) setActive("recording");
   }, [active]);
 
   useEffect(() => {

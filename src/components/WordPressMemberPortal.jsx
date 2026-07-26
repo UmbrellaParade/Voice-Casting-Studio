@@ -479,7 +479,7 @@ function MemberSchedule({ project }) {
 
 export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voice Cast Studio", connectionState, onRefresh, onUpdateLine, onCreateQuestion, onResolveQuestion }) {
   const projects = data.recordingProjects || [];
-  const [active, setActive] = useState("home");
+  const [active, setActive] = useState("script");
   const [projectId, setProjectId] = useState(projects[0]?.id || "");
   useEffect(() => { if (!projects.some((item) => item.id === projectId)) setProjectId(projects[0]?.id || ""); }, [projects, projectId]);
   const project = projects.find((item) => item.id === projectId) || projects[0];
