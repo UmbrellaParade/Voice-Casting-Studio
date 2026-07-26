@@ -5,6 +5,7 @@ import { makeGoogleDrivePreviewUrl, makePlayableEmbedUrl, migrateData } from "..
 
 import {
   archiveScriptVersion,
+  canResolveProductionQuestion,
   getCharacterDialogueCounts,
   getCharacterImageCropStyle,
   getCharacterScriptName,
@@ -27,6 +28,15 @@ import {
   repairScriptHierarchy,
   restoreScriptSnapshot
 } from "../src/lib/recording.js";
+
+test("only lets the questioner resolve an answered question", () => {
+  const answered = { wpUserId: 11, answer: "こちらでお願いします。", status: "回答済み" };
+  assert.equal(canResolveProductionQuestion(answered, 11), true);
+  assert.equal(canResolveProductionQuestion(answered, 12), false);
+  assert.equal(canResolveProductionQuestion({ ...answered, answer: "" }, 11), false);
+  assert.equal(canResolveProductionQuestion({ ...answered, status: "未回答" }, 11), false);
+  assert.equal(canResolveProductionQuestion({ ...answered, status: "解決済み" }, 11), false);
+});
 
 test("builds an embeddable Google Drive audio preview URL", () => {
   const sharedUrl = "https://drive.google.com/file/d/abc_DEF-123/view?usp=sharing";

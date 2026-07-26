@@ -45,6 +45,9 @@ const wordpressRequest = async (path, options = {}) => {
       const now = new Date().toISOString();
       return { ok: true, question: { id: `question_preview_${Date.now()}`, lineId: body.lineId || "", characterId: "", authorName: runtime.currentUser.name, wpUserId: runtime.currentUser.id, body: body.body, answer: "", status: "未回答", createdAt: now, updatedAt: now } };
     }
+    if (path === "question/resolve") {
+      return { ok: true, question: { id: body.questionId, status: "解決済み", updatedAt: new Date().toISOString() } };
+    }
     if (path === "image") return { id: 0, url: "" };
   }
   const response = await fetch(`${runtime.restUrl}${String(path || "").replace(/^\/+/, "")}`, {
@@ -96,6 +99,11 @@ export const updateWordPressRecordingLine = ({ projectId, lineId, patch, lineCon
 export const createWordPressQuestion = ({ projectId, lineId = "", body }) => wordpressRequest("question", {
   method: "POST",
   body: JSON.stringify({ projectId, lineId, body })
+});
+
+export const resolveWordPressQuestion = ({ projectId, questionId }) => wordpressRequest("question/resolve", {
+  method: "POST",
+  body: JSON.stringify({ projectId, questionId })
 });
 
 export const uploadWordPressImage = (file) => {

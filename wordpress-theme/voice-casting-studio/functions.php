@@ -607,6 +607,39 @@ function vcs_merge_concurrent_actor_data(array $incoming, array $current): array
             }
         }
 
+        $current_questions = [];
+        foreach (($current_project['questions'] ?? []) as $question) {
+            $current_questions[(string) ($question['id'] ?? '')] = $question;
+        }
+        foreach (($project['questions'] ?? []) as $question_index => $question) {
+            $question_id = (string) ($question['id'] ?? '');
+            $current_question = $current_questions[$question_id] ?? null;
+            if (!is_array($current_question)) {
+                if ('解決済み' === ($question['status'] ?? '')) {
+                    $incoming['recordingProjects'][$project_index]['questions'][$question_index]['status'] =
+                        '' !== trim((string) ($question['answer'] ?? '')) ? '回答済み' : '未回答';
+                }
+                continue;
+            }
+
+            $incoming_status = (string) ($question['status'] ?? '未回答');
+            $current_status = (string) ($current_question['status'] ?? '未回答');
+            // Only the questioner endpoint may create a resolved transition.
+            if ('解決済み' === $current_status || ('解決済み' === $incoming_status && '解決済み' !== $current_status)) {
+                $incoming['recordingProjects'][$project_index]['questions'][$question_index]['status'] = $current_status;
+            }
+
+            $incoming_time = strtotime((string) ($question['updatedAt'] ?? '')) ?: 0;
+            $current_time = strtotime((string) ($current_question['updatedAt'] ?? '')) ?: 0;
+            if ($current_time > $incoming_time) {
+                foreach (['status', 'updatedAt'] as $key) {
+                    if (array_key_exists($key, $current_question)) {
+                        $incoming['recordingProjects'][$project_index]['questions'][$question_index][$key] = $current_question[$key];
+                    }
+                }
+            }
+        }
+
         $incoming_question_ids = [];
         foreach (($project['questions'] ?? []) as $question) {
             $incoming_question_ids[(string) ($question['id'] ?? '')] = true;
@@ -814,6 +847,55 @@ function vcs_rest_create_question(WP_REST_Request $request): WP_REST_Response|WP
     return rest_ensure_response(['ok' => true, 'question' => $question]);
 }
 
+function vcs_rest_resolve_question(WP_REST_Request $request): WP_REST_Response|WP_Error
+{
+    $params = $request->get_json_params();
+    $project_id = sanitize_text_field((string) ($params['projectId'] ?? ''));
+    $question_id = sanitize_text_field((string) ($params['questionId'] ?? ''));
+    if ('' === $project_id || '' === $question_id) {
+        return new WP_Error('vcs_question_resolve_required', 'Project and question IDs are required.', ['status' => 400]);
+    }
+
+    $post = vcs_get_workspace_post(false);
+    $data = vcs_decode_workspace($post);
+    $project_index = vcs_find_project_index($data, $project_id);
+    if ($project_index < 0) {
+        return new WP_Error('vcs_project_not_found', 'Project not found.', ['status' => 404]);
+    }
+
+    $question_index = -1;
+    foreach (($data['recordingProjects'][$project_index]['questions'] ?? []) as $index => $question) {
+        if (($question['id'] ?? '') === $question_id) {
+            $question_index = (int) $index;
+            break;
+        }
+    }
+    if ($question_index < 0) {
+        return new WP_Error('vcs_question_not_found', 'Question not found.', ['status' => 404]);
+    }
+
+    $question = $data['recordingProjects'][$project_index]['questions'][$question_index];
+    $question_user_id = (int) ($question['wpUserId'] ?? 0);
+    if ($question_user_id <= 0 || $question_user_id !== get_current_user_id()) {
+        return new WP_Error('vcs_question_resolve_forbidden', 'Only the person who asked this question can resolve it.', ['status' => 403]);
+    }
+    if ('解決済み' === ($question['status'] ?? '')) {
+        return rest_ensure_response(['ok' => true, 'question' => $question]);
+    }
+    if ('回答済み' !== ($question['status'] ?? '') || '' === trim((string) ($question['answer'] ?? ''))) {
+        return new WP_Error('vcs_question_not_answered', 'This question has not been answered yet.', ['status' => 409]);
+    }
+
+    $question['status'] = '解決済み';
+    $question['updatedAt'] = current_time('c');
+    $data['recordingProjects'][$project_index]['questions'][$question_index] = $question;
+    $write = vcs_write_workspace($data);
+    if (is_wp_error($write)) {
+        return $write;
+    }
+    return rest_ensure_response(['ok' => true, 'question' => $question]);
+}
+
 function vcs_rest_upload_image(WP_REST_Request $request): WP_REST_Response|WP_Error
 {
     if (empty($_FILES['file'])) {
@@ -860,6 +942,11 @@ function vcs_register_rest_routes(): void
     register_rest_route(VCS_REST_NAMESPACE, '/question', [
         'methods' => WP_REST_Server::CREATABLE,
         'callback' => 'vcs_rest_create_question',
+        'permission_callback' => 'vcs_rest_logged_in',
+    ]);
+    register_rest_route(VCS_REST_NAMESPACE, '/question/resolve', [
+        'methods' => WP_REST_Server::CREATABLE,
+        'callback' => 'vcs_rest_resolve_question',
         'permission_callback' => 'vcs_rest_logged_in',
     ]);
     register_rest_route(VCS_REST_NAMESPACE, '/image', [

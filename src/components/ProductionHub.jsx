@@ -1208,7 +1208,7 @@ function QuestionsView({ project, updateProject }) {
           <article className={`question-thread status-${question.status}`} key={question.id}>
             <header>
               <div><b>{question.authorName}</b><time>{formatDate(question.createdAt, true)}</time></div>
-              <div><select value={question.status} onChange={(event) => patchQuestion(question.id, { status: event.target.value })}>{PRODUCTION_QUESTION_STATUSES.map((status) => <option key={status}>{status}</option>)}</select><button type="button" className="icon-button danger-icon" title="質問を削除" onClick={() => {
+              <div><span className={`question-status-label status-${question.status}`}>{question.status}</span><button type="button" className="icon-button danger-icon" title="質問を削除" onClick={() => {
                 if (!confirm("この質問を削除しますか？")) return;
                 updateProject((current) => ({ ...current, questions: current.questions.filter((item) => item.id !== question.id) }));
               }}><Trash2 size={16} /></button></div>
@@ -1218,7 +1218,10 @@ function QuestionsView({ project, updateProject }) {
             <label className="question-answer"><span>管理者からの回答</span><textarea value={question.answer} placeholder="回答を入力" onChange={(event) => patchQuestion(question.id, { answer: event.target.value })} /></label>
             <footer>
               <span>最終更新 {formatDate(question.updatedAt, true)}</span>
-              <button type="button" className="secondary" disabled={!question.answer.trim()} onClick={() => patchQuestion(question.id, { status: question.status === "解決済み" ? "回答済み" : "解決済み" })}>{question.status === "解決済み" ? "回答済みに戻す" : "解決済みにする"}</button>
+              <button type="button" className="primary" disabled={!question.answer.trim()} onClick={() => patchQuestion(question.id, { status: question.status === "解決済み" ? "解決済み" : "回答済み" })}>
+                <MessageSquareText size={16} />
+                {question.status === "未回答" ? "回答を確定" : "回答を更新"}
+              </button>
             </footer>
           </article>
         ))}

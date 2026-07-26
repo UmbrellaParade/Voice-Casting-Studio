@@ -40,6 +40,7 @@ import {
   createWordPressQuestion,
   getWordPressRuntime,
   loadWordPressWorkspace,
+  resolveWordPressQuestion,
   saveWordPressWorkspace,
   updateWordPressRecordingLine
 } from "./lib/wordpress.js";
@@ -529,6 +530,23 @@ function App() {
       ...current,
       recordingProjects: current.recordingProjects.map((project) => project.id === projectId
         ? { ...project, questions: [result.question, ...project.questions] }
+        : project)
+    }));
+    return result;
+  };
+
+  const resolveMemberQuestion = async (projectId, questionId) => {
+    const result = await resolveWordPressQuestion({ projectId, questionId });
+    const questionPatch = result.question || { id: questionId, status: "解決済み", updatedAt: new Date().toISOString() };
+    setData((current) => ({
+      ...current,
+      recordingProjects: current.recordingProjects.map((project) => project.id === projectId
+        ? {
+            ...project,
+            questions: project.questions.map((question) => question.id === questionId
+              ? { ...question, ...questionPatch }
+              : question)
+          }
         : project)
     }));
     return result;
@@ -1847,6 +1865,7 @@ ${socialRows || "-"}
         onRefresh={refreshWordPressData}
         onUpdateLine={updateMemberRecordingLine}
         onCreateQuestion={addMemberQuestion}
+        onResolveQuestion={resolveMemberQuestion}
       />
     );
   }

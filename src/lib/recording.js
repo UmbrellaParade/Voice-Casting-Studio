@@ -11,6 +11,16 @@ export const SHARED_LINK_COLORS = [
   "#397c50", "#4b6fa9", "#9b4b45", "#7c5c3d"
 ];
 
+export const canResolveProductionQuestion = (question = {}, userId) => {
+  const questionUserId = Number(question.wpUserId);
+  const currentUserId = Number(userId);
+  return question.status === "回答済み"
+    && Boolean(String(question.answer || "").trim())
+    && Number.isFinite(questionUserId)
+    && Number.isFinite(currentUserId)
+    && questionUserId === currentUserId;
+};
+
 const normalizeSharedLinkColor = (value = "") => {
   const color = String(value || "").trim().toLowerCase();
   return /^#[0-9a-f]{6}$/.test(color) ? color : "";

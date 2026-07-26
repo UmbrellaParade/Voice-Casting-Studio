@@ -20,7 +20,7 @@ import {
   Users
 } from "lucide-react";
 import { getGoogleDriveFileId, isWebUrl, makeDirectAudioDownloadUrl, makeGoogleDrivePreviewUrl, makeImagePreviewUrl } from "../lib/core.js";
-import { getCharacterImageCropStyle, getCharacterName, getCharacterScriptName, getRecordingDisplayProject, getRecordingProgress, parseRubyText, partitionCharactersByScript } from "../lib/recording.js";
+import { canResolveProductionQuestion, getCharacterImageCropStyle, getCharacterName, getCharacterScriptName, getRecordingDisplayProject, getRecordingProgress, parseRubyText, partitionCharactersByScript } from "../lib/recording.js";
 import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
 import { ConceptView } from "./ConceptView.jsx";
 import { ManualView } from "./ManualView.jsx";
@@ -324,11 +324,13 @@ function MemberMaterials({ project }) {
   return <div className="material-library-grid member-materials">{project.materials.map((material) => <article className="material-editor" key={material.id}><header><span className="material-category">{material.category}</span><span>{material.status}</span></header>{material.category === "サムネイル" ? <div className={`material-preview ratio-${material.aspectRatio.replace(":", "-") || "16-9"}`}>{material.url ? <img src={makeImagePreviewUrl(material.url) || material.url} alt={material.title} /> : null}</div> : <PersistentAudioButton material={material} />}<h3>{material.title}</h3>{material.notes && <p>{material.notes}</p>}</article>)}{!project.materials.length && <div className="production-empty-state"><Music2 size={30} /><b>素材はまだありません</b></div>}</div>;
 }
 
-function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQuestion }) {
+function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQuestion, onResolveQuestion }) {
   const lines = project.lines.filter((line) => line.kind !== "direction" && assignedCharacterIds.has(line.characterId));
   const questions = project.questions.filter((question) => Number(question.wpUserId) === Number(currentUser.id) || assignedCharacterIds.has(question.characterId));
   const [draft, setDraft] = useState({ lineId: "", body: "" });
   const [message, setMessage] = useState("");
+  const [resolvingQuestionId, setResolvingQuestionId] = useState("");
+  const [resolveMessages, setResolveMessages] = useState({});
   const submit = async () => {
     if (!draft.body.trim()) return;
     setMessage("送信中…");
@@ -340,14 +342,67 @@ function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQ
       setMessage(error.message);
     }
   };
-  return <div className="production-page-stack"><section className="question-composer"><header><CircleHelp size={20} /><div><h3>質問を送る</h3></div></header><div className="question-composer-fields"><label><span>対象のセリフ</span><select value={draft.lineId} onChange={(event) => setDraft((current) => ({ ...current, lineId: event.target.value }))}><option value="">作品全体</option>{lines.map((line) => <option key={line.id} value={line.id}>{line.chapterTitle} / {line.sceneTitle} / {String(line.order).padStart(3, "0")} {line.text.slice(0, 30)}</option>)}</select></label><label className="wide"><span>質問内容</span><textarea value={draft.body} onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))} /></label></div><div className="member-question-submit"><span>{message}</span><button type="button" className="primary" disabled={!draft.body.trim()} onClick={submit}><MessageSquareText size={16} />登録</button></div></section><div className="question-thread-list">{questions.map((question) => { const line = project.lines.find((item) => item.id === question.lineId); return <article className={`question-thread status-${question.status}`} key={question.id}><header><div><b>{question.authorName}</b><time>{formatDate(question.createdAt)}</time></div><span>{question.status}</span></header>{line && <div className="question-line-context"><span>{line.chapterTitle} / {line.sceneTitle} / {getCharacterName(project, line.characterId)}</span><p><RubyText text={line.text} /></p></div>}<p className="question-body">{question.body}</p>{question.answer && <div className="member-question-answer"><b>管理者からの回答</b><p>{question.answer}</p></div>}</article>; })}{!questions.length && <div className="production-empty-state"><CheckCircle2 size={30} /><b>質問はまだありません</b></div>}</div></div>;
+  const resolveQuestion = async (questionId) => {
+    setResolvingQuestionId(questionId);
+    setResolveMessages((current) => ({ ...current, [questionId]: "送信中…" }));
+    try {
+      await onResolveQuestion(project.id, questionId);
+      setResolveMessages((current) => ({ ...current, [questionId]: "解決済みにしました。" }));
+    } catch (error) {
+      setResolveMessages((current) => ({ ...current, [questionId]: error.message }));
+    } finally {
+      setResolvingQuestionId("");
+    }
+  };
+  return (
+    <div className="production-page-stack">
+      <section className="question-composer">
+        <header><CircleHelp size={20} /><div><h3>質問を送る</h3></div></header>
+        <div className="question-composer-fields">
+          <label><span>対象のセリフ</span><select value={draft.lineId} onChange={(event) => setDraft((current) => ({ ...current, lineId: event.target.value }))}><option value="">作品全体</option>{lines.map((line) => <option key={line.id} value={line.id}>{line.chapterTitle} / {line.sceneTitle} / {String(line.order).padStart(3, "0")} {line.text.slice(0, 30)}</option>)}</select></label>
+          <label className="wide"><span>質問内容</span><textarea value={draft.body} onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))} /></label>
+        </div>
+        <div className="member-question-submit"><span>{message}</span><button type="button" className="primary" disabled={!draft.body.trim()} onClick={submit}><MessageSquareText size={16} />登録</button></div>
+      </section>
+      <div className="question-thread-list">
+        {questions.map((question) => {
+          const line = project.lines.find((item) => item.id === question.lineId);
+          const canResolve = canResolveProductionQuestion(question, currentUser.id);
+          const isQuestioner = Number(question.wpUserId) === Number(currentUser.id);
+          return (
+            <article className={`question-thread status-${question.status}`} key={question.id}>
+              <header>
+                <div><b>{question.authorName}</b><time>{formatDate(question.createdAt)}</time></div>
+                <span className={`question-status-label status-${question.status}`}>{question.status}</span>
+              </header>
+              {line && <div className="question-line-context"><span>{line.chapterTitle} / {line.sceneTitle} / {getCharacterName(project, line.characterId)}</span><p><RubyText text={line.text} /></p></div>}
+              <p className="question-body">{question.body}</p>
+              {question.answer && (
+                <div className="member-question-answer">
+                  <b>管理者からの回答</b>
+                  <p>{question.answer}</p>
+                  {isQuestioner && (
+                    <div className={`member-question-resolution${question.status === "解決済み" ? " resolved" : ""}`}>
+                      <span>{resolveMessages[question.id] || (question.status === "解決済み" ? "回答を確認済みです。" : "回答を確認できたら解決済みにしてください。")}</span>
+                      {canResolve && <button type="button" className="secondary" disabled={resolvingQuestionId === question.id} onClick={() => resolveQuestion(question.id)}><CheckCircle2 size={16} />解決済みにする</button>}
+                    </div>
+                  )}
+                </div>
+              )}
+            </article>
+          );
+        })}
+        {!questions.length && <div className="production-empty-state"><CheckCircle2 size={30} /><b>質問はまだありません</b></div>}
+      </div>
+    </div>
+  );
 }
 
 function MemberSchedule({ project }) {
   return <div className="production-page-stack"><MemberKeyDates project={project} /><div className="member-schedule-list">{[...project.scheduleItems].sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999")).map((item) => <article key={item.id}><time>{formatDate(item.date)}</time><div><span>{item.type} / {item.status}</span><h3>{item.title}</h3>{item.notes && <p>{item.notes}</p>}</div></article>)}</div></div>;
 }
 
-export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voice Cast Studio", connectionState, onRefresh, onUpdateLine, onCreateQuestion }) {
+export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voice Cast Studio", connectionState, onRefresh, onUpdateLine, onCreateQuestion, onResolveQuestion }) {
   const projects = data.recordingProjects || [];
   const [active, setActive] = useState("home");
   const [projectId, setProjectId] = useState(projects[0]?.id || "");
@@ -374,7 +429,7 @@ export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voic
         {active === "characters" && <MemberCharacters project={project} assignedCharacterIds={assignedCharacterIds} />}
         {active === "links" && <MemberLinks project={project} assignedCharacterIds={assignedCharacterIds} />}
         {active === "materials" && <MemberMaterials project={project} />}
-        {active === "questions" && <MemberQuestions project={project} assignedCharacterIds={assignedCharacterIds} currentUser={runtime.currentUser || {}} onCreateQuestion={onCreateQuestion} />}
+        {active === "questions" && <MemberQuestions project={project} assignedCharacterIds={assignedCharacterIds} currentUser={runtime.currentUser || {}} onCreateQuestion={onCreateQuestion} onResolveQuestion={onResolveQuestion} />}
         {active === "schedule" && <MemberSchedule project={project} />}
         {active === "manual" && <ManualView viewerRole="actor" showTitle={false} onNavigate={setActive} />}
       </section>

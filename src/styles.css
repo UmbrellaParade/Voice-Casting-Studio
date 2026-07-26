@@ -1911,6 +1911,32 @@ h1 {
   font-weight: 900;
 }
 
+.question-status-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid #d8cec1;
+  border-radius: 5px;
+  background: #f5efe5;
+  color: #705a2d;
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.question-status-label.status-回答済み {
+  border-color: #9ccfd3;
+  background: #edf8f7;
+  color: #126f78;
+}
+
+.question-status-label.status-解決済み {
+  border-color: #acd0b8;
+  background: #eef8f1;
+  color: #2f704c;
+}
+
 .question-line-context {
   display: grid;
   gap: 4px;
