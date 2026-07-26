@@ -31,10 +31,43 @@ const OWNER_STEPS = [
 ];
 
 const ACTOR_STEPS = [
-  ["1", "担当を確認", "ホームで担当作品、締切、お知らせを確認します。"],
-  ["2", "台本を読む", "章・シーン・キャラクターを選び、担当セリフを確認します。"],
-  ["3", "録音を提出", "担当フォルダーへ録音を置き、台本で収録済みにチェックします。"],
-  ["4", "結果を確認", "OK・リテイク・管理者メモを確認し、必要なら再提出します。"]
+  ["1", "最新情報を読む", "ホームで担当作品、締切、お知らせ、リテイクの有無を確認します。"],
+  ["2", "担当セリフを表示", "台本で章を選び、自分のキャラクターボタンから担当セリフを表示します。"],
+  ["3", "Driveへ録音を置く", "共有リンクから担当の収録フォルダーを開き、録音ファイルをアップロードします。"],
+  ["4", "レ点で完了を伝える", "アップロード後、台本の「このセリフは収録済み」にチェックします。"]
+];
+
+const ACTOR_PRIORITY_AREAS = [
+  {
+    target: "script",
+    label: "台本",
+    title: "担当セリフを確認する",
+    detail: "章と自分の人物ボタンを選び、通常・ナレーション・心の声・イヤモニをまとめて確認します。",
+    icon: FileText
+  },
+  {
+    target: "links",
+    label: "共有リンク",
+    title: "収録フォルダーを開く",
+    detail: "担当キャラクターのGoogle Driveフォルダーを開き、録音ファイルをアップロードします。",
+    icon: FolderOpen
+  },
+  {
+    target: "questions",
+    label: "質問",
+    title: "分からない点を送る",
+    detail: "台本を書き換えず、対象のセリフを選んで制作オーナーへ質問します。",
+    icon: MessageSquareText
+  }
+];
+
+const ACTOR_RECORDING_ROUTE = [
+  "ホームで締切、お知らせ、リテイクの有無を確認する",
+  "台本で収録する章と自分のキャラクターボタンを選ぶ",
+  "セリフ、演技指示、通常・心の声などの読み分けを確認する",
+  "共有リンクから担当のGoogle Drive収録フォルダーを開く",
+  "録音ファイルをアップロードしてから、台本の収録済みにチェックする",
+  "後日、OK・リテイク・確認メモを見て、必要な場合だけ録り直す"
 ];
 
 const OWNER_SECTIONS = [
@@ -204,7 +237,8 @@ const ACTOR_SECTIONS = [
     steps: [
       "「台本」で、ボイスドラマ脚本全文または収録する章を選びます。",
       "章を選ぶと、その章のシーンと登場人物が表示されます。人物は複数選択できます。",
-      "人物を1人選ぶと、通常・ナレーション・心の声・イヤモニを含む、その人物の全セリフが表示されます。",
+      "人物ボタンは「ヴェル」のような台本用の短い名前です。セリフ欄には「ヴェル13世」のような正式名称が表示されます。",
+      "人物を1人選ぶと、通常・ナレーション・心の声・イヤモニを含む、その人物の全セリフが表示されます。読み分けは名前の横のラベルで確認します。",
       "自分だけを選ぶと担当セリフ、複数人を選ぶと掛け合いをまとめて確認できます。",
       "前後の文脈が必要なときは、全文表示や前後のセリフ表示へ戻して確認します。"
     ]
@@ -218,8 +252,8 @@ const ACTOR_SECTIONS = [
     steps: [
       "「共有リンク」またはキャラクター画面から、自分の収録フォルダーを開きます。",
       "録音ファイルをGoogle Driveへアップロードします。",
-      "担当セリフの「このセリフは収録済み」にチェックします。チェックすると自動保存されます。",
-      "リテイク後にチェックすると「再提出済み」として共有されます。"
+      "アップロードが完了してから、担当セリフの「このセリフは収録済み」にチェックします。チェックすると自動保存されます。",
+      "リテイク時は録り直したファイルを同じ担当フォルダーへ置き、収録済みチェックを付け直すと「再提出済み」として共有されます。"
     ],
     note: "録音ファイルはWordPressへ直接アップロードしません。必ず指定されたGoogle Driveフォルダーを使ってください。"
   },
@@ -281,7 +315,33 @@ const ACTOR_SECTIONS = [
       "収録締切と直近の制作予定を確認します。",
       "予定やお知らせは制作オーナーが更新します。声優アカウントから追加・編集・削除はできません。"
     ]
+  },
+  {
+    id: "actor-trouble",
+    title: "表示や保存で困ったとき",
+    summary: "人物ボタン、収録フォルダー、収録済みチェックで困った場合の確認順です。",
+    icon: RefreshCw,
+    steps: [
+      "人物ボタンが見つからないときは、正しい作品と章を選んでいるか確認し、画面上部の「最新状況を読み込む」を押します。",
+      "Google Driveへアップロードできないときは、共有リンクが開けるかを確認し、リンク名と表示された内容を「質問」から送ります。",
+      "収録済みチェックが保存されないときは、通信が戻ってからページを再読み込みし、チェック状態をもう一度確認します。",
+      "台本やキャラクター情報に間違いを見つけても直接変更せず、対象の章・シーン・セリフを書いて質問します。"
+    ],
+    note: "録音ファイルをWordPressへ送る必要はありません。録音本体はGoogle Drive、完了報告だけを台本のレ点で共有します。"
   }
+];
+
+const ACTOR_SECTION_ORDER = [
+  "actor-script",
+  "actor-submit",
+  "actor-review",
+  "actor-home",
+  "actor-links",
+  "actor-questions",
+  "actor-schedule",
+  "actor-materials",
+  "actor-concept",
+  "actor-trouble"
 ];
 
 const PERMISSION_ROWS = [
@@ -312,6 +372,35 @@ function QuickStart({ audience }) {
   );
 }
 
+function ActorPriorityGuide({ onNavigate }) {
+  return (
+    <section className="manual-actor-priority" aria-labelledby="manual-actor-priority-title">
+      <header>
+        <div>
+          <span>声優さんはここから</span>
+          <h3 id="manual-actor-priority-title">収録で使う3つの画面</h3>
+          <p>基本操作は「台本」「共有リンク」「質問」の3か所です。台本や素材そのものを編集する必要はありません。</p>
+        </div>
+        <strong>最優先</strong>
+      </header>
+      <div className="manual-actor-area-list">
+        {ACTOR_PRIORITY_AREAS.map(({ target, label, title, detail, icon: Icon }) => (
+          <article key={target}>
+            <Icon size={21} />
+            <div><span>{label}</span><b>{title}</b><p>{detail}</p></div>
+            {onNavigate && <button type="button" className="secondary" onClick={() => onNavigate(target)}>{label}を開く<ArrowRight size={15} /></button>}
+          </article>
+        ))}
+      </div>
+      <div className="manual-recording-route">
+        <div className="manual-section-kicker"><CheckCircle2 size={18} /><h4>1回の収録手順</h4></div>
+        <ol>{ACTOR_RECORDING_ROUTE.map((step) => <li key={step}>{step}</li>)}</ol>
+      </div>
+      <p className="manual-actor-lock-note"><LockKeyhole size={18} /><span><b>声優さんが変更するのは、担当セリフの「収録済み」と質問の登録だけです。</b>台本本文、キャラクター、素材、予定、OK・リテイク判定は制作側が管理します。</span></p>
+    </section>
+  );
+}
+
 function PermissionTable({ viewerRole }) {
   return (
     <section className="manual-permissions" aria-labelledby="manual-permissions-title">
@@ -328,7 +417,9 @@ function PermissionTable({ viewerRole }) {
 }
 
 function ManualSections({ audience, onNavigate }) {
-  const sections = audience === "owner" ? OWNER_SECTIONS : ACTOR_SECTIONS;
+  const sections = audience === "owner"
+    ? OWNER_SECTIONS
+    : [...ACTOR_SECTIONS].sort((left, right) => ACTOR_SECTION_ORDER.indexOf(left.id) - ACTOR_SECTION_ORDER.indexOf(right.id));
   return (
     <div className="manual-guide-layout">
       <nav className="manual-toc" aria-label="マニュアル目次">
@@ -356,28 +447,29 @@ function ManualSections({ audience, onNavigate }) {
 }
 
 export function ManualView({ viewerRole = "owner", allowAudienceSwitch = false, showTitle = true, onNavigate }) {
-  const defaultAudience = viewerRole === "actor" ? "actor" : "owner";
+  const defaultAudience = "actor";
   const [audience, setAudience] = useState(defaultAudience);
-  useEffect(() => setAudience(defaultAudience), [defaultAudience]);
+  useEffect(() => setAudience("actor"), [viewerRole]);
   const intro = useMemo(() => audience === "owner"
     ? "作品の準備から録音確認、バックアップまで、制作側の作業を順番に確認できます。"
-    : "担当台本の確認から録音提出、リテイク対応まで、声優さんの作業を順番に確認できます。", [audience]);
+    : "声優さんが実際に使う画面と、録音から完了報告までの手順を最初にまとめています。", [audience]);
   const navigate = onNavigate
     ? (target) => onNavigate(viewerRole === "actor" ? target : target === "script" ? "recording" : target)
     : undefined;
 
   return (
     <div className="manual-view">
-      {showTitle && <SectionTitle title="マニュアル" subtitle="Voice Cast Studioの操作と権限を、役割別に確認できます。" />}
+      {showTitle && <SectionTitle title="マニュアル" subtitle="声優さんが収録で使う手順を最初に、制作側の操作を後半にまとめています。" />}
       <section className="manual-intro">
         <div className="manual-intro-copy"><BookOpen size={24} /><div><span>{audience === "owner" ? "制作ガイド" : "声優さんガイド"}</span><p>{intro}</p></div></div>
         {allowAudienceSwitch && (
           <div className="manual-audience-switch" role="tablist" aria-label="読む人を選択">
+            <button type="button" role="tab" aria-selected={audience === "actor"} className={audience === "actor" ? "active" : ""} onClick={() => setAudience("actor")}><Users size={17} />声優さん向け</button>
             <button type="button" role="tab" aria-selected={audience === "owner"} className={audience === "owner" ? "active" : ""} onClick={() => setAudience("owner")}><ShieldCheck size={17} />制作側</button>
-            <button type="button" role="tab" aria-selected={audience === "actor"} className={audience === "actor" ? "active" : ""} onClick={() => setAudience("actor")}><Users size={17} />声優さん</button>
           </div>
         )}
       </section>
+      {audience === "actor" && <ActorPriorityGuide onNavigate={navigate} />}
       <QuickStart audience={audience} />
       {audience === "owner" && <PermissionTable viewerRole={viewerRole} />}
       <ManualSections audience={audience} onNavigate={navigate} />
