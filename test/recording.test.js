@@ -1053,15 +1053,17 @@ test("adds empty script history fields when older projects are normalized", () =
   assert.deepEqual(project.scriptSnapshots, []);
 });
 
-test("omits private script history from actor share payloads", () => {
+test("omits private production data from actor share payloads", () => {
   const project = normalizeRecordingProject({
     sourceScriptText: "非公開の取り込み原文",
     scriptSnapshots: [{ id: "private_version", lines: [{ id: "old_line", recordingUrl: "https://drive.google.com/file/d/private/view" }] }],
+    auditionFormsFolderUrl: "https://drive.google.com/drive/folders/private",
     lines: [{ id: "current_line", text: "現在の台本" }]
   });
   const shared = getShareableRecordingProject(project);
 
   assert.equal("sourceScriptText" in shared, false);
   assert.equal("scriptSnapshots" in shared, false);
+  assert.equal("auditionFormsFolderUrl" in shared, false);
   assert.equal(shared.lines[0].text, "現在の台本");
 });

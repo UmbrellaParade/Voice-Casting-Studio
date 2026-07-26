@@ -489,7 +489,14 @@ function vcs_extract_script_structure(array $data): array
 
 function vcs_filter_project_for_actor(array $project, int $user_id, array $character_ids, string $member_id = ''): array
 {
-    unset($project['scriptSnapshots'], $project['sourceScriptText']);
+    unset(
+        $project['scriptSnapshots'],
+        $project['sourceScriptText'],
+        $project['auditionFormsFolderUrl'],
+        $project['auditionFormFolderUrl'],
+        $project['auditionFormUrl'],
+        $project['auditionUrl']
+    );
     $project['castMembers'] = array_values(array_map(
         static function (array $member): array {
             unset($member['contact'], $member['accessKey']);
@@ -551,7 +558,14 @@ function vcs_filter_project_for_actor(array $project, int $user_id, array $chara
 
 function vcs_filter_project_for_shared_guest(array $project, string $public_member_id = ''): array
 {
-    unset($project['scriptSnapshots'], $project['sourceScriptText']);
+    unset(
+        $project['scriptSnapshots'],
+        $project['sourceScriptText'],
+        $project['auditionFormsFolderUrl'],
+        $project['auditionFormFolderUrl'],
+        $project['auditionFormUrl'],
+        $project['auditionUrl']
+    );
     $project['castMembers'] = array_values(array_map(
         static function (array $member): array {
             unset($member['contact'], $member['accessKey'], $member['wpUserId']);

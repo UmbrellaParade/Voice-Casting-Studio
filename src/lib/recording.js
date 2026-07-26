@@ -532,6 +532,10 @@ export const getShareableRecordingProject = (project = {}) => {
   const sharedProject = { ...project };
   delete sharedProject.scriptSnapshots;
   delete sharedProject.sourceScriptText;
+  delete sharedProject.auditionFormsFolderUrl;
+  delete sharedProject.auditionFormFolderUrl;
+  delete sharedProject.auditionFormUrl;
+  delete sharedProject.auditionUrl;
   return sharedProject;
 };
 

@@ -1678,7 +1678,7 @@ function TasksView({ project, updateProject, canEditScript = true, setActive }) 
 
         {unassignedCharacters.length > 0 ? (
           <>
-            <div className="audition-form-panel">
+            {canEditScript && <div className="audition-form-panel">
               <div><FolderOpen size={18} /><div><b>オーディションフォーム保管フォルダー</b><span>作成したフォームをまとめているGoogle Driveフォルダーです。</span></div></div>
               <div className="audition-form-control">
                 <input
@@ -1697,7 +1697,7 @@ function TasksView({ project, updateProject, canEditScript = true, setActive }) 
                   aria-disabled={!canOpenAuditionFolder}
                 ><ExternalLink size={16} />フォルダーを開く</a>
               </div>
-            </div>
+            </div>}
 
             <div className="unassigned-role-grid">
               {unassignedCharacters.map((character) => (
@@ -1709,7 +1709,7 @@ function TasksView({ project, updateProject, canEditScript = true, setActive }) 
                     <p>担当声優名を登録すると、このタスクは自動で一覧から外れます。</p>
                   </div>
                   <div className="unassigned-role-actions">
-                    {canOpenAuditionFolder && <a className="secondary" href={project.auditionFormsFolderUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />フォーム一覧</a>}
+                    {canEditScript && canOpenAuditionFolder && <a className="secondary" href={project.auditionFormsFolderUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />フォーム一覧</a>}
                     {canEditScript && <button type="button" className="secondary" onClick={() => openCharacterEditor(character.id)}><Users size={15} />担当声優を登録</button>}
                   </div>
                   <div className="unassigned-role-statuses" aria-label={`${character.name}のオーディション進捗`}>
