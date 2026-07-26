@@ -121,9 +121,10 @@ Googleドキュメントでは、章見出しの下へシーン見出しを置�
 - 台本の追加、本文編集、削除、入れ替え、復元、プロジェクト削除、登場人物名の変更は制作オーナーだけが実行できます。
 - `Voice Director`が台本構造を書き換えた作品JSONを直接REST APIへ送っても、サーバー側で`403`として拒否します。
 - 台本の保存版と取り込み原文は制作オーナー・制作管理者だけに返し、声優さん用RESTデータやApps Script共有データには含めません。
-- 声優さんは作品JSON全体を保存できません。
-- 声優さんが変更できるのは、担当キャラクターの収録状態、Google Drive URL、提出メモだけです。
-- 質問は専用共有URLに紐づく担当声優名で記録されます。回答後は本人だけが解決または追加質問を実行できます。
+- 声優さんや共通画面の利用者は作品JSON全体を保存できません。
+- 共通画面から変更できるのはセリフの収録状態と質問だけです。制作確認、台本、キャラクター、素材、予定、並び順は変更できません。
+- 担当者別URLでは、担当キャラクターの収録状態、Google Drive URL、提出メモも変更できます。
+- 共通画面の質問は入力した表示名とブラウザごとの識別子で記録されます。回答後は質問したブラウザだけが解決または追加質問を実行できます。
 - JPEG、PNG、WebP画像だけがWordPressメディアへアップロードできます。
 
 ## 更新
@@ -138,12 +139,12 @@ npm run build:wordpress
 
 ## REST API
 
-制作側はログインCookieとWordPress REST nonce、声優さん側の更新操作は担当者別アクセスキーを使います。共通閲覧はログイン不要ですが、書き込み系APIは利用できません。
+制作側はログインCookieとWordPress REST nonce、担当者別URLはアクセスキー、共通画面は公開共同作業用nonceを使います。共通画面はログイン不要で、収録状態と質問だけを書き込めます。
 
 - `GET /wp-json/voice-casting-studio/v1/workspace`: 制作側の全データ、専用URLに対応する担当者向けデータ、または匿名の共通閲覧データ
 - `POST /wp-json/voice-casting-studio/v1/workspace`: 制作オーナーと制作管理者が作品データを保存。台本構造の変更は制作オーナーだけ許可
-- `POST /wp-json/voice-casting-studio/v1/line`: 担当セリフまたは管理者の進捗更新
-- `POST /wp-json/voice-casting-studio/v1/question`: 担当メンバーの質問・追加質問投稿
+- `POST /wp-json/voice-casting-studio/v1/line`: 共通画面の収録状態、担当セリフ、または管理者の進捗更新
+- `POST /wp-json/voice-casting-studio/v1/question`: 共通画面または担当メンバーの質問・追加質問投稿
 - `POST /wp-json/voice-casting-studio/v1/question/resolve`: 質問者本人による回答確認・解決
 - `POST /wp-json/voice-casting-studio/v1/image`: 管理者の画像アップロード
 

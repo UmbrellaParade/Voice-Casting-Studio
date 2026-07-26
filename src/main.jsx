@@ -34,6 +34,7 @@ import {
   ZoomIn
 } from "lucide-react";
 import "./styles.css";
+import "./member.css";
 import { PersistentAudioProvider } from "./components/PersistentAudioPlayer.jsx";
 import { postToGasEndpoint, getFromGasEndpoint, loadAppConfig } from "./lib/gas.js";
 import {
@@ -270,7 +271,6 @@ import {
 import { RecordingStudio, SharedRecordingBoard } from "./components/RecordingStudio.jsx";
 import { ProductionWorkspace } from "./components/ProductionHub.jsx";
 import { ConceptView } from "./components/ConceptView.jsx";
-import { WordPressMemberPortal } from "./components/WordPressMemberPortal.jsx";
 import { ManualView } from "./components/ManualView.jsx";
 import {
   normalizeRecordingProject,
@@ -526,8 +526,8 @@ function App() {
     return result;
   };
 
-  const addMemberQuestion = async (projectId, lineId, body, parentQuestionId = "") => {
-    const result = await createWordPressQuestion({ projectId, lineId, body, parentQuestionId });
+  const addMemberQuestion = async (projectId, lineId, body, parentQuestionId = "", authorName = "") => {
+    const result = await createWordPressQuestion({ projectId, lineId, body, parentQuestionId, authorName });
     setData((current) => ({
       ...current,
       recordingProjects: current.recordingProjects.map((project) => project.id === projectId
@@ -1857,22 +1857,6 @@ ${socialRows || "-"}
 
   const canEditScript = !WORDPRESS_RUNTIME || wordpressState.canEditScript;
 
-  if (WORDPRESS_RUNTIME && !WORDPRESS_RUNTIME.canManage) {
-    return (
-      <WordPressMemberPortal
-        logoSrc={logoSrc}
-        data={data}
-        runtime={{ ...WORDPRESS_RUNTIME, currentUser: wordpressState.currentUser || WORDPRESS_RUNTIME.currentUser }}
-        appTitle={APP_DISPLAY_NAME}
-        connectionState={wordpressState}
-        onRefresh={refreshWordPressData}
-        onUpdateLine={updateMemberRecordingLine}
-        onCreateQuestion={addMemberQuestion}
-        onResolveQuestion={resolveMemberQuestion}
-      />
-    );
-  }
-
   return (
     <main className="app-shell">
       <Header logoSrc={logoSrc} title={APP_DISPLAY_NAME} />
@@ -1896,8 +1880,8 @@ ${socialRows || "-"}
           <Database size={16} />
           <span>{wordpressState.message}</span>
           <small>
-            {WORDPRESS_RUNTIME.currentUser?.name || "ログイン中"}
-            {wordpressState.canEditScript ? " / 制作オーナー" : WORDPRESS_RUNTIME.canManage ? " / 制作管理者" : " / 声優"}
+            {wordpressState.currentUser?.name || WORDPRESS_RUNTIME.currentUser?.name || "全メンバー共通"}
+            {wordpressState.canEditScript ? " / 制作オーナー" : WORDPRESS_RUNTIME.canManage ? " / 制作管理者" : " / 共同メンバー"}
           </small>
         </div>
       )}
@@ -1947,6 +1931,8 @@ ${socialRows || "-"}
               settings={data.settings}
               setActive={setActive}
               canEditScript={canEditScript}
+              onUpdateLine={WORDPRESS_RUNTIME && !canEditScript ? updateMemberRecordingLine : null}
+              onRefresh={WORDPRESS_RUNTIME ? refreshWordPressData : null}
             />
           )}
           {PRODUCTION_HUB_KEYS.has(active) && (
@@ -1958,6 +1944,9 @@ ${socialRows || "-"}
               updateProject={(updater) => updateRecordingProject(selectedRecordingProjectId, updater)}
               siteUsers={wordpressState.users}
               canEditScript={canEditScript}
+              currentUser={wordpressState.currentUser || WORDPRESS_RUNTIME?.currentUser || {}}
+              onCreateQuestion={WORDPRESS_RUNTIME && !canEditScript ? addMemberQuestion : null}
+              onResolveQuestion={WORDPRESS_RUNTIME && !canEditScript ? resolveMemberQuestion : null}
               setActive={setActive}
             />
           )}
@@ -2092,7 +2081,7 @@ ${socialRows || "-"}
           )}
           {active === "manual" && (
             <ManualView
-              viewerRole={canEditScript ? "owner" : "manager"}
+              viewerRole={canEditScript ? "owner" : "actor"}
               allowAudienceSwitch
               onNavigate={setActive}
             />
@@ -3937,7 +3926,7 @@ function SettingsPanel({
   }, [recordingProjects, colorProjectId]);
 
   const updateCharacterColor = (characterId, color) => {
-    if (!colorProject) return;
+    if (!canEditScript || !colorProject) return;
     updateRecordingProjects((current) => current.map((project) => project.id === colorProject.id ? {
       ...project,
       characters: project.characters.map((character) => character.id === characterId ? { ...character, color } : character),
@@ -3993,7 +3982,11 @@ function SettingsPanel({
     <div className="view-stack">
       <SectionTitle
         title="設定/バックアップ"
-        subtitle={WORDPRESS_RUNTIME ? "人物色とWordPress上の制作データのバックアップを管理します。" : "ブラウザ内保存のエクスポート、インポート、主要パスを管理します。"}
+        subtitle={WORDPRESS_RUNTIME
+          ? canEditScript
+            ? "人物色とWordPress上の制作データのバックアップを管理します。"
+            : "制作オーナーと同じ設定内容を確認できます。変更とバックアップは制作オーナー専用です。"
+          : "ブラウザ内保存のエクスポート、インポート、主要パスを管理します。"}
       />
       {WORDPRESS_RUNTIME ? (
         <article className="panel sync-panel">
@@ -4005,7 +3998,7 @@ function SettingsPanel({
             </div>
           </div>
           <div className="sync-status-grid">
-            <div><b>関係者画面</b><span>WordPressアカウントと担当キャラクターに応じて表示範囲を分けます。</span></div>
+            <div><b>共通画面</b><span>制作オーナーとメンバーが同じ画面と最新の進捗を確認します。</span></div>
             <div><b>録音データ</b><span>WordPressへアップロードせず、Google Drive共有URLだけを保存します。</span></div>
           </div>
         </article>
@@ -4053,6 +4046,7 @@ function SettingsPanel({
                 <input
                   type="color"
                   value={character.color || "#5f6d7a"}
+                  disabled={!canEditScript}
                   onChange={(event) => updateCharacterColor(character.id, event.target.value)}
                   aria-label={`${character.name}の表示色`}
                 />
@@ -4153,8 +4147,8 @@ function SettingsPanel({
           </div>
           {folderMessage && <p className="hint-text">{folderMessage}</p>}
         </>}
-        {WORDPRESS_RUNTIME && <div className="record-head"><div><h2>制作データのバックアップ</h2><p className="muted">台本内の保存版に加えて、制作データ全体を手元へJSONで書き出せます。</p></div></div>}
-        <div className="button-row">
+        {WORDPRESS_RUNTIME && <div className="record-head"><div><h2>制作データのバックアップ</h2><p className="muted">{canEditScript ? "台本内の保存版に加えて、制作データ全体を手元へJSONで書き出せます。" : "バックアップ操作は制作オーナーだけが実行できます。"}</p></div></div>}
+        {(!WORDPRESS_RUNTIME || canEditScript) && <div className="button-row">
           {!WORDPRESS_RUNTIME && <button className="secondary" onClick={copyTransferLink}><ClipboardCopy size={16} />{transferCopied ? "コピー済み" : "引き継ぎリンクをコピー"}</button>}
           <button className="secondary" onClick={exportJson}><Download size={16} />JSONを書き出し</button>
           {canEditScript && <>
@@ -4164,7 +4158,7 @@ function SettingsPanel({
             </label>
             <button className="danger" onClick={resetSample}><Trash2 size={16} />サンプルに戻す</button>
           </>}
-        </div>
+        </div>}
         {!WORDPRESS_RUNTIME && transferLinkText && (
           <label className="transfer-link-fallback">
             <span>引き継ぎURL</span>

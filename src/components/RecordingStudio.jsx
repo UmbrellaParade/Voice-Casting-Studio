@@ -512,7 +512,7 @@ function StatusBadge({ status, type }) {
   return <span className={`recording-status-badge ${type} status-${status}`}>{status}</span>;
 }
 
-function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) {
+function AdminLineCard({ project, line, patchLine, removeLine, canEditScript, canUpdateActorStatus = true, lineUpdateBusy = false }) {
   const character = project.characters.find((item) => item.id === line.characterId);
   const isDirection = line.kind === "direction";
   const isManualBody = isDirection && line.manualBody;
@@ -558,6 +558,7 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
                 <input
                   type="checkbox"
                   checked={line.actorStatus !== "未収録"}
+                  disabled={!canUpdateActorStatus || lineUpdateBusy}
                   onChange={(event) => patchLine(line.id, {
                     actorStatus: event.target.checked
                       ? (line.reviewStatus === "リテイク" ? "再提出済み" : "収録済み")
@@ -568,7 +569,7 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
               </label>
               <label>
                 <span>確認</span>
-                <select value={line.reviewStatus} onChange={(event) => patchLine(line.id, { reviewStatus: event.target.value })}>
+                <select value={line.reviewStatus} disabled={!canEditScript || lineUpdateBusy} onChange={(event) => patchLine(line.id, { reviewStatus: event.target.value })}>
                   {DIRECTOR_REVIEW_STATUSES.map((status) => <option key={status}>{status}</option>)}
                 </select>
               </label>
@@ -610,9 +611,9 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
                 <TextArea label="演技指示" value={line.direction} onChange={(value) => patchLine(line.id, { direction: value })} />
                 <Field label="録音ファイル名" value={line.fileName} onChange={(value) => patchLine(line.id, { fileName: value })} />
               </>}
-              <Field label="録音URL" value={line.recordingUrl} onChange={(value) => patchLine(line.id, { recordingUrl: value })} />
-              <TextArea label="声優さんのメモ" value={line.actorNote} onChange={(value) => patchLine(line.id, { actorNote: value })} />
-              <TextArea label="確認・リテイクメモ" value={line.directorNote} onChange={(value) => patchLine(line.id, { directorNote: value })} />
+              <Field label="録音URL" value={line.recordingUrl} readOnly={!canEditScript} onChange={(value) => patchLine(line.id, { recordingUrl: value })} />
+              <TextArea label="声優さんのメモ" value={line.actorNote} readOnly={!canEditScript} onChange={(value) => patchLine(line.id, { actorNote: value })} />
+              <TextArea label="確認・リテイクメモ" value={line.directorNote} readOnly={!canEditScript} onChange={(value) => patchLine(line.id, { directorNote: value })} />
               {canEditScript && !isDerivedFromManualBody && (
                 <button type="button" className="danger compact" onClick={() => removeLine(line.id)}>
                   <Trash2 size={15} />このセリフを削除
@@ -654,7 +655,7 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
   );
 }
 
-function RecordingBoardView({ project, patchLine, removeLine, canEditScript }) {
+function RecordingBoardView({ project, patchLine, removeLine, canEditScript, canUpdateActorStatus, lineUpdateBusy }) {
   const displayProject = useMemo(() => getRecordingDisplayProject(project), [project]);
   const allChapters = useMemo(() => getChapterGroups(displayProject.lines), [displayProject.lines]);
   const [selectedChapterId, setSelectedChapterId] = useState("");
@@ -789,7 +790,16 @@ function RecordingBoardView({ project, patchLine, removeLine, canEditScript }) {
                   >
                     <div className="script-line-list">
                       {scene.lines.map((line) => (
-                        <AdminLineCard key={line.id} project={displayProject} line={line} patchLine={patchLine} removeLine={removeLine} canEditScript={canEditScript} />
+                        <AdminLineCard
+                          key={line.id}
+                          project={displayProject}
+                          line={line}
+                          patchLine={patchLine}
+                          removeLine={removeLine}
+                          canEditScript={canEditScript}
+                          canUpdateActorStatus={canUpdateActorStatus}
+                          lineUpdateBusy={lineUpdateBusy}
+                        />
                       ))}
                     </div>
                   </ScriptSceneSection>
@@ -1455,20 +1465,22 @@ function CastAndSharing({
 
   return (
     <div className="recording-management-stack">
-      <article className={`panel recording-share-status${ready ? " ready" : ""}`}>
+      <article className={`panel recording-share-status${ready || !canEditScript ? " ready" : ""}`}>
         <div className="sync-heading">
-          {ready ? <CheckCircle2 size={22} /> : <KeyRound size={22} />}
+          {ready || !canEditScript ? <CheckCircle2 size={22} /> : <KeyRound size={22} />}
           <div>
-            <h3>{ready ? "共同収録の接続設定ができています" : "共同収録の接続設定が必要です"}</h3>
+            <h3>{canEditScript ? (ready ? "共同収録の接続設定ができています" : "共同収録の接続設定が必要です") : "配役・共有情報"}</h3>
             <p>
-              {ready
-                ? "「共有内容を更新」を押すと、声優さん用URLから同じ台本と進捗を確認できます。"
-                : "Apps Script URLと同期トークンを設定すると、声優さんとの共同進捗が有効になります。"}
+              {canEditScript
+                ? ready
+                  ? "「共有内容を更新」を押すと、声優さん用URLから同じ台本と進捗を確認できます。"
+                  : "Apps Script URLと同期トークンを設定すると、声優さんとの共同進捗が有効になります。"
+                : "制作オーナーが登録した登場人物と担当情報を、同じ画面で確認できます。"}
             </p>
           </div>
-          {!ready && <button type="button" className="secondary" onClick={() => setActive("settings")}>設定を開く</button>}
+          {canEditScript && !ready && <button type="button" className="secondary" onClick={() => setActive("settings")}>設定を開く</button>}
         </div>
-        <div className="recording-share-actions">
+        {canEditScript && <div className="recording-share-actions">
           <button type="button" className="primary" onClick={publishProject} disabled={!ready || syncState.busy}>
             <Send size={16} />{project.sharedAt ? "共有内容を更新" : "共有を開始"}
           </button>
@@ -1476,7 +1488,7 @@ function CastAndSharing({
             <RefreshCw size={16} />最新状況を同期
           </button>
           {project.sharedAt && <span>最終共有: {formatUpdatedAt(project.sharedAt)}</span>}
-        </div>
+        </div>}
         {syncState.message && <p className={`sync-inline-message${syncState.error ? " error" : ""}`}>{syncState.message}</p>}
       </article>
 
@@ -1494,6 +1506,7 @@ function CastAndSharing({
               <input
                 type="color"
                 value={character.color}
+                disabled={!canEditScript}
                 onChange={(event) => patchCharacter(character.id, { color: event.target.value })}
                 aria-label={`${character.name}の色`}
               />
@@ -1552,7 +1565,7 @@ function CastAndSharing({
             <h2>配役と声優さん用URL</h2>
             <p className="muted">一人が複数役を担当する場合も、同じURLにまとめられます。</p>
           </div>
-          <button type="button" className="primary" onClick={addCastMember}><Plus size={16} />声優さん</button>
+          {canEditScript && <button type="button" className="primary" onClick={addCastMember}><Plus size={16} />声優さん</button>}
         </div>
         <div className="cast-member-list">
           {project.castMembers.map((member) => {
@@ -1568,16 +1581,18 @@ function CastAndSharing({
                 <div className="cast-member-heading">
                   <UserRound size={20} />
                   <input
-                    value={member.actorName}
+                    value={member.actorName || ""}
+                    readOnly={!canEditScript}
                     onChange={(event) => patchCastMember(member.id, { actorName: event.target.value })}
                     aria-label="声優さん名"
                   />
-                  <button type="button" className="icon-button danger-icon" title="声優さんを削除" onClick={() => removeCastMember(member.id)}>
+                  {canEditScript && <button type="button" className="icon-button danger-icon" title="声優さんを削除" onClick={() => removeCastMember(member.id)}>
                     <Trash2 size={16} />
-                  </button>
+                  </button>}
                 </div>
                 <input
-                  value={member.contact}
+                  value={member.contact || ""}
+                  readOnly={!canEditScript}
                   onChange={(event) => patchCastMember(member.id, { contact: event.target.value })}
                   placeholder="連絡先メモ（共有画面には表示されません）"
                 />
@@ -1587,6 +1602,7 @@ function CastAndSharing({
                       <input
                         type="checkbox"
                         checked={member.characterIds.includes(character.id)}
+                        disabled={!canEditScript}
                         onChange={(event) => {
                           const next = event.target.checked
                             ? [...member.characterIds, character.id]
@@ -1598,7 +1614,7 @@ function CastAndSharing({
                     </label>
                   ))}
                 </div>
-                <div className="cast-share-link">
+                {canEditScript && <div className="cast-share-link">
                   <input value={shareUrl} readOnly aria-label={`${member.actorName}用共有URL`} />
                   <button
                     type="button"
@@ -1616,8 +1632,8 @@ function CastAndSharing({
                   >
                     <KeyRound size={16} />
                   </button>
-                </div>
-                {!project.sharedAt && <small>最初に「共有を開始」を押すとURLを渡せるようになります。</small>}
+                </div>}
+                {canEditScript && !project.sharedAt && <small>最初に「共有を開始」を押すとURLを渡せるようになります。</small>}
               </div>
             );
           })}
@@ -1644,7 +1660,9 @@ export function RecordingStudio({
   setSelectedRecordingProjectId,
   settings,
   setActive,
-  canEditScript = true
+  canEditScript = true,
+  onUpdateLine = null,
+  onRefresh = null
 }) {
   const episodeProjects = projects.filter((project) => !selectedEpisodeId || project.episodeId === selectedEpisodeId);
   const [internalSelectedProjectId, setInternalSelectedProjectId] = useState(() => episodeProjects[0]?.id || projects[0]?.id || "");
@@ -1678,7 +1696,7 @@ export function RecordingStudio({
   };
 
   const patchProject = (patch) => {
-    if (!project) return;
+    if (!project || !canEditScript) return;
     updateProject(project.id, { ...project, ...patch });
   };
 
@@ -1686,10 +1704,20 @@ export function RecordingStudio({
     if (!project) return;
     const permittedPatch = canEditScript
       ? patch
-      : Object.fromEntries(Object.entries(patch).filter(([key]) => COLLABORATIVE_LINE_FIELDS.has(key)));
+      : Object.fromEntries(Object.entries(patch).filter(([key]) => key === "actorStatus"));
     if (!Object.keys(permittedPatch).length) return;
     const timestampedPatch = { ...permittedPatch, updatedAt: new Date().toISOString() };
     const displayLine = getRecordingDisplayProject(project).lines.find((line) => line.id === lineId);
+    if (!canEditScript && onUpdateLine) {
+      setSyncState({ busy: true, message: "収録状況を保存しています…", error: false });
+      try {
+        await onUpdateLine(project.id, lineId, timestampedPatch, displayLine);
+        setSyncState({ busy: false, message: "収録状況を保存しました。", error: false });
+      } catch (error) {
+        setSyncState({ busy: false, message: `保存できませんでした: ${error.message}`, error: true });
+      }
+      return;
+    }
     updateProject(project.id, (current) => patchRecordingLineProgress(current, lineId, timestampedPatch, displayLine));
     const shouldSync = !displayLine?.derivedFromManualBody && project.sharedAt && Object.keys(permittedPatch).some((key) => COLLABORATIVE_LINE_FIELDS.has(key));
     if (!shouldSync || !endpointUrl || !token) return;
@@ -1963,9 +1991,8 @@ export function RecordingStudio({
   };
 
   const patchCharacter = (characterId, patch) => {
-    const permittedPatch = canEditScript
-      ? patch
-      : Object.fromEntries(Object.entries(patch).filter(([key]) => key !== "name" && key !== "scriptName" && key !== "id"));
+    if (!canEditScript) return;
+    const permittedPatch = patch;
     if (!Object.keys(permittedPatch).length) return;
     updateProject(project.id, (current) => {
       let next = current;
@@ -2015,6 +2042,7 @@ export function RecordingStudio({
   };
 
   const addCastMember = () => {
+    if (!canEditScript) return;
     updateProject(project.id, (current) => ({
       ...current,
       castMembers: [
@@ -2033,6 +2061,7 @@ export function RecordingStudio({
   };
 
   const patchCastMember = (memberId, patch) => {
+    if (!canEditScript) return;
     updateProject(project.id, (current) => ({
       ...current,
       castMembers: current.castMembers.map((member) => member.id === memberId ? { ...member, ...patch } : member)
@@ -2040,6 +2069,7 @@ export function RecordingStudio({
   };
 
   const removeCastMember = (memberId) => {
+    if (!canEditScript) return;
     if (!confirm("この声優さんの共有設定を削除しますか？収録進捗は残ります。")) return;
     updateProject(project.id, (current) => ({
       ...current,
@@ -2083,7 +2113,22 @@ export function RecordingStudio({
     }
   };
 
+  const refreshCurrentProject = async () => {
+    if (!canEditScript && onRefresh) {
+      setSyncState({ busy: true, message: "最新状況を読み込んでいます…", error: false });
+      try {
+        await onRefresh();
+        setSyncState({ busy: false, message: "最新状況を読み込みました。", error: false });
+      } catch (error) {
+        setSyncState({ busy: false, message: `読み込めませんでした: ${error.message}`, error: true });
+      }
+      return;
+    }
+    await pullProject();
+  };
+
   useEffect(() => {
+    if (!canEditScript) return undefined;
     if (!project?.sharedAt || !endpointUrl || !token) return undefined;
     const timer = window.setInterval(() => pullProject({ silent: true }), 30000);
     return () => window.clearInterval(timer);
@@ -2132,8 +2177,8 @@ export function RecordingStudio({
           <span className="recording-project-status">{project.status}</span>
         </div>
         <div>
-          {project.sharedAt && (
-            <button type="button" className="secondary" onClick={() => pullProject()} disabled={syncState.busy}>
+          {(project.sharedAt || onRefresh) && (
+            <button type="button" className="secondary" onClick={refreshCurrentProject} disabled={syncState.busy}>
               <RefreshCw size={16} />最新状況
             </button>
           )}
@@ -2162,10 +2207,17 @@ export function RecordingStudio({
         <button type="button" className={tab === "cast" ? "active" : ""} onClick={() => setTab("cast")}><Users size={16} />配役・共有</button>
       </div>
       {!canEditScript && (
-        <p className="script-permission-note"><LockKeyhole size={16} />制作管理者は録音・確認・配役・素材・予定を管理できます。台本本文の変更、削除、入れ替えは制作オーナーだけが行えます。</p>
+        <p className="script-permission-note"><LockKeyhole size={16} />収録済みチェックはこの共通画面から保存できます。台本・制作確認・配役などの編集は制作オーナー専用です。</p>
       )}
       {tab === "board" && (
-        <RecordingBoardView project={project} patchLine={patchLine} removeLine={removeLine} canEditScript={canEditScript} />
+        <RecordingBoardView
+          project={project}
+          patchLine={patchLine}
+          removeLine={removeLine}
+          canEditScript={canEditScript}
+          canUpdateActorStatus={canEditScript || Boolean(onUpdateLine)}
+          lineUpdateBusy={syncState.busy}
+        />
       )}
       {tab === "script" && canEditScript && (
         <ScriptEditor

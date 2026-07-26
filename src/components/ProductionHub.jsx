@@ -45,6 +45,7 @@ import {
   SHARED_LINK_COLORS,
   archiveScriptVersion,
   buildProductionQuestionThreads,
+  canResolveProductionQuestion,
   createRecordingAccessKey,
   getCharacterImageCropStyle,
   getCharacterName,
@@ -69,6 +70,15 @@ import { SectionTitle } from "./ui.jsx";
 const EDITING_STATUS_OPTIONS = ["未着手", "脚本・配役調整中", "収録中", "音声編集中", "確認中", "公開準備中", "完了"];
 const MATERIAL_ASPECT_RATIOS = ["", "16:9", "9:16", "1:1"];
 const WORDPRESS_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp";
+const PUBLIC_QUESTIONER_NAME_KEY = "voice-casting-studio-questioner-name";
+
+const readPublicQuestionerName = () => {
+  try {
+    return globalThis.localStorage?.getItem(PUBLIC_QUESTIONER_NAME_KEY) || "";
+  } catch {
+    return "";
+  }
+};
 
 const formatDate = (value, withTime = false) => {
   if (!value) return "未設定";
@@ -372,7 +382,7 @@ function ProductionHome({ project, setActive, updateProject, canEditScript }) {
   );
 }
 
-function CharacterImage({ character, patchCharacter }) {
+function CharacterImage({ character, patchCharacter, canEdit = true }) {
   const [message, setMessage] = useState("");
   const positionDragRef = useRef(null);
   const imageUrl = getImageUrl(character.imageUrl);
@@ -381,6 +391,7 @@ function CharacterImage({ character, patchCharacter }) {
   const imageScale = normalizeImageScale(character.imageScale);
 
   const patchImagePosition = (x, y) => {
+    if (!canEdit) return;
     const nextX = Math.round(normalizeImagePosition(x));
     const nextY = Math.round(normalizeImagePosition(y));
     patchCharacter({
@@ -391,7 +402,7 @@ function CharacterImage({ character, patchCharacter }) {
   };
 
   const beginPositionDrag = (event) => {
-    if (!imageUrl || event.button !== 0) return;
+    if (!canEdit || !imageUrl || event.button !== 0) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     positionDragRef.current = {
       startX: event.clientX,
@@ -421,6 +432,7 @@ function CharacterImage({ character, patchCharacter }) {
   };
 
   const uploadImage = async (file) => {
+    if (!canEdit) return;
     try {
       const runtime = getWordPressRuntime();
       const imageUrl = runtime
@@ -436,7 +448,7 @@ function CharacterImage({ character, patchCharacter }) {
   return (
     <div className="character-image-editor">
       <div
-        className={`character-image-preview${imageUrl ? " can-position" : ""}`}
+        className={`character-image-preview${imageUrl && canEdit ? " can-position" : ""}`}
         style={{ "--character-color": character.color }}
         onPointerDown={beginPositionDrag}
         onPointerMove={moveImagePosition}
@@ -444,17 +456,17 @@ function CharacterImage({ character, patchCharacter }) {
         onPointerCancel={finishPositionDrag}
       >
         {imageUrl ? <img src={imageUrl} alt={`${character.name}のキャラクター画像`} draggable="false" style={getCharacterImageCropStyle(character)} /> : <Users size={34} />}
-        {imageUrl && <span className="character-image-move-icon" title="画像位置をドラッグで調整"><Move size={15} /></span>}
+        {imageUrl && canEdit && <span className="character-image-move-icon" title="画像位置をドラッグで調整"><Move size={15} /></span>}
       </div>
-      <label className="secondary character-image-upload">
+      {canEdit && <label className="secondary character-image-upload">
         <ImagePlus size={16} /><span>画像を選択</span>
         <input type="file" accept={WORDPRESS_IMAGE_ACCEPT} onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) uploadImage(file);
           event.target.value = "";
         }} />
-      </label>
-      {imageUrl && (
+      </label>}
+      {imageUrl && canEdit && (
         <div className="character-image-position-controls">
           <label>
             <span>横位置</span>
@@ -489,13 +501,13 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
     [project.characters, project.lines]
   );
 
-  const patchCharacter = (characterId, patch) => updateProject((current) => ({
-    ...current,
-    characters: current.characters.map((character) => character.id === characterId ? {
-      ...character,
-      ...Object.fromEntries(Object.entries(patch).filter(([key]) => canEditScript || (key !== "id" && key !== "name")))
-    } : character)
-  }));
+  const patchCharacter = (characterId, patch) => {
+    if (!canEditScript) return;
+    updateProject((current) => ({
+      ...current,
+      characters: current.characters.map((character) => character.id === characterId ? { ...character, ...patch } : character)
+    }));
+  };
 
   const clearCharacterNameDraft = (characterId) => {
     setCharacterNameDrafts((current) => {
@@ -538,6 +550,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
   };
 
   const assignActorName = (characterId, actorName) => {
+    if (!canEditScript) return;
     const name = String(actorName || "").trim();
     updateProject((current) => {
       const unassignedMembers = current.castMembers.map((member) => ({
@@ -566,7 +579,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
   };
 
   const moveCharacter = (sourceId, targetId) => {
-    if (!sourceId || !targetId || sourceId === targetId) return;
+    if (!canEditScript || !sourceId || !targetId || sourceId === targetId) return;
     const character = project.characters.find((item) => item.id === sourceId);
     updateProject((current) => ({
       ...current,
@@ -582,7 +595,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
   };
 
   const beginCharacterDrag = (event, characterId) => {
-    if (event.button !== 0) return;
+    if (!canEditScript || event.button !== 0) return;
     pointerDragRef.current = {
       sourceId: characterId,
       startX: event.clientX,
@@ -663,15 +676,21 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
     setMessage(`「${character?.name || "登場人物"}」を削除しました。`);
   };
 
-  const addCastMember = () => updateProject((current) => ({
-    ...current,
-    castMembers: [...current.castMembers, { id: newId("cast"), actorName: "声優さん", contact: "", socialUrl: "", characterIds: [], wpUserId: 0, accessKey: createRecordingAccessKey() }]
-  }));
+  const addCastMember = () => {
+    if (!canEditScript) return;
+    updateProject((current) => ({
+      ...current,
+      castMembers: [...current.castMembers, { id: newId("cast"), actorName: "声優さん", contact: "", socialUrl: "", characterIds: [], wpUserId: 0, accessKey: createRecordingAccessKey() }]
+    }));
+  };
 
-  const patchCastMember = (memberId, patch) => updateProject((current) => ({
-    ...current,
-    castMembers: current.castMembers.map((member) => member.id === memberId ? { ...member, ...patch } : member)
-  }));
+  const patchCastMember = (memberId, patch) => {
+    if (!canEditScript) return;
+    updateProject((current) => ({
+      ...current,
+      castMembers: current.castMembers.map((member) => member.id === memberId ? { ...member, ...patch } : member)
+    }));
+  };
 
   const copyMemberShareUrl = async (member) => {
     const shareUrl = makeWordPressMemberShareUrl({
@@ -701,7 +720,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
         key={character.id}
         style={{ "--character-color": character.color }}
       >
-        <CharacterImage character={character} patchCharacter={(patch) => patchCharacter(character.id, patch)} />
+        <CharacterImage character={character} patchCharacter={(patch) => patchCharacter(character.id, patch)} canEdit={canEditScript} />
         <div className="character-editor-fields">
           <header>
             <div className="character-name-fields">
@@ -731,7 +750,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
                   }}
                 />
               </label>
-              <label className="character-color-field"><span>セリフ色</span><input type="color" value={character.color} onChange={(event) => patchCharacter(character.id, { color: event.target.value })} /></label>
+              <label className="character-color-field"><span>セリフ色</span><input type="color" value={character.color} disabled={!canEditScript} onChange={(event) => patchCharacter(character.id, { color: event.target.value })} /></label>
             </div>
             <div className="character-header-actions">
               {!isLinked && <span className="character-script-state">台本外</span>}
@@ -757,11 +776,11 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
           </header>
           <div className="character-field-grid">
             <div className="character-actor-fields">
-              <label><span>担当声優</span><input value={actorNameDrafts[character.id] ?? assignedMember?.actorName ?? ""} placeholder="声優さんの名前を入力" onChange={(event) => setActorNameDrafts((current) => ({ ...current, [character.id]: event.target.value }))} onBlur={(event) => assignActorName(character.id, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>
-              <label><span>担当者SNS</span><div className="character-social-field"><input value={assignedMember?.socialUrl || ""} placeholder={assignedMember ? "https://x.com/..." : "担当声優を先に入力"} disabled={!assignedMember} onChange={(event) => patchCastMember(assignedMember.id, { socialUrl: event.target.value })} /><a className={`icon-button character-social-open${isWebUrl(assignedMember?.socialUrl) ? "" : " disabled"}`} href={isWebUrl(assignedMember?.socialUrl) ? assignedMember.socialUrl : undefined} target="_blank" rel="noreferrer" aria-label="担当者SNSを開く" aria-disabled={!isWebUrl(assignedMember?.socialUrl)} title="担当者SNSを開く"><ExternalLink size={16} /></a></div></label>
+              <label><span>担当声優</span><input value={actorNameDrafts[character.id] ?? assignedMember?.actorName ?? ""} placeholder="声優さんの名前を入力" readOnly={!canEditScript} onChange={(event) => setActorNameDrafts((current) => ({ ...current, [character.id]: event.target.value }))} onBlur={(event) => assignActorName(character.id, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>
+              <label><span>担当者SNS</span><div className="character-social-field"><input value={assignedMember?.socialUrl || ""} placeholder={assignedMember ? "https://x.com/..." : "担当声優を先に入力"} disabled={!assignedMember || !canEditScript} onChange={(event) => patchCastMember(assignedMember.id, { socialUrl: event.target.value })} /><a className={`icon-button character-social-open${isWebUrl(assignedMember?.socialUrl) ? "" : " disabled"}`} href={isWebUrl(assignedMember?.socialUrl) ? assignedMember.socialUrl : undefined} target="_blank" rel="noreferrer" aria-label="担当者SNSを開く" aria-disabled={!isWebUrl(assignedMember?.socialUrl)} title="担当者SNSを開く"><ExternalLink size={16} /></a></div></label>
             </div>
-            <label className="character-folder-label"><span>収録フォルダー</span><div className="character-folder-field"><input value={character.recordingFolderUrl} placeholder="Google DriveフォルダーURL" onChange={(event) => patchCharacter(character.id, { recordingFolderUrl: event.target.value })} /><a className={`icon-button character-folder-open${isWebUrl(character.recordingFolderUrl) ? "" : " disabled"}`} href={isWebUrl(character.recordingFolderUrl) ? character.recordingFolderUrl : undefined} target="_blank" rel="noreferrer" aria-label={`${character.name}の収録フォルダーを開く`} aria-disabled={!isWebUrl(character.recordingFolderUrl)} title="収録フォルダーを開く"><FolderOpen size={16} /></a></div></label>
-            <label className="wide"><span>設定・人物像</span><textarea value={character.profile} onChange={(event) => patchCharacter(character.id, { profile: event.target.value })} /></label>
+            <label className="character-folder-label"><span>収録フォルダー</span><div className="character-folder-field"><input value={character.recordingFolderUrl} placeholder="Google DriveフォルダーURL" readOnly={!canEditScript} onChange={(event) => patchCharacter(character.id, { recordingFolderUrl: event.target.value })} /><a className={`icon-button character-folder-open${isWebUrl(character.recordingFolderUrl) ? "" : " disabled"}`} href={isWebUrl(character.recordingFolderUrl) ? character.recordingFolderUrl : undefined} target="_blank" rel="noreferrer" aria-label={`${character.name}の収録フォルダーを開く`} aria-disabled={!isWebUrl(character.recordingFolderUrl)} title="収録フォルダーを開く"><FolderOpen size={16} /></a></div></label>
+            <label className="wide"><span>設定・人物像</span><textarea value={character.profile} readOnly={!canEditScript} onChange={(event) => patchCharacter(character.id, { profile: event.target.value })} /></label>
           </div>
         </div>
       </article>
@@ -793,22 +812,22 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
       )}
 
       <section className="panel cast-roster-panel">
-        <header><div><UserPlus size={19} /><div><h3>担当声優</h3><p>登場人物へ割り当てるメンバーを管理します。</p></div></div><button type="button" className="secondary" onClick={addCastMember}><Plus size={16} />声優さん</button></header>
+        <header><div><UserPlus size={19} /><div><h3>担当声優</h3><p>登場人物へ割り当てるメンバーを管理します。</p></div></div>{canEditScript && <button type="button" className="secondary" onClick={addCastMember}><Plus size={16} />声優さん</button>}</header>
         <div className="cast-roster-list">
           {project.castMembers.map((member) => {
             const shareUrl = makeWordPressMemberShareUrl({ projectId: project.id, memberId: member.id, accessKey: member.accessKey });
             return (
             <div className={siteUsers.length ? "has-wordpress-users" : ""} key={member.id}>
-              <label><span>表示名</span><input value={member.actorName} onChange={(event) => patchCastMember(member.id, { actorName: event.target.value })} /></label>
-              <label><span>連絡先メモ</span><input value={member.contact} onChange={(event) => patchCastMember(member.id, { contact: event.target.value })} /></label>
+              <label><span>表示名</span><input value={member.actorName || ""} readOnly={!canEditScript} onChange={(event) => patchCastMember(member.id, { actorName: event.target.value })} /></label>
+              <label><span>連絡先メモ</span><input value={member.contact || ""} readOnly={!canEditScript} onChange={(event) => patchCastMember(member.id, { contact: event.target.value })} /></label>
               {siteUsers.length > 0 && (
                 <label><span>WordPressアカウント</span><select value={member.wpUserId || 0} onChange={(event) => patchCastMember(member.id, { wpUserId: Number(event.target.value) || 0 })}><option value="0">未連携</option>{siteUsers.map((user) => <option key={user.id} value={user.id}>{user.name}</option>)}</select></label>
               )}
               <span>{member.characterIds.map((id) => getCharacterName(project, id)).join("・") || "担当未設定"}</span>
-              <button type="button" className="icon-button danger-icon" title="担当声優を削除" onClick={() => {
+              {canEditScript && <button type="button" className="icon-button danger-icon" title="担当声優を削除" onClick={() => {
                 if (!confirm(`${member.actorName}を担当声優一覧から削除しますか？`)) return;
                 updateProject((current) => ({ ...current, castMembers: current.castMembers.filter((item) => item.id !== member.id) }));
-              }}><Trash2 size={16} /></button>
+              }}><Trash2 size={16} /></button>}
               {canEditScript && getWordPressRuntime() && (
                 <div className="cast-member-share-field">
                   <input value={shareUrl} readOnly aria-label={`${member.actorName || "声優さん"}用のログイン不要共有URL`} />
@@ -874,14 +893,19 @@ function LinksView({ project, updateProject, canEditScript = true }) {
       (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(right.id) ?? Number.MAX_SAFE_INTEGER));
   }, [linkedCharacters, project.recordingFolderOrder]);
 
-  const patchCharacterLink = (characterId, key, value) => updateProject((current) => ({
-    ...current,
-    characters: current.characters.map((character) => character.id === characterId
-      ? { ...character, [key]: value }
-      : character)
-  }));
+  const patchCharacterLink = (characterId, key, value) => {
+    if (!canEditScript) return;
+    updateProject((current) => ({
+      ...current,
+      characters: current.characters.map((character) => character.id === characterId
+        ? { ...character, [key]: value }
+        : character)
+    }));
+  };
 
-  const addSharedLink = () => updateProject((current) => {
+  const addSharedLink = () => {
+    if (!canEditScript) return;
+    updateProject((current) => {
     const sharedLinks = current.sharedLinks || [];
     const usedColors = new Set(sharedLinks.map((link) => link.color));
     const color = SHARED_LINK_COLORS.find((candidate) => !usedColors.has(candidate))
@@ -895,18 +919,25 @@ function LinksView({ project, updateProject, canEditScript = true }) {
         notes: "",
         color
       }]
-    };
-  });
+      };
+    });
+  };
 
-  const patchSharedLink = (linkId, patch) => updateProject((current) => ({
-    ...current,
-    sharedLinks: (current.sharedLinks || []).map((link) => link.id === linkId ? { ...link, ...patch } : link)
-  }));
+  const patchSharedLink = (linkId, patch) => {
+    if (!canEditScript) return;
+    updateProject((current) => ({
+      ...current,
+      sharedLinks: (current.sharedLinks || []).map((link) => link.id === linkId ? { ...link, ...patch } : link)
+    }));
+  };
 
-  const removeSharedLink = (linkId) => updateProject((current) => ({
-    ...current,
-    sharedLinks: (current.sharedLinks || []).filter((link) => link.id !== linkId)
-  }));
+  const removeSharedLink = (linkId) => {
+    if (!canEditScript) return;
+    updateProject((current) => ({
+      ...current,
+      sharedLinks: (current.sharedLinks || []).filter((link) => link.id !== linkId)
+    }));
+  };
 
   const moveSharedLink = (sourceId, targetId) => {
     if (!canEditScript || !sourceId || !targetId || sourceId === targetId) return;
@@ -1104,21 +1135,27 @@ function MaterialsView({ project, updateProject, canEditScript = true }) {
   const pointerDragRef = useRef(null);
   const visibleMaterials = filter === "すべて" ? project.materials : project.materials.filter((material) => material.category === filter);
 
-  const addMaterial = (category = filter === "すべて" ? "主題歌" : filter) => updateProject((current) => ({
-    ...current,
-    materials: [{
-      id: newId("material"), category, title: `${category} 新規素材`, url: "", fileName: "",
-      aspectRatio: category === "サムネイル" ? "16:9" : "", status: "準備中", notes: "", updatedAt: new Date().toISOString()
-    }, ...current.materials]
-  }));
+  const addMaterial = (category = filter === "すべて" ? "主題歌" : filter) => {
+    if (!canEditScript) return;
+    updateProject((current) => ({
+      ...current,
+      materials: [{
+        id: newId("material"), category, title: `${category} 新規素材`, url: "", fileName: "",
+        aspectRatio: category === "サムネイル" ? "16:9" : "", status: "準備中", notes: "", updatedAt: new Date().toISOString()
+      }, ...current.materials]
+    }));
+  };
 
-  const patchMaterial = (materialId, patch) => updateProject((current) => ({
-    ...current,
-    materials: current.materials.map((material) => material.id === materialId ? { ...material, ...patch, updatedAt: new Date().toISOString() } : material)
-  }));
+  const patchMaterial = (materialId, patch) => {
+    if (!canEditScript) return;
+    updateProject((current) => ({
+      ...current,
+      materials: current.materials.map((material) => material.id === materialId ? { ...material, ...patch, updatedAt: new Date().toISOString() } : material)
+    }));
+  };
 
   const moveMaterial = (sourceId, targetId) => {
-    if (!sourceId || !targetId || sourceId === targetId) return;
+    if (!canEditScript || !sourceId || !targetId || sourceId === targetId) return;
     const movedMaterial = project.materials.find((material) => material.id === sourceId);
     updateProject((current) => ({
       ...current,
@@ -1134,7 +1171,7 @@ function MaterialsView({ project, updateProject, canEditScript = true }) {
   };
 
   const beginMaterialDrag = (event, materialId) => {
-    if (event.button !== 0) return;
+    if (!canEditScript || event.button !== 0) return;
     pointerDragRef.current = {
       sourceId: materialId,
       startX: event.clientX,
@@ -1168,7 +1205,7 @@ function MaterialsView({ project, updateProject, canEditScript = true }) {
   };
 
   const uploadMaterial = async (material, file) => {
-    if (material.category !== "サムネイル") return;
+    if (!canEditScript || material.category !== "サムネイル") return;
     try {
       const runtime = getWordPressRuntime();
       const imageUrl = runtime
@@ -1262,14 +1299,56 @@ function QuestionContext({ project, question }) {
   );
 }
 
-function QuestionsView({ project, updateProject }) {
+function QuestionsView({
+  project,
+  updateProject,
+  canEditScript = true,
+  currentUser = {},
+  onCreateQuestion = null,
+  onResolveQuestion = null
+}) {
   const [filter, setFilter] = useState("未回答");
-  const [draft, setDraft] = useState({ authorName: "", lineId: "", body: "" });
+  const [draft, setDraft] = useState(() => ({
+    authorName: currentUser.accessMode === "guest" ? readPublicQuestionerName() : currentUser.name || "",
+    lineId: "",
+    body: ""
+  }));
+  const [message, setMessage] = useState("");
+  const [busyQuestionId, setBusyQuestionId] = useState("");
+  const [followUpQuestionId, setFollowUpQuestionId] = useState("");
+  const [followUpDrafts, setFollowUpDrafts] = useState({});
+  const isSharedMember = !canEditScript && typeof onCreateQuestion === "function";
+  const currentMemberId = String(currentUser.castMemberId || "");
   const visibleQuestionThreads = buildProductionQuestionThreads(project.questions)
     .filter(({ question }) => filter === "すべて" || question.status === filter);
 
-  const addQuestion = () => {
+  const ownsQuestion = (question) => Boolean(question.isOwnedByCurrentVisitor) || (currentMemberId
+    ? String(question.castMemberId || "") === currentMemberId
+    : Number(currentUser.id) > 0 && Number(question.wpUserId) === Number(currentUser.id));
+
+  const addQuestion = async () => {
     if (!draft.body.trim()) return;
+    if (!canEditScript && !isSharedMember) {
+      setMessage("質問の共有機能を読み込めませんでした。ページを再読み込みしてください。");
+      return;
+    }
+    if (isSharedMember && !draft.authorName.trim()) {
+      setMessage("質問者名を入力してください。");
+      return;
+    }
+    if (isSharedMember) {
+      setMessage("質問を送信しています…");
+      try {
+        await onCreateQuestion(project.id, draft.lineId, draft.body, "", draft.authorName.trim());
+        try { globalThis.localStorage?.setItem(PUBLIC_QUESTIONER_NAME_KEY, draft.authorName.trim()); } catch { /* Keep questions usable without storage. */ }
+        setDraft((current) => ({ ...current, lineId: "", body: "" }));
+        setFilter("未回答");
+        setMessage("質問を登録しました。");
+      } catch (error) {
+        setMessage(error.message);
+      }
+      return;
+    }
     const line = project.lines.find((item) => item.id === draft.lineId);
     const now = new Date().toISOString();
     updateProject((current) => ({
@@ -1280,10 +1359,45 @@ function QuestionsView({ project, updateProject }) {
     setFilter("未回答");
   };
 
-  const patchQuestion = (questionId, patch) => updateProject((current) => ({
-    ...current,
-    questions: current.questions.map((question) => question.id === questionId ? { ...question, ...patch, updatedAt: new Date().toISOString() } : question)
-  }));
+  const patchQuestion = (questionId, patch) => {
+    if (!canEditScript) return;
+    updateProject((current) => ({
+      ...current,
+      questions: current.questions.map((question) => question.id === questionId ? { ...question, ...patch, updatedAt: new Date().toISOString() } : question)
+    }));
+  };
+
+  const resolveQuestion = async (questionId) => {
+    if (!onResolveQuestion) return;
+    setBusyQuestionId(questionId);
+    setMessage("解決済みに更新しています…");
+    try {
+      await onResolveQuestion(project.id, questionId);
+      setMessage("質問を解決済みにしました。");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setBusyQuestionId("");
+    }
+  };
+
+  const submitFollowUp = async (question) => {
+    const body = String(followUpDrafts[question.id] || "").trim();
+    if (!body || !onCreateQuestion) return;
+    setBusyQuestionId(question.id);
+    setMessage("追加の質問を送信しています…");
+    try {
+      await onCreateQuestion(project.id, question.lineId, body, question.id, draft.authorName.trim());
+      setFollowUpDrafts((current) => ({ ...current, [question.id]: "" }));
+      setFollowUpQuestionId("");
+      setFilter("未回答");
+      setMessage("追加の質問を未回答へ送りました。");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setBusyQuestionId("");
+    }
+  };
 
   const lineOptions = project.lines.filter((line) => line.kind !== "direction");
 
@@ -1296,7 +1410,8 @@ function QuestionsView({ project, updateProject }) {
           <label><span>対象のセリフ</span><select value={draft.lineId} onChange={(event) => setDraft((current) => ({ ...current, lineId: event.target.value }))}><option value="">作品全体について</option>{lineOptions.map((line) => <option key={line.id} value={line.id}>{line.chapterTitle} / {line.sceneTitle} / {getCharacterName(project, line.characterId)} / {String(line.order).padStart(3, "0")} {line.text.slice(0, 24)}</option>)}</select></label>
           <label className="wide"><span>質問内容</span><textarea value={draft.body} onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))} /></label>
         </div>
-        <button type="button" className="primary" disabled={!draft.body.trim()} onClick={addQuestion}><MessageSquareText size={16} />質問を登録</button>
+        <button type="button" className="primary" disabled={!draft.body.trim() || !canEditScript && (!isSharedMember || !draft.authorName.trim())} onClick={addQuestion}><MessageSquareText size={16} />質問を登録</button>
+        {message && <p className="production-inline-message">{message}</p>}
       </section>
 
       <div className="question-status-tabs" role="tablist">
@@ -1304,28 +1419,54 @@ function QuestionsView({ project, updateProject }) {
       </div>
 
       <div className="question-thread-list">
-        {visibleQuestionThreads.map(({ question, depth }) => (
-          <article className={`question-thread status-${question.status}${depth ? " is-follow-up" : ""}`} style={{ "--question-depth": Math.min(depth, 3) }} key={question.id}>
+        {visibleQuestionThreads.map(({ question, depth }) => {
+          const isQuestioner = ownsQuestion(question);
+          const canResolve = !canEditScript && isQuestioner && (question.isOwnedByCurrentVisitor
+            ? question.status === "回答済み" && Boolean(String(question.answer || "").trim())
+            : canResolveProductionQuestion(question, currentUser.id, currentMemberId));
+          return <article className={`question-thread status-${question.status}${depth ? " is-follow-up" : ""}`} style={{ "--question-depth": Math.min(depth, 3) }} key={question.id}>
             <header>
               <div><b>{question.authorName}</b><time>{formatDate(question.createdAt, true)}</time></div>
-              <div><span className={`question-status-label status-${question.status}`}>{question.status}</span><button type="button" className="icon-button danger-icon" title="質問を削除" onClick={() => {
+              <div><span className={`question-status-label status-${question.status}`}>{question.status}</span>{canEditScript && <button type="button" className="icon-button danger-icon" title="質問を削除" onClick={() => {
                 if (!confirm("この質問を削除しますか？")) return;
                 updateProject((current) => ({ ...current, questions: current.questions.filter((item) => item.id !== question.id) }));
-              }}><Trash2 size={16} /></button></div>
+              }}><Trash2 size={16} /></button>}</div>
             </header>
             {question.parentQuestionId && <div className="question-follow-up-label"><MessageSquareText size={15} />前の回答への追加質問</div>}
             <QuestionContext project={project} question={question} />
             <p className="question-body">{question.body}</p>
-            <label className="question-answer"><span>管理者からの回答</span><textarea value={question.answer} placeholder="回答を入力" onChange={(event) => patchQuestion(question.id, { answer: event.target.value })} /></label>
+            {canEditScript ? (
+              <label className="question-answer"><span>管理者からの回答</span><textarea value={question.answer} placeholder="回答を入力" onChange={(event) => patchQuestion(question.id, { answer: event.target.value })} /></label>
+            ) : question.answer ? (
+              <div className="member-question-answer">
+                <b>管理者からの回答</b>
+                <p>{question.answer}</p>
+                {canResolve && (
+                  <div className="member-question-resolution">
+                    <span>回答を確認し、解決したか追加で確認したいかを選んでください。</span>
+                    <div className="member-question-resolution-actions">
+                      <button type="button" className="secondary" disabled={busyQuestionId === question.id} onClick={() => resolveQuestion(question.id)}><CheckCircle2 size={16} />解決しました</button>
+                      <button type="button" className="secondary" disabled={busyQuestionId === question.id} onClick={() => setFollowUpQuestionId((current) => current === question.id ? "" : question.id)}><MessageSquareText size={16} />さらに質問</button>
+                    </div>
+                    {followUpQuestionId === question.id && (
+                      <div className="member-follow-up-composer">
+                        <label><span>追加の質問</span><textarea value={followUpDrafts[question.id] || ""} onChange={(event) => setFollowUpDrafts((current) => ({ ...current, [question.id]: event.target.value }))} /></label>
+                        <button type="button" className="primary" disabled={!String(followUpDrafts[question.id] || "").trim() || busyQuestionId === question.id} onClick={() => submitFollowUp(question)}><MessageSquareText size={16} />未回答へ送る</button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : <p className="question-answer-pending">管理者からの回答を待っています。</p>}
             <footer>
               <span>最終更新 {formatDate(question.updatedAt, true)}</span>
-              <button type="button" className="primary" disabled={!question.answer.trim()} onClick={() => patchQuestion(question.id, { status: question.status === "解決済み" ? "解決済み" : "回答済み" })}>
+              {canEditScript && <button type="button" className="primary" disabled={!question.answer.trim()} onClick={() => patchQuestion(question.id, { status: question.status === "解決済み" ? "解決済み" : "回答済み" })}>
                 <MessageSquareText size={16} />
                 {question.status === "未回答" ? "回答を確定" : "回答内容を保存"}
-              </button>
+              </button>}
             </footer>
-          </article>
-        ))}
+          </article>;
+        })}
       </div>
       {!visibleQuestionThreads.length && <div className="production-empty-state"><CheckCircle2 size={30} /><b>{filter}の質問はありません</b></div>}
     </div>
@@ -1390,6 +1531,9 @@ export function ProductionWorkspace({
   updateProject,
   siteUsers = [],
   canEditScript = true,
+  currentUser = {},
+  onCreateQuestion = null,
+  onResolveQuestion = null,
   setActive
 }) {
   const project = useMemo(
@@ -1415,7 +1559,16 @@ export function ProductionWorkspace({
       {view === "characters" && <CharactersView project={project} updateProject={updateProject} siteUsers={siteUsers} canEditScript={canEditScript} />}
       {view === "links" && <LinksView project={project} updateProject={updateProject} canEditScript={canEditScript} />}
       {view === "materials" && <MaterialsView project={project} updateProject={updateProject} canEditScript={canEditScript} />}
-      {view === "questions" && <QuestionsView project={project} updateProject={updateProject} />}
+      {view === "questions" && (
+        <QuestionsView
+          project={project}
+          updateProject={updateProject}
+          canEditScript={canEditScript}
+          currentUser={currentUser}
+          onCreateQuestion={onCreateQuestion}
+          onResolveQuestion={onResolveQuestion}
+        />
+      )}
       {view === "schedule" && <ScheduleView project={project} updateProject={updateProject} canEditScript={canEditScript} />}
     </div>
   );

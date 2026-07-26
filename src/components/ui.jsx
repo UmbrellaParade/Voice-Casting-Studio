@@ -261,11 +261,11 @@ export function Field({ label, value, onChange = () => {}, type = "text", placeh
   );
 }
 
-export function TextArea({ label, value, onChange }) {
+export function TextArea({ label, value, onChange = () => {}, readOnly = false }) {
   return (
     <label className="field wide">
       <span>{label}</span>
-      <textarea value={value ?? ""} onChange={(event) => onChange(event.target.value)} />
+      <textarea value={value ?? ""} readOnly={readOnly} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }

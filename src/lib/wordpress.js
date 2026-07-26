@@ -25,6 +25,21 @@ export const getWordPressRuntime = () => {
   return null;
 };
 
+const PUBLIC_MEMBER_STORAGE_KEY = "voice-casting-studio-public-member-id";
+const fallbackPublicMemberId = `member-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+
+const getPublicMemberId = () => {
+  try {
+    const stored = globalThis.localStorage?.getItem(PUBLIC_MEMBER_STORAGE_KEY);
+    if (stored) return stored;
+    const generated = globalThis.crypto?.randomUUID?.() || fallbackPublicMemberId;
+    globalThis.localStorage?.setItem(PUBLIC_MEMBER_STORAGE_KEY, generated);
+    return generated;
+  } catch {
+    return fallbackPublicMemberId;
+  }
+};
+
 const wordpressRequest = async (path, options = {}) => {
   const runtime = getWordPressRuntime();
   if (!runtime) throw new Error("WordPress接続情報がありません。");
@@ -55,12 +70,17 @@ const wordpressRequest = async (path, options = {}) => {
     "X-VCS-Member": runtime.shareAccess.memberId,
     "X-VCS-Key": runtime.shareAccess.accessKey
   } : {};
+  const publicHeaders = runtime.publicNonce ? {
+    "X-VCS-Public-Nonce": runtime.publicNonce,
+    "X-VCS-Public-Member": getPublicMemberId()
+  } : {};
   const response = await fetch(`${runtime.restUrl}${String(path || "").replace(/^\/+/, "")}`, {
     credentials: "same-origin",
     ...options,
     headers: {
       ...(runtime.nonce ? { "X-WP-Nonce": runtime.nonce } : {}),
       ...shareHeaders,
+      ...publicHeaders,
       ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...(options.headers || {})
     }
@@ -113,9 +133,9 @@ export const updateWordPressRecordingLine = ({ projectId, lineId, patch, lineCon
   body: JSON.stringify({ projectId, lineId, patch, lineContext })
 });
 
-export const createWordPressQuestion = ({ projectId, lineId = "", body, parentQuestionId = "" }) => wordpressRequest("question", {
+export const createWordPressQuestion = ({ projectId, lineId = "", body, parentQuestionId = "", authorName = "" }) => wordpressRequest("question", {
   method: "POST",
-  body: JSON.stringify({ projectId, lineId, body, parentQuestionId })
+  body: JSON.stringify({ projectId, lineId, body, parentQuestionId, authorName })
 });
 
 export const resolveWordPressQuestion = ({ projectId, questionId }) => wordpressRequest("question/resolve", {

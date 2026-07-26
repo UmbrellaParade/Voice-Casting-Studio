@@ -39,6 +39,16 @@ const MEMBER_NAV = [
   ["manual", "マニュアル", BookOpen]
 ];
 
+const PUBLIC_QUESTIONER_NAME_KEY = "voice-casting-studio-questioner-name";
+
+const readPublicQuestionerName = () => {
+  try {
+    return globalThis.localStorage?.getItem(PUBLIC_QUESTIONER_NAME_KEY) || "";
+  } catch {
+    return "";
+  }
+};
+
 const formatDate = (value) => {
   if (!value) return "未設定";
   const date = new Date(value.length === 10 ? `${value}T00:00:00` : value);
@@ -160,7 +170,7 @@ function MemberHome({ project, assignedCharacterIds, setActive, isGuest = false 
         <button type="button" className="production-metric" onClick={() => setActive("script")}><CheckCircle2 size={20} /><span>{isGuest ? "全セリフ収録済み" : "担当セリフ収録済み"}</span><strong>{progress.recorded}/{progress.total}</strong><small>{progress.recordedPercent}%</small></button>
         <button type="button" className={`production-metric ${unreviewed.length ? "attention" : ""}`} onClick={() => setActive("script")}><FileAudio size={20} /><span>確認待ち</span><strong>{unreviewed.length}</strong><small>提出済み録音</small></button>
         <button type="button" className={`production-metric ${retakes.length ? "danger" : ""}`} onClick={() => setActive("script")}><RefreshCw size={20} /><span>リテイク</span><strong>{retakes.length}</strong><small>再提出が必要</small></button>
-        {!isGuest && <button type="button" className={`production-metric ${questions.length ? "attention" : ""}`} onClick={() => setActive("questions")}><CircleHelp size={20} /><span>対応中の質問</span><strong>{questions.length}</strong><small>未回答・回答済み</small></button>}
+        <button type="button" className={`production-metric ${questions.length ? "attention" : ""}`} onClick={() => setActive("questions")}><CircleHelp size={20} /><span>対応中の質問</span><strong>{questions.length}</strong><small>未回答・回答済み</small></button>
       </div>
       <div className="production-home-grid">
         <section className="panel production-dashboard-section announcements"><header><div><Megaphone size={19} /><h3>お知らせ</h3></div></header><div className="production-dashboard-list compact">{project.announcements.map((item) => <article className={item.priority === "重要" ? "important" : ""} key={item.id}><div><b>{item.title}</b><span>{formatDate(item.publishedAt)}</span></div><p>{item.body}</p></article>)}{!project.announcements.length && <p className="production-list-empty">お知らせはありません。</p>}</div></section>
@@ -278,18 +288,22 @@ function MemberCharacters({ project, assignedCharacterIds, showAssignments = tru
   const { linkedCharacters } = partitionCharactersByScript(project);
   return (
     <div className="member-character-grid">
-      {linkedCharacters.map((character) => (
+      {linkedCharacters.map((character) => {
+        const assignedMember = project.castMembers.find((member) => member.characterIds?.includes(character.id));
+        return (
         <article key={character.id} style={{ "--character-color": character.color }}>
           <div className="member-character-image">{character.imageUrl ? <img src={makeImagePreviewUrl(character.imageUrl) || character.imageUrl} alt={character.name} style={getCharacterImageCropStyle(character)} /> : <Users size={32} />}</div>
           <div>
-            <header><h3>{character.name}</h3>{showAssignments && assignedCharacterIds.has(character.id) && <span>担当</span>}</header>
+            <header><h3>{character.name}</h3>{showAssignments && <span>{assignedMember?.actorName || "担当声優未設定"}</span>}</header>
             {character.profile && <p>{character.profile}</p>}
+            {showAssignments && isWebUrl(assignedMember?.socialUrl) && <a href={assignedMember.socialUrl} target="_blank" rel="noreferrer"><ExternalLink size={16} />担当者SNS</a>}
             {assignedCharacterIds.has(character.id) && character.recordingFolderUrl && (
               <footer><a href={character.recordingFolderUrl} target="_blank" rel="noreferrer"><FolderOpen size={16} />収録フォルダー</a></footer>
             )}
           </div>
         </article>
-      ))}
+        );
+      })}
       {!linkedCharacters.length && <div className="production-empty-state"><Users size={30} /><b>現在の台本に登場するキャラクターはいません</b></div>}
     </div>
   );
@@ -352,24 +366,31 @@ function MemberMaterials({ project }) {
 }
 
 function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQuestion, onResolveQuestion }) {
+  const isGuest = currentUser.accessMode === "guest";
   const lines = project.lines.filter((line) => line.kind !== "direction" && assignedCharacterIds.has(line.characterId));
   const currentMemberId = String(currentUser.castMemberId || "");
-  const ownsQuestion = (question) => currentMemberId
+  const ownsQuestion = (question) => Boolean(question.isOwnedByCurrentVisitor) || (currentMemberId
     ? String(question.castMemberId || "") === currentMemberId
-    : Number(currentUser.id) > 0 && Number(question.wpUserId) === Number(currentUser.id);
-  const questions = project.questions.filter((question) => ownsQuestion(question) || assignedCharacterIds.has(question.characterId));
+    : Number(currentUser.id) > 0 && Number(question.wpUserId) === Number(currentUser.id));
+  const questions = isGuest
+    ? project.questions
+    : project.questions.filter((question) => ownsQuestion(question) || assignedCharacterIds.has(question.characterId));
   const questionThreads = buildProductionQuestionThreads(questions);
   const [draft, setDraft] = useState({ lineId: "", body: "" });
+  const [questionerName, setQuestionerName] = useState(readPublicQuestionerName);
   const [message, setMessage] = useState("");
   const [resolvingQuestionId, setResolvingQuestionId] = useState("");
   const [resolveMessages, setResolveMessages] = useState({});
   const [followUpQuestionId, setFollowUpQuestionId] = useState("");
   const [followUpDrafts, setFollowUpDrafts] = useState({});
   const submit = async () => {
-    if (!draft.body.trim()) return;
+    if (!draft.body.trim() || (isGuest && !questionerName.trim())) return;
     setMessage("送信中…");
     try {
-      await onCreateQuestion(project.id, draft.lineId, draft.body);
+      await onCreateQuestion(project.id, draft.lineId, draft.body, "", questionerName.trim());
+      if (isGuest) {
+        try { globalThis.localStorage?.setItem(PUBLIC_QUESTIONER_NAME_KEY, questionerName.trim()); } catch { /* Keep the form usable without storage. */ }
+      }
       setDraft({ lineId: "", body: "" });
       setMessage("質問を登録しました。");
     } catch (error) {
@@ -394,7 +415,7 @@ function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQ
     setResolvingQuestionId(question.id);
     setResolveMessages((current) => ({ ...current, [question.id]: "追加の質問を送信中…" }));
     try {
-      await onCreateQuestion(project.id, question.lineId, body, question.id);
+      await onCreateQuestion(project.id, question.lineId, body, question.id, questionerName.trim());
       setFollowUpDrafts((current) => ({ ...current, [question.id]: "" }));
       setFollowUpQuestionId("");
       setResolveMessages((current) => ({ ...current, [question.id]: "追加の質問を未回答へ送りました。" }));
@@ -409,16 +430,19 @@ function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQ
       <section className="question-composer">
         <header><CircleHelp size={20} /><div><h3>質問を送る</h3></div></header>
         <div className="question-composer-fields">
+          {isGuest && <label><span>お名前</span><input value={questionerName} placeholder="声優名・表示名" onChange={(event) => setQuestionerName(event.target.value)} /></label>}
           <label><span>対象のセリフ</span><select value={draft.lineId} onChange={(event) => setDraft((current) => ({ ...current, lineId: event.target.value }))}><option value="">作品全体</option>{lines.map((line) => <option key={line.id} value={line.id}>{line.chapterTitle} / {line.sceneTitle} / {String(line.order).padStart(3, "0")} {line.text.slice(0, 30)}</option>)}</select></label>
           <label className="wide"><span>質問内容</span><textarea value={draft.body} onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))} /></label>
         </div>
-        <div className="member-question-submit"><span>{message}</span><button type="button" className="primary" disabled={!draft.body.trim()} onClick={submit}><MessageSquareText size={16} />登録</button></div>
+        <div className="member-question-submit"><span>{message}</span><button type="button" className="primary" disabled={!draft.body.trim() || (isGuest && !questionerName.trim())} onClick={submit}><MessageSquareText size={16} />登録</button></div>
       </section>
       <div className="question-thread-list">
         {questionThreads.map(({ question, depth }) => {
           const line = project.lines.find((item) => item.id === question.lineId);
-          const canResolve = canResolveProductionQuestion(question, currentUser.id, currentMemberId);
           const isQuestioner = ownsQuestion(question);
+          const canResolve = question.isOwnedByCurrentVisitor
+            ? question.status === "回答済み" && Boolean(String(question.answer || "").trim())
+            : canResolveProductionQuestion(question, currentUser.id, currentMemberId);
           return (
             <article className={`question-thread status-${question.status}${depth ? " is-follow-up" : ""}`} style={{ "--question-depth": Math.min(depth, 3) }} key={question.id}>
               <header>
@@ -484,8 +508,7 @@ export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voic
   useEffect(() => { if (!projects.some((item) => item.id === projectId)) setProjectId(projects[0]?.id || ""); }, [projects, projectId]);
   const project = projects.find((item) => item.id === projectId) || projects[0];
   const isGuest = runtime.currentUser?.accessMode === "guest";
-  const memberNav = isGuest ? MEMBER_NAV.filter(([key]) => key !== "questions") : MEMBER_NAV;
-  useEffect(() => { if (isGuest && active === "questions") setActive("home"); }, [active, isGuest]);
+  const memberNav = MEMBER_NAV;
   if (connectionState.status === "loading") return <main className="member-portal-loading"><RefreshCw className="spin" size={30} /><b>{connectionState.message}</b></main>;
   if (!project) return <main className="member-portal-loading"><Users size={30} /><b>{connectionState.status === "error" ? connectionState.message : isGuest ? "共有中の作品はまだありません。" : "担当作品がまだ割り当てられていません。"}</b>{runtime.logoutUrl && <a className="secondary" href={runtime.logoutUrl}><LogOut size={16} />ログアウト</a>}</main>;
   const member = isGuest ? null : project.castMembers.find((item) => Number(item.wpUserId) === Number(runtime.currentUser?.id)) || project.castMembers[0];
@@ -500,15 +523,15 @@ export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voic
       <nav className="app-nav" aria-label="Main navigation">{memberNav.map(([key, label, Icon]) => <button type="button" className={active === key ? "active" : ""} key={key} onClick={() => setActive(key)}><Icon size={17} /><span>{label}</span></button>)}</nav>
       <section className="content-panel view-stack">
         <SectionTitle title={pageTitle} subtitle={pageSubtitle} />
-        {isGuest && <div className="member-shared-view-notice"><Users size={18} /><span><b>全メンバー共通の閲覧画面</b>収録済みチェックと個別の質問は、担当者専用URLから利用できます。</span></div>}
+        {isGuest && <div className="member-shared-view-notice"><Users size={18} /><span><b>全メンバー共通の共同作業画面</b>収録済みチェックと質問を全員で共有できます。台本・制作確認・素材・予定などの管理は制作オーナーだけが行えます。</span></div>}
         {active !== "concept" && <MemberProjectBar projects={projects} project={project} setProjectId={setProjectId} runtime={runtime} connectionState={connectionState} onRefresh={onRefresh} isGuest={isGuest} />}
         {active === "home" && <MemberHome project={project} assignedCharacterIds={assignedCharacterIds} setActive={setActive} isGuest={isGuest} />}
         {active === "concept" && <ConceptView concept={data.studioConcept} showTitle={false} />}
-        {active === "script" && <MemberScript project={project} assignedCharacterIds={assignedCharacterIds} onUpdateLine={onUpdateLine} canUpdateLine={!isGuest} />}
-        {active === "characters" && <MemberCharacters project={project} assignedCharacterIds={assignedCharacterIds} showAssignments={!isGuest} />}
+        {active === "script" && <MemberScript project={project} assignedCharacterIds={assignedCharacterIds} onUpdateLine={onUpdateLine} canUpdateLine />}
+        {active === "characters" && <MemberCharacters project={project} assignedCharacterIds={assignedCharacterIds} />}
         {active === "links" && <MemberLinks project={project} assignedCharacterIds={assignedCharacterIds} />}
         {active === "materials" && <MemberMaterials project={project} />}
-        {!isGuest && active === "questions" && <MemberQuestions project={project} assignedCharacterIds={assignedCharacterIds} currentUser={runtime.currentUser || {}} onCreateQuestion={onCreateQuestion} onResolveQuestion={onResolveQuestion} />}
+        {active === "questions" && <MemberQuestions project={project} assignedCharacterIds={assignedCharacterIds} currentUser={runtime.currentUser || {}} onCreateQuestion={onCreateQuestion} onResolveQuestion={onResolveQuestion} />}
         {active === "schedule" && <MemberSchedule project={project} />}
         {active === "manual" && <ManualView viewerRole="actor" showTitle={false} onNavigate={setActive} />}
       </section>
