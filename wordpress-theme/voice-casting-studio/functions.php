@@ -283,6 +283,7 @@ function vcs_normalize_studio_concept(array $data): array
         'title' => (string) ($concept['title'] ?? 'Umbrella Parade'),
         'tagline' => (string) ($concept['tagline'] ?? ''),
         'body' => (string) ($concept['body'] ?? ''),
+        'vision' => (string) ($concept['vision'] ?? ''),
         'principles' => (string) ($concept['principles'] ?? ''),
     ];
 }

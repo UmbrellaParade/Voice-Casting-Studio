@@ -2226,6 +2226,7 @@ export const DEFAULT_STUDIO_CONCEPT = {
   title: "Umbrella Parade",
   tagline: "",
   body: "",
+  vision: "",
   principles: ""
 };
 
@@ -2233,6 +2234,7 @@ export const normalizeStudioConcept = (concept = {}) => ({
   title: String(concept?.title || DEFAULT_STUDIO_CONCEPT.title).trim() || DEFAULT_STUDIO_CONCEPT.title,
   tagline: String(concept?.tagline || ""),
   body: String(concept?.body || ""),
+  vision: String(concept?.vision || ""),
   principles: String(concept?.principles || "")
 });
 

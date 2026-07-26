@@ -1016,9 +1016,9 @@ h1 {
 
 .character-editor {
   display: grid;
-  grid-template-columns: 172px minmax(0, 1fr);
-  gap: 16px;
-  padding: 14px;
+  grid-template-columns: 152px minmax(0, 1fr);
+  gap: 14px;
+  padding: 12px;
   border: 1px solid #d8cec1;
   border-left: 5px solid var(--character-color);
   border-radius: 8px;
@@ -1162,7 +1162,7 @@ h1 {
 
 .character-editor-fields {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -1243,7 +1243,7 @@ h1 {
 .character-field-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 8px 10px;
 }
 
 .character-actor-fields {
@@ -1260,12 +1260,33 @@ h1 {
   min-width: 0;
 }
 
+.character-folder-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  gap: 6px;
+  min-width: 0;
+}
+
+.character-folder-label {
+  align-self: start;
+  align-content: start;
+}
+
 .character-social-open {
   width: 40px;
   height: 40px;
 }
 
-.character-social-open.disabled {
+.character-folder-open {
+  width: 40px;
+  height: 40px;
+  border-color: #c9d8d6;
+  background: #f3f9f8;
+  color: #166f79;
+}
+
+.character-social-open.disabled,
+.character-folder-open.disabled {
   pointer-events: none;
   opacity: .42;
 }
@@ -1275,7 +1296,7 @@ h1 {
 }
 
 .character-editor textarea {
-  min-height: 72px;
+  min-height: 58px;
   resize: vertical;
 }
 
@@ -7633,7 +7654,7 @@ textarea {
 }
 
 .concept-page {
-  gap: 18px;
+  gap: 14px;
 }
 
 .concept-hero {
@@ -7641,8 +7662,8 @@ textarea {
   display: flex;
   align-items: center;
   gap: 18px;
-  min-height: 210px;
-  padding: 32px clamp(22px, 5vw, 58px);
+  min-height: 160px;
+  padding: 24px clamp(22px, 5vw, 48px);
   overflow: hidden;
   border: 1px solid #241f2f;
   border-left: 7px solid #25a8a8;
@@ -7699,19 +7720,48 @@ textarea {
 
 .concept-content-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr);
   gap: 0;
-  border-top: 1px solid #d8cdbf;
+  overflow: hidden;
+  border: 1px solid #d8cdbf;
+  border-radius: 8px;
+}
+
+.concept-reader-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 5px;
   border-bottom: 1px solid #d8cdbf;
+  background: #f3efea;
 }
 
-.concept-content-layout > section {
-  min-height: 220px;
-  padding: 26px clamp(18px, 3vw, 34px);
+.concept-reader-tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #5f5666;
+  font-size: 12px;
+  font-weight: 900;
 }
 
-.concept-content-layout > section + section {
-  border-left: 1px solid #d8cdbf;
+.concept-reader-tabs button.active {
+  background: #fff;
+  color: #241f2f;
+  box-shadow: 0 1px 5px rgba(36, 31, 47, .12);
+}
+
+.concept-reader-panel {
+  min-height: 180px;
+  max-height: 260px;
+  padding: 20px clamp(16px, 2.5vw, 28px);
+  overflow-y: auto;
+  scrollbar-color: #a69aa8 #f2eee9;
 }
 
 .concept-content-layout header,
@@ -7730,6 +7780,10 @@ textarea {
   color: #d44069;
 }
 
+.concept-vision header svg {
+  color: #8a5baf;
+}
+
 .concept-content-layout h3,
 .concept-editor h3 {
   margin: 0;
@@ -7737,10 +7791,10 @@ textarea {
 }
 
 .concept-content-layout section > p {
-  margin: 20px 0 0;
+  margin: 14px 0 0;
   color: #403747;
   font-size: 15px;
-  line-height: 2;
+  line-height: 1.8;
   white-space: pre-wrap;
 }
 
@@ -7806,6 +7860,37 @@ textarea {
   line-height: 1.8;
 }
 
+.concept-editor-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.concept-editor-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #d8cec1;
+  border-radius: 7px;
+  background: #f3efea;
+}
+
+.concept-editor-tabs button {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #5f5666;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.concept-editor-tabs button.active {
+  background: #241f2f;
+  color: #fff;
+}
+
 .concept-editor > footer {
   display: flex;
   align-items: center;
@@ -7839,19 +7924,24 @@ textarea {
     font-size: 34px;
   }
 
-  .concept-content-layout,
   .concept-editor-fields {
     grid-template-columns: 1fr;
   }
 
-  .concept-content-layout > section {
-    min-height: 0;
-    padding: 22px 4px;
+  .concept-reader-tabs button {
+    min-height: 48px;
+    padding: 6px 4px;
+    font-size: 11px;
   }
 
-  .concept-content-layout > section + section {
-    border-top: 1px solid #d8cdbf;
-    border-left: 0;
+  .concept-reader-tabs button svg {
+    display: none;
+  }
+
+  .concept-reader-panel {
+    min-height: 160px;
+    max-height: 240px;
+    padding: 18px;
   }
 
   .concept-editor-fields label.wide {

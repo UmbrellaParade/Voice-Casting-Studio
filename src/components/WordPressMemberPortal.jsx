@@ -29,7 +29,7 @@ import { getScriptSceneAnchorId, ScriptSceneToc } from "./ScriptSceneToc.jsx";
 
 const MEMBER_NAV = [
   ["home", "ホーム", Home],
-  ["concept", "コンセプト", Sparkles],
+  ["concept", "コンセプト・ビジョン", Sparkles],
   ["script", "台本", FileText],
   ["characters", "キャラクター", Users],
   ["links", "共有リンク", Link],
@@ -419,7 +419,7 @@ export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voic
   const assignedCharacterIds = new Set(member?.characterIds || []);
   const pageTitle = MEMBER_NAV.find(([key]) => key === active)?.[1] || "ホーム";
   const pageSubtitle = active === "concept"
-    ? "Umbrella Paradeが大切にしている考えを共有します。"
+    ? "Umbrella Paradeが大切にしている考えと、目指す未来を共有します。"
     : `${withHonorific(runtime.currentUser?.name || member?.actorName)} / ${project.title}`;
   return (
     <main className="app-shell member-portal-shell">

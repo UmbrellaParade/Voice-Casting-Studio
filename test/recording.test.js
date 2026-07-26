@@ -83,8 +83,12 @@ test("adds a global Umbrella Parade concept to older workspace data", () => {
     title: "Umbrella Parade",
     tagline: "",
     body: "",
+    vision: "",
     principles: ""
   });
+
+  const withVision = migrateData({ studioConcept: { vision: "物語と声が長く残る場所をつくる。" }, recordingProjects: [] });
+  assert.equal(withVision.studioConcept.vision, "物語と声が長く残る場所をつくる。");
 });
 
 test("reorders production materials without changing their contents", () => {

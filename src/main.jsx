@@ -300,7 +300,7 @@ const AUDITION_NAV_ITEMS = [
 ];
 const MAIN_NAV_ITEMS = [
   ["home", "ホーム", LayoutDashboard],
-  ["concept", "コンセプト", Sparkles],
+  ["concept", "コンセプト・ビジョン", Sparkles],
   ["recording", "台本", FileText],
   ["characters", "キャラクター", Users],
   ["links", "共有リンク", Link],
