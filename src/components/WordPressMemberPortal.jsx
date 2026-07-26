@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import "../member.css";
 import {
+  BookOpen,
   CalendarDays,
   CheckCircle2,
   CircleHelp,
@@ -21,6 +22,7 @@ import {
 import { getGoogleDriveFileId, isWebUrl, makeDirectAudioDownloadUrl, makeGoogleDrivePreviewUrl, makeImagePreviewUrl } from "../lib/core.js";
 import { getCharacterImageCropStyle, getCharacterName, getRecordingDisplayProject, getRecordingProgress, parseRubyText } from "../lib/recording.js";
 import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
+import { ManualView } from "./ManualView.jsx";
 import { Header, SectionTitle } from "./ui.jsx";
 import { getScriptSceneAnchorId, ScriptSceneToc } from "./ScriptSceneToc.jsx";
 
@@ -31,7 +33,8 @@ const MEMBER_NAV = [
   ["links", "共有リンク", Link],
   ["materials", "素材", Music2],
   ["questions", "質問", MessageSquareText],
-  ["schedule", "予定", CalendarDays]
+  ["schedule", "予定", CalendarDays],
+  ["manual", "マニュアル", BookOpen]
 ];
 
 const formatDate = (value) => {
@@ -351,6 +354,7 @@ export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voic
         {active === "materials" && <MemberMaterials project={project} />}
         {active === "questions" && <MemberQuestions project={project} assignedCharacterIds={assignedCharacterIds} currentUser={runtime.currentUser || {}} onCreateQuestion={onCreateQuestion} />}
         {active === "schedule" && <MemberSchedule project={project} />}
+        {active === "manual" && <ManualView viewerRole="actor" showTitle={false} onNavigate={setActive} />}
       </section>
     </main>
   );

@@ -1169,6 +1169,61 @@ h1 {
   min-height: 44px;
 }
 
+.production-folder-section > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 50px;
+  padding: 10px 12px;
+  border: 1px solid #d8cec1;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  list-style: none;
+}
+
+.production-folder-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.production-folder-section > summary > div,
+.production-folder-section > summary > span {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.production-folder-section > summary h3,
+.production-folder-section > summary p {
+  margin: 0;
+}
+
+.production-folder-section > summary h3 {
+  color: #352e3c;
+  font-size: 16px;
+}
+
+.production-folder-section > summary p,
+.production-folder-section > summary > span {
+  color: #776e7d;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.production-folder-section > summary svg {
+  flex: 0 0 auto;
+  color: #167680;
+}
+
+.production-folder-section > summary > span svg {
+  transition: transform 160ms ease;
+}
+
+.production-folder-section[open] > summary > span svg {
+  transform: rotate(180deg);
+}
+
 .production-link-section > header > div {
   display: flex;
   align-items: center;
@@ -1327,6 +1382,16 @@ h1 {
   border: 1px solid #d8cec1;
   border-radius: 8px;
   background: #fff;
+  transition: border-color 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+}
+
+.production-shared-url-row.dragging {
+  opacity: .55;
+}
+
+.production-shared-url-row.drag-over {
+  border-color: #168b9a;
+  box-shadow: 0 0 0 2px rgba(22, 139, 154, .14);
 }
 
 .production-shared-url-fields {
@@ -1347,6 +1412,15 @@ h1 {
 .production-shared-url-actions {
   display: grid;
   gap: 6px;
+}
+
+.shared-link-drag-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.shared-link-drag-handle:active {
+  cursor: grabbing;
 }
 
 .production-shared-url-actions a {
@@ -1848,11 +1922,16 @@ h1 {
   .production-section-toolbar,
   .material-toolbar,
   .production-link-section > header,
+  .production-folder-section > summary,
   .production-dashboard-section > header,
   .cast-roster-panel > header,
   .schedule-section > header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .production-folder-section > summary > span {
+    align-self: flex-start;
   }
 
   .production-project-fields {
@@ -1928,7 +2007,7 @@ h1 {
   }
 
   .production-shared-url-actions {
-    grid-template-columns: 36px 36px;
+    grid-template-columns: repeat(3, 36px);
     justify-content: end;
   }
 

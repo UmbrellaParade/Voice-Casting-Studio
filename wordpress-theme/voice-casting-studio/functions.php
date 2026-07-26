@@ -32,7 +32,9 @@ function vcs_register_workspace_post_type(): void
         'public' => false,
         'show_ui' => current_user_can(VCS_MANAGER_CAPABILITY),
         'show_in_rest' => false,
-        'supports' => ['title', 'editor', 'revisions'],
+        // The workspace keeps its own script snapshots. Creating a full WordPress
+        // revision on every debounced save duplicates several MB of JSON.
+        'supports' => ['title'],
         'capability_type' => 'post',
         'map_meta_cap' => true,
     ]);
@@ -211,6 +213,12 @@ function vcs_workspace_recording_urls_are_drive(mixed $value): bool
 
 function vcs_write_workspace(array $data): WP_REST_Response|WP_Error
 {
+    foreach (($data['recordingProjects'] ?? []) as $project_index => $project) {
+        if (!is_array($project) || !isset($project['scriptSnapshots']) || !is_array($project['scriptSnapshots'])) {
+            continue;
+        }
+        $data['recordingProjects'][$project_index]['scriptSnapshots'] = array_slice($project['scriptSnapshots'], 0, 8);
+    }
     if (vcs_workspace_has_embedded_audio($data)) {
         return new WP_Error('vcs_embedded_audio_rejected', 'Audio must be stored in Google Drive and referenced by URL.', ['status' => 400]);
     }

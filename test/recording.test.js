@@ -17,6 +17,7 @@ import {
   parseManualChapterBody,
   reorderProductionCharacters,
   reorderProductionMaterials,
+  reorderProductionSharedLinks,
   repairScriptHierarchy,
   restoreScriptSnapshot
 } from "../src/lib/recording.js";
@@ -49,6 +50,31 @@ test("reorders characters without changing ids used by the script", () => {
   const reordered = reorderProductionCharacters(characters, "narration", "vel");
   assert.deepEqual(reordered.map((character) => character.id), ["narration", "vel", "amamori"]);
   assert.deepEqual(characters.map((character) => character.id), ["vel", "amamori", "narration"]);
+});
+
+test("reorders shared links without changing their contents", () => {
+  const links = [
+    { id: "line", title: "LINEオープンチャット" },
+    { id: "guide", title: "共有資料" },
+    { id: "reference", title: "参考URL" }
+  ];
+  const reordered = reorderProductionSharedLinks(links, "reference", "line");
+  assert.deepEqual(reordered.map((link) => link.id), ["reference", "line", "guide"]);
+  assert.equal(reordered[0], links[2]);
+  assert.deepEqual(links.map((link) => link.id), ["line", "guide", "reference"]);
+});
+
+test("keeps a bounded number of script snapshots for WordPress saves", () => {
+  const project = normalizeRecordingProject({
+    scriptSnapshots: Array.from({ length: 12 }, (_, index) => ({
+      id: `snapshot_${index}`,
+      label: `保存版 ${index}`,
+      lines: [{ id: `line_${index}`, text: `台本 ${index}` }]
+    }))
+  });
+  assert.equal(project.scriptSnapshots.length, 8);
+  assert.equal(project.scriptSnapshots[0].id, "snapshot_0");
+  assert.equal(project.scriptSnapshots[7].id, "snapshot_7");
 });
 
 test("normalizes and preserves character image positions", () => {

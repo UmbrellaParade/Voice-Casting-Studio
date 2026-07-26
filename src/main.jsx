@@ -4,6 +4,7 @@ import LZString from "lz-string";
 import {
   ArrowDown,
   ArrowUp,
+  BookOpen,
   CalendarDays,
   ChevronRight,
   ClipboardCopy,
@@ -267,6 +268,7 @@ import {
 import { RecordingStudio, SharedRecordingBoard } from "./components/RecordingStudio.jsx";
 import { ProductionWorkspace } from "./components/ProductionHub.jsx";
 import { WordPressMemberPortal } from "./components/WordPressMemberPortal.jsx";
+import { ManualView } from "./components/ManualView.jsx";
 import { normalizeRecordingProject, readRecordingShareReference } from "./lib/recording.js";
 
 const moveArrayItem = (items = [], fromIndex, toIndex) => {
@@ -298,6 +300,7 @@ const MAIN_NAV_ITEMS = [
   ["questions", "質問", MessageSquareText],
   ["schedule", "予定", CalendarDays],
   ...(SHOW_AUDITION_WORKFLOW ? AUDITION_NAV_ITEMS : []),
+  ["manual", "マニュアル", BookOpen],
   ["settings", "設定", Settings]
 ];
 
@@ -2050,6 +2053,13 @@ ${socialRows || "-"}
               transferLinkText={transferLinkText}
               setActive={setActive}
               canEditScript={canEditScript}
+            />
+          )}
+          {active === "manual" && (
+            <ManualView
+              viewerRole={canEditScript ? "owner" : "manager"}
+              allowAudienceSwitch
+              onNavigate={setActive}
             />
           )}
         </section>
@@ -4108,7 +4118,7 @@ function SettingsPanel({
           </div>
           {folderMessage && <p className="hint-text">{folderMessage}</p>}
         </>}
-        {WORDPRESS_RUNTIME && <div className="record-head"><div><h2>制作データのバックアップ</h2><p className="muted">WordPressの投稿リビジョンに加えて、手元へJSONを書き出せます。</p></div></div>}
+        {WORDPRESS_RUNTIME && <div className="record-head"><div><h2>制作データのバックアップ</h2><p className="muted">台本内の保存版に加えて、制作データ全体を手元へJSONで書き出せます。</p></div></div>}
         <div className="button-row">
           {!WORDPRESS_RUNTIME && <button className="secondary" onClick={copyTransferLink}><ClipboardCopy size={16} />{transferCopied ? "コピー済み" : "引き継ぎリンクをコピー"}</button>}
           <button className="secondary" onClick={exportJson}><Download size={16} />JSONを書き出し</button>

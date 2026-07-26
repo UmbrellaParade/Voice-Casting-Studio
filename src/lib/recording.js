@@ -22,6 +22,9 @@ export const reorderProductionMaterials = (materials = [], sourceId = "", target
 export const reorderProductionCharacters = (characters = [], sourceId = "", targetId = "") =>
   reorderProductionItems(characters, sourceId, targetId);
 
+export const reorderProductionSharedLinks = (links = [], sourceId = "", targetId = "") =>
+  reorderProductionItems(links, sourceId, targetId);
+
 export const parseManualChapterBody = (bodyText = "", chapterTitle = "") => {
   const chapter = String(chapterTitle || "").trim();
   const rows = [];
@@ -169,7 +172,8 @@ export const ensureUniqueCharacterColors = (characters = []) => {
     return { ...character, color };
   });
 };
-export const MAX_SCRIPT_SNAPSHOTS = 30;
+export const MAX_SCRIPT_SNAPSHOTS = 8;
+export const MAX_SCRIPT_SNAPSHOT_BYTES = 4 * 1024 * 1024;
 
 export const normalizeImagePosition = (value, fallback = 50) => {
   const position = Number(value);
@@ -252,6 +256,19 @@ const normalizeScriptSnapshot = (snapshot = {}, index = 0) => ({
   lines: cloneScriptLines(snapshot.lines)
 });
 
+const compactScriptSnapshots = (snapshots = []) => {
+  const compacted = [];
+  let totalBytes = 0;
+  for (const [index, rawSnapshot] of (Array.isArray(snapshots) ? snapshots : []).slice(0, MAX_SCRIPT_SNAPSHOTS).entries()) {
+    const snapshot = normalizeScriptSnapshot(rawSnapshot, index);
+    const snapshotBytes = JSON.stringify(snapshot).length;
+    if (compacted.length && totalBytes + snapshotBytes > MAX_SCRIPT_SNAPSHOT_BYTES) continue;
+    compacted.push(snapshot);
+    totalBytes += snapshotBytes;
+  }
+  return compacted;
+};
+
 export const createScriptSnapshot = (project = {}, {
   label = "",
   reason = "手動保存",
@@ -269,10 +286,10 @@ export const createScriptSnapshot = (project = {}, {
 
 export const archiveScriptVersion = (project = {}, options = {}) => ({
   ...project,
-  scriptSnapshots: [
+  scriptSnapshots: compactScriptSnapshots([
     createScriptSnapshot(project, options),
     ...(Array.isArray(project.scriptSnapshots) ? project.scriptSnapshots : [])
-  ].slice(0, MAX_SCRIPT_SNAPSHOTS)
+  ])
 });
 
 export const getShareableRecordingProject = (project = {}) => {
@@ -785,9 +802,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
     description: project.description || "",
     scriptVersion: project.scriptVersion || "初稿",
     sourceScriptText: String(project.sourceScriptText || ""),
-    scriptSnapshots: (Array.isArray(project.scriptSnapshots) ? project.scriptSnapshots : [])
-      .slice(0, MAX_SCRIPT_SNAPSHOTS)
-      .map(normalizeScriptSnapshot),
+    scriptSnapshots: compactScriptSnapshots(project.scriptSnapshots),
     status: project.status || "準備中",
     recordingDeadline: String(project.recordingDeadline || ""),
     releaseDate: String(project.releaseDate || ""),

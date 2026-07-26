@@ -5,6 +5,7 @@ import {
   ArrowUp,
   CalendarClock,
   CheckCircle2,
+  ChevronDown,
   CircleHelp,
   ExternalLink,
   FileAudio,
@@ -48,7 +49,8 @@ import {
   normalizeImageScale,
   parseRubyText,
   reorderProductionCharacters,
-  reorderProductionMaterials
+  reorderProductionMaterials,
+  reorderProductionSharedLinks
 } from "../lib/recording.js";
 import { getWordPressRuntime, uploadWordPressImage } from "../lib/wordpress.js";
 import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
@@ -634,6 +636,11 @@ function CharacterLinkField({ icon: Icon, label, service, value = "", placeholde
 }
 
 function LinksView({ project, updateProject, canEditScript = true }) {
+  const [draggingLinkId, setDraggingLinkId] = useState("");
+  const [dragOverLinkId, setDragOverLinkId] = useState("");
+  const [message, setMessage] = useState("");
+  const linkDragRef = useRef(null);
+
   const patchCharacterLink = (characterId, key, value) => updateProject((current) => ({
     ...current,
     characters: current.characters.map((character) => character.id === characterId
@@ -661,13 +668,63 @@ function LinksView({ project, updateProject, canEditScript = true }) {
     sharedLinks: (current.sharedLinks || []).filter((link) => link.id !== linkId)
   }));
 
+  const moveSharedLink = (sourceId, targetId) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const movedLink = (project.sharedLinks || []).find((link) => link.id === sourceId);
+    updateProject((current) => ({
+      ...current,
+      sharedLinks: reorderProductionSharedLinks(current.sharedLinks || [], sourceId, targetId)
+    }));
+    setMessage(`「${movedLink?.title || "共有URL"}」の並び順を保存しました。`);
+  };
+
+  const resetLinkDrag = () => {
+    linkDragRef.current = null;
+    setDraggingLinkId("");
+    setDragOverLinkId("");
+  };
+
+  const beginLinkDrag = (event, linkId) => {
+    if (event.button !== 0) return;
+    linkDragRef.current = {
+      sourceId: linkId,
+      startX: event.clientX,
+      startY: event.clientY,
+      targetId: "",
+      moved: false
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const trackLinkDrag = (event) => {
+    const drag = linkDragRef.current;
+    if (!drag) return;
+    if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
+    event.preventDefault();
+    drag.moved = true;
+    setDraggingLinkId(drag.sourceId);
+    if (event.clientY < 72) window.scrollBy({ top: -18 });
+    if (event.clientY > window.innerHeight - 72) window.scrollBy({ top: 18 });
+    const targetId = document.elementFromPoint(event.clientX, event.clientY)?.closest?.("[data-shared-link-id]")?.dataset.sharedLinkId || "";
+    drag.targetId = targetId && targetId !== drag.sourceId ? targetId : "";
+    setDragOverLinkId(drag.targetId);
+  };
+
+  const finishLinkDrag = (event) => {
+    const drag = linkDragRef.current;
+    if (!drag) return;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (drag.moved && drag.targetId) moveSharedLink(drag.sourceId, drag.targetId);
+    resetLinkDrag();
+  };
+
   return (
     <div className="production-page-stack">
-      <section className="production-link-section">
-        <header>
+      <details className="production-link-section production-folder-section">
+        <summary>
           <div><FolderOpen size={20} /><div><h3>収録フォルダー一覧</h3><p>キャラクターごとのGoogle Drive録音先です。</p></div></div>
-          <span>{project.characters.length}フォルダー</span>
-        </header>
+          <span>{project.characters.length}フォルダー<ChevronDown size={18} /></span>
+        </summary>
         <div className="production-link-list">
           {project.characters.map((character) => {
             const assignedMember = project.castMembers.find((member) => member.characterIds.includes(character.id));
@@ -693,24 +750,47 @@ function LinksView({ project, updateProject, canEditScript = true }) {
           })}
           {!project.characters.length && <div className="production-empty-state"><FolderOpen size={30} /><b>収録フォルダーを設定するキャラクターがいません</b></div>}
         </div>
-      </section>
+      </details>
 
       <section className="production-link-section">
         <header>
           <div><Link size={20} /><div><h3>共有URL</h3><p>作品全体で共有する連絡先や資料へのリンクです。</p></div></div>
           {canEditScript && <button type="button" className="primary" onClick={addSharedLink}><Plus size={16} />共有URL</button>}
         </header>
+        {message && <p className="production-inline-message">{message}</p>}
         <div className="production-shared-url-list">
           {(project.sharedLinks || []).map((link) => {
             const canOpen = isWebUrl(link.url);
             return (
-              <article className="production-shared-url-row" key={link.id}>
+              <article
+                className={`production-shared-url-row${draggingLinkId === link.id ? " dragging" : ""}${dragOverLinkId === link.id ? " drag-over" : ""}`}
+                data-shared-link-id={link.id}
+                key={link.id}
+              >
                 <div className="production-shared-url-fields">
                   <label><span>リンク名</span><input value={link.title} readOnly={!canEditScript} onChange={(event) => patchSharedLink(link.id, { title: event.target.value })} /></label>
                   <label className="wide"><span>URL</span><input type="url" value={link.url} placeholder="https://..." readOnly={!canEditScript} onChange={(event) => patchSharedLink(link.id, { url: event.target.value })} /></label>
                   <label className="wide"><span>補足</span><input value={link.notes} placeholder="用途や共有先" readOnly={!canEditScript} onChange={(event) => patchSharedLink(link.id, { notes: event.target.value })} /></label>
                 </div>
                 <div className="production-shared-url-actions">
+                  {canEditScript && <button
+                    type="button"
+                    className="icon-button shared-link-drag-handle"
+                    title="ドラッグして並べ替え"
+                    aria-label={`${link.title || "共有URL"}をドラッグして並べ替え`}
+                    onPointerDown={(event) => beginLinkDrag(event, link.id)}
+                    onPointerMove={trackLinkDrag}
+                    onPointerUp={finishLinkDrag}
+                    onPointerCancel={resetLinkDrag}
+                    onKeyDown={(event) => {
+                      if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+                      event.preventDefault();
+                      const links = project.sharedLinks || [];
+                      const linkIndex = links.findIndex((item) => item.id === link.id);
+                      const target = links[linkIndex + (event.key === "ArrowUp" ? -1 : 1)];
+                      if (target) moveSharedLink(link.id, target.id);
+                    }}
+                  ><GripVertical size={17} /></button>}
                   <a className={`icon-button${canOpen ? "" : " disabled"}`} href={canOpen ? link.url : undefined} target="_blank" rel="noreferrer" title={canOpen ? "共有URLを開く" : "URLが未登録です"} aria-label={`${link.title || "共有URL"}を開く`} aria-disabled={!canOpen}><ExternalLink size={16} /></a>
                   {canEditScript && <button type="button" className="icon-button danger-icon" title="共有URLを削除" aria-label={`${link.title || "共有URL"}を削除`} onClick={() => removeSharedLink(link.id)}><Trash2 size={16} /></button>}
                 </div>
