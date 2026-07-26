@@ -578,8 +578,12 @@ function App() {
     }
   };
 
-  const createAuditionForm = async (projectId, characterId) => {
-    const result = await createWordPressAuditionForm({ projectId, characterId });
+  const createAuditionForm = async (projectId, characterId, options = {}) => {
+    const result = await createWordPressAuditionForm({
+      projectId,
+      characterId,
+      replaceImages: Boolean(options.replaceImages)
+    });
     if (result.progress) {
       setData((current) => ({
         ...current,

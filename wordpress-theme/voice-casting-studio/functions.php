@@ -16,6 +16,8 @@ const VCS_SCRIPT_CAPABILITY = 'edit_voice_casting_scripts';
 const VCS_ROLE_SCHEMA_VERSION = '2';
 const VCS_AUDITION_AUTOMATION_OPTION = '_vcs_audition_automation';
 const VCS_AUDITION_OPENAI_MODEL = 'gpt-image-2';
+const VCS_AUDITION_AUDIT_MODEL = 'gpt-5.6-luna';
+const VCS_AUDITION_MAX_IMAGE_ATTEMPTS = 3;
 
 function vcs_setup_theme(): void
 {
@@ -348,6 +350,8 @@ function vcs_safe_audition_automation_settings(?array $settings = null): array
         'appsScriptConfigured' => '' !== vcs_get_audition_automation_secret($settings, 'appsScriptWebAppUrl')
             && '' !== vcs_get_audition_automation_secret($settings, 'appsScriptSecret'),
         'model' => VCS_AUDITION_OPENAI_MODEL,
+        'auditModel' => VCS_AUDITION_AUDIT_MODEL,
+        'maxImageAttempts' => VCS_AUDITION_MAX_IMAGE_ATTEMPTS,
         'headerSize' => '1600x400',
         'socialSize' => '1792x1008',
         'headerThemeNeedsManualSelection' => true,
@@ -1503,6 +1507,199 @@ function vcs_crop_audition_header(array $generated): array|WP_Error
     }
 }
 
+function vcs_openai_response_text(array $payload): string
+{
+    if (is_string($payload['output_text'] ?? null)) {
+        return trim($payload['output_text']);
+    }
+    foreach (($payload['output'] ?? []) as $output) {
+        if (!is_array($output) || 'message' !== ($output['type'] ?? '')) continue;
+        foreach (($output['content'] ?? []) as $content) {
+            if (is_array($content)
+                && 'output_text' === ($content['type'] ?? '')
+                && is_string($content['text'] ?? null)) {
+                return trim($content['text']);
+            }
+        }
+    }
+    return '';
+}
+
+function vcs_normalize_audition_title(string $value): string
+{
+    $normalized = preg_replace('/[\s　]+/u', '', trim($value));
+    return is_string($normalized) ? $normalized : trim($value);
+}
+
+function vcs_audit_audition_image(
+    string $api_key,
+    array $image,
+    string $asset_type,
+    string $required_title
+): array|WP_Error {
+    $base64 = (string) ($image['base64'] ?? '');
+    if ('' === $base64 && is_string($image['bytes'] ?? null)) {
+        $base64 = base64_encode($image['bytes']);
+    }
+    if ('' === $base64) {
+        return new WP_Error('vcs_audition_audit_image_missing', '画像監査に必要な画像データがありません。', ['status' => 500]);
+    }
+
+    $is_header = 'header' === $asset_type;
+    $canvas = $is_header ? '1600x400 Google Forms header' : '1792x1008 16:9 social image';
+    $safe_margin = $is_header
+        ? 'at least 72 px on the left and right and 24 px on the top and bottom'
+        : 'at least 90 px on the left and right and 56 px on the top and bottom';
+    $audit_prompt = <<<PROMPT
+You are the final preflight inspector for official Japanese voice-actor audition artwork.
+Inspect this final {$canvas} pixel image itself, including all four edges.
+The required exact title is: {$required_title}
+
+Pass only when every condition below is clearly satisfied:
+1. The complete required title is present with exactly the same Japanese characters, punctuation, parentheses, and role name. Line breaks and spaces may differ.
+2. Every title glyph is fully visible. Nothing is cropped, truncated, hidden behind the edge, or continued outside the canvas.
+3. The title has a comfortable safe margin: {$safe_margin}. Text merely touching the boundary fails.
+4. The complete Umbrella Parade logo is fully visible with comfortable margins and is not cropped.
+5. The character's complete face, eyes, mouth, and identity-defining features are visible. Minor intentional cropping of hair tips, accessories, shoulders, or clothing at an outer edge is acceptable and must not fail when the face and identity remain clear. Do not require the complete hairstyle or full body to fit inside the canvas.
+6. There is no unrelated pseudo-text, misspelled duplicate title, or watermark.
+
+Be strict about the title, logo, face, and unrelated text. Do not reject only because a hair tip or clothing edge is cropped. When uncertain about required text or the face, fail. Return only one JSON object with exactly these keys:
+{"passed":false,"titleExact":false,"titleFullyVisible":false,"safeMargins":false,"logoFullyVisible":false,"characterVisible":false,"noUnrelatedText":false,"detectedTitle":"","issues":["short issue"],"correction":"specific layout correction for the next image generation"}
+PROMPT;
+
+    $response = wp_remote_post('https://api.openai.com/v1/responses', [
+        'timeout' => 150,
+        'redirection' => 0,
+        'httpversion' => '1.1',
+        'headers' => [
+            'Authorization' => 'Bearer ' . $api_key,
+            'Content-Type' => 'application/json; charset=utf-8',
+        ],
+        'body' => wp_json_encode([
+            'model' => VCS_AUDITION_AUDIT_MODEL,
+            'input' => [[
+                'role' => 'user',
+                'content' => [
+                    ['type' => 'input_text', 'text' => $audit_prompt],
+                    [
+                        'type' => 'input_image',
+                        'image_url' => 'data:image/png;base64,' . $base64,
+                        'detail' => 'original',
+                    ],
+                ],
+            ]],
+            'reasoning' => ['effort' => 'low'],
+            'text' => ['verbosity' => 'low'],
+            'max_output_tokens' => 800,
+            'store' => false,
+            'safety_identifier' => hash('sha256', home_url('/') . '|' . get_current_user_id()),
+        ]),
+        'data_format' => 'body',
+    ]);
+    if (is_wp_error($response)) {
+        return new WP_Error('vcs_audition_audit_unreachable', '生成画像を監査できませんでした。時間をおいて再度お試しください。', ['status' => 502]);
+    }
+    $status = wp_remote_retrieve_response_code($response);
+    $payload = json_decode(wp_remote_retrieve_body($response), true);
+    if ($status < 200 || $status >= 300 || !is_array($payload)) {
+        $message = sanitize_text_field((string) ($payload['error']['message'] ?? '生成画像の監査に失敗しました。'));
+        if (401 === $status) $message = 'OpenAI APIキーを確認してください。';
+        return new WP_Error('vcs_audition_audit_error', $message, ['status' => 502]);
+    }
+
+    $audit_text = vcs_openai_response_text($payload);
+    $audit_text = preg_replace('/^```(?:json)?\s*|\s*```$/u', '', trim($audit_text));
+    $audit = is_string($audit_text) ? json_decode($audit_text, true) : null;
+    if (!is_array($audit) && is_string($audit_text) && preg_match('/\{.*\}/s', $audit_text, $matches)) {
+        $audit = json_decode($matches[0], true);
+    }
+    if (!is_array($audit)) {
+        return new WP_Error('vcs_audition_audit_invalid', '画像監査の結果を読み取れませんでした。', ['status' => 502]);
+    }
+
+    $issues = [];
+    foreach (($audit['issues'] ?? []) as $issue) {
+        if (is_string($issue) && '' !== trim($issue)) $issues[] = sanitize_text_field($issue);
+        if (count($issues) >= 6) break;
+    }
+    $detected_title = sanitize_text_field((string) ($audit['detectedTitle'] ?? ''));
+    $title_matches = vcs_normalize_audition_title($detected_title) === vcs_normalize_audition_title($required_title);
+    $passed = !empty($audit['passed'])
+        && !empty($audit['titleExact'])
+        && !empty($audit['titleFullyVisible'])
+        && !empty($audit['safeMargins'])
+        && !empty($audit['logoFullyVisible'])
+        && !empty($audit['characterVisible'])
+        && !empty($audit['noUnrelatedText'])
+        && $title_matches;
+    if (!$title_matches) $issues[] = '必須タイトルを完全一致で確認できませんでした。';
+
+    return [
+        'passed' => $passed,
+        'model' => VCS_AUDITION_AUDIT_MODEL,
+        'titleExact' => !empty($audit['titleExact']) && $title_matches,
+        'titleFullyVisible' => !empty($audit['titleFullyVisible']),
+        'safeMargins' => !empty($audit['safeMargins']),
+        'logoFullyVisible' => !empty($audit['logoFullyVisible']),
+        'characterVisible' => !empty($audit['characterVisible']),
+        'noUnrelatedText' => !empty($audit['noUnrelatedText']),
+        'detectedTitle' => $detected_title,
+        'issues' => array_values(array_unique($issues)),
+        'correction' => sanitize_text_field((string) ($audit['correction'] ?? '文字を小さくし、四辺から十分に離してください。')),
+        'checkedAt' => current_time('c'),
+    ];
+}
+
+function vcs_generate_audited_audition_image(
+    string $api_key,
+    string $prompt,
+    string $size,
+    array $reference_images,
+    string $asset_type,
+    string $required_title
+): array|WP_Error {
+    $retry_feedback = '';
+    $attempt_images = $reference_images;
+    $last_audit = [];
+    for ($attempt = 1; $attempt <= VCS_AUDITION_MAX_IMAGE_ATTEMPTS; $attempt++) {
+        $attempt_prompt = $prompt;
+        if ('' !== $retry_feedback) {
+            $attempt_prompt .= " Input image 3 is the previous rejected candidate. Keep its strong visual direction, but create a corrected new layout. Automatic preflight rejected it for: {$retry_feedback}. Use smaller title lettering and increase the empty margin around every word and logo. Do not repeat the rejected edge placement.";
+        }
+        $generated = vcs_generate_audition_image($api_key, $attempt_prompt, $size, $attempt_images);
+        if (is_wp_error($generated)) return $generated;
+        $candidate = 'header' === $asset_type ? vcs_crop_audition_header($generated) : $generated;
+        if (is_wp_error($candidate)) return $candidate;
+
+        $audit = vcs_audit_audition_image($api_key, $candidate, $asset_type, $required_title);
+        if (is_wp_error($audit)) return $audit;
+        $last_audit = $audit;
+        if (!empty($audit['passed'])) {
+            return [
+                'image' => $candidate,
+                'audit' => $audit,
+                'attempts' => $attempt,
+            ];
+        }
+
+        $issue_text = implode(' / ', $audit['issues'] ?? []);
+        $retry_feedback = trim($issue_text . ' ' . (string) ($audit['correction'] ?? ''));
+        $attempt_images = array_merge($reference_images, [[
+            'bytes' => $candidate['bytes'],
+            'mimeType' => 'image/png',
+            'fileName' => 'rejected-' . $asset_type . '-candidate.png',
+        ]]);
+    }
+
+    $issues = implode('、', $last_audit['issues'] ?? []);
+    $message = '画像監査に3回合格できなかったため、Driveには保存しませんでした。';
+    if ('' !== $issues) $message .= ' 確認事項：' . $issues;
+    return new WP_Error('vcs_audition_image_audit_failed', $message, [
+        'status' => 422,
+        'audit' => $last_audit,
+    ]);
+}
+
 function vcs_call_audition_apps_script(string $url, string $secret, string $action, array $payload): array|WP_Error
 {
     $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
@@ -1556,7 +1753,8 @@ function vcs_store_audition_form_result(
     array $project,
     string $character_id,
     array $google_result,
-    array $image_files = []
+    array $image_files = [],
+    array $image_audit = []
 ): WP_REST_Response|WP_Error {
     $progress_items = is_array($project['auditionRoleProgress'] ?? null) ? $project['auditionRoleProgress'] : [];
     $existing_progress = [];
@@ -1577,6 +1775,9 @@ function vcs_store_audition_form_result(
         'createdAt' => sanitize_text_field((string) ($google_result['createdAt'] ?? current_time('c'))),
         'updatedAt' => current_time('c'),
     ]);
+    if (!empty($image_audit)) {
+        $progress['imageAudit'] = $image_audit;
+    }
     $found_progress = false;
     foreach ($progress_items as $index => $item) {
         if (is_array($item) && (string) ($item['characterId'] ?? '') === $character_id) {
@@ -1593,7 +1794,9 @@ function vcs_store_audition_form_result(
         'ok' => true,
         'progress' => $progress,
         'imageFiles' => $image_files,
+        'imageAudit' => $progress['imageAudit'] ?? [],
         'recovered' => !empty($google_result['recovered']),
+        'imagesReplaced' => !empty($google_result['imagesReplaced']),
         'headerThemeNeedsManualSelection' => true,
     ]);
 }
@@ -1601,11 +1804,12 @@ function vcs_store_audition_form_result(
 function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Response|WP_Error
 {
     if (function_exists('set_time_limit')) {
-        @set_time_limit(420);
+        @set_time_limit(900);
     }
     $params = $request->get_json_params();
     $project_id = sanitize_text_field((string) ($params['projectId'] ?? ''));
     $character_id = sanitize_text_field((string) ($params['characterId'] ?? ''));
+    $replace_images = !empty($params['replaceImages']);
     if ('' === $project_id || '' === $character_id) {
         return new WP_Error('vcs_audition_role_required', '作品と役を選択してください。', ['status' => 400]);
     }
@@ -1644,7 +1848,8 @@ function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Respon
     foreach (($project['auditionRoleProgress'] ?? []) as $progress) {
         if (is_array($progress)
             && (string) ($progress['characterId'] ?? '') === $character_id
-            && '' !== trim((string) ($progress['formEditUrl'] ?? ''))) {
+            && '' !== trim((string) ($progress['formEditUrl'] ?? ''))
+            && !$replace_images) {
             return new WP_Error('vcs_audition_already_created', 'この役のフォームはすでに作成済みです。', ['status' => 409]);
         }
     }
@@ -1664,7 +1869,7 @@ function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Respon
             'roleName' => $role_name,
         ]);
         if (is_wp_error($lookup_result)) return $lookup_result;
-        if (!empty($lookup_result['found'])) {
+        if (!empty($lookup_result['found']) && !$replace_images) {
             return vcs_store_audition_form_result(
                 $data,
                 $project_index,
@@ -1672,6 +1877,9 @@ function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Respon
                 $character_id,
                 $lookup_result
             );
+        }
+        if ($replace_images && empty($lookup_result['found'])) {
+            return new WP_Error('vcs_audition_form_missing', '画像を差し替えるGoogleフォームが見つかりませんでした。', ['status' => 404]);
         }
 
         $character_image = vcs_load_audition_image((string) ($character['imageUrl'] ?? ''));
@@ -1682,17 +1890,33 @@ function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Respon
         $profile = function_exists('mb_substr') ? mb_substr($profile, 0, 700) : substr($profile, 0, 700);
         $common_prompt = "Input image 1 is the official character reference. Preserve the same character identity, face, hairstyle, outfit, colors, and overall design. Input image 2 is the official Umbrella Parade logo; reproduce it faithfully without changing its lettering or proportions. Do not add other characters, third-party logos, watermarks, or unreadable decorative text. Project: {$project_title}. Role: {$role_name}. Character notes: {$profile}.";
 
-        $header_prompt = $common_prompt . " Create polished Japanese voice-actor audition key art for a Google Forms header. Use a cinematic but readable composition with the character as the clear subject and the Umbrella Parade logo visibly integrated. Include the exact Japanese title 『{$role_name}』役オーディション, spelled exactly. Keep every essential face, logo, and title element inside the central horizontal 4:1 safe band because the generated 1600x544 image will be center-cropped to 1600x400. Balanced contrast, professional production artwork.";
-        $generated_header = vcs_generate_audition_image($api_key, $header_prompt, '1600x544', [$character_image, $logo_image]);
-        if (is_wp_error($generated_header)) return $generated_header;
-        $header_image = vcs_crop_audition_header($generated_header);
-        if (is_wp_error($header_image)) return $header_image;
+        $required_title = "『{$role_name}』役オーディション";
+        $header_prompt = $common_prompt . " Create polished Japanese voice-actor audition key art on a 1600x544 canvas that will be center-cropped to a final 1600x400 Google Forms header. The only usable vertical band is y=72 through y=472. Keep every essential face, logo, and title entirely within that band. Place the character mainly in x=60..620. Place the complete Umbrella Parade logo in x=700..1450 and y=105..220. Include the exact Japanese title {$required_title}, spelled exactly, inside x=700..1450 and y=245..420. Use two or three lines and deliberately smaller lettering when the role name is long. Leave at least 90 pixels of empty space at both horizontal canvas edges and do not let any glyph touch the final crop boundary. Balanced contrast, professional production artwork.";
+        $header_result = vcs_generate_audited_audition_image(
+            $api_key,
+            $header_prompt,
+            '1600x544',
+            [$character_image, $logo_image],
+            'header',
+            $required_title
+        );
+        if (is_wp_error($header_result)) return $header_result;
+        $header_image = $header_result['image'];
 
-        $social_prompt = $common_prompt . " Create polished 16:9 Japanese social-media audition artwork. Feature the character prominently, integrate the Umbrella Parade logo, and include the exact Japanese title 『{$role_name}』役オーディション, spelled exactly. Leave comfortable margins so the artwork is readable on phones. Cinematic, polished, and suitable for an official voice-actor recruitment announcement.";
-        $social_image = vcs_generate_audition_image($api_key, $social_prompt, '1792x1008', [$character_image, $logo_image]);
-        if (is_wp_error($social_image)) return $social_image;
+        $social_prompt = $common_prompt . " Create polished 16:9 Japanese social-media audition artwork. Feature the character prominently, integrate the complete Umbrella Parade logo, and include the exact Japanese title {$required_title}, spelled exactly. Keep the logo, character face, and every title glyph at least 100 pixels away from all four edges. Use two or three title lines and smaller lettering when needed. Cinematic, polished, and suitable for an official voice-actor recruitment announcement.";
+        $social_result = vcs_generate_audited_audition_image(
+            $api_key,
+            $social_prompt,
+            '1792x1008',
+            [$character_image, $logo_image],
+            'social',
+            $required_title
+        );
+        if (is_wp_error($social_result)) return $social_result;
+        $social_image = $social_result['image'];
 
-        $google_result = vcs_call_audition_apps_script($apps_script_url, $apps_script_secret, 'createAuditionForm', [
+        $google_action = $replace_images ? 'replaceAuditionImages' : 'createAuditionForm';
+        $google_result = vcs_call_audition_apps_script($apps_script_url, $apps_script_secret, $google_action, [
             'requestKey' => $request_key,
             'projectTitle' => $project_title,
             'roleName' => $role_name,
@@ -1711,6 +1935,21 @@ function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Respon
             [
                 ['fileName' => $safe_role_name . '_Googleフォームヘッダー_1600x400.png', 'mimeType' => 'image/png', 'base64' => $header_image['base64']],
                 ['fileName' => $safe_role_name . '_SNS_16x9.png', 'mimeType' => 'image/png', 'base64' => $social_image['base64']],
+            ],
+            [
+                'passed' => true,
+                'model' => VCS_AUDITION_AUDIT_MODEL,
+                'maxAttempts' => VCS_AUDITION_MAX_IMAGE_ATTEMPTS,
+                'header' => [
+                    'passed' => true,
+                    'attempts' => (int) $header_result['attempts'],
+                    'checkedAt' => (string) ($header_result['audit']['checkedAt'] ?? current_time('c')),
+                ],
+                'social' => [
+                    'passed' => true,
+                    'attempts' => (int) $social_result['attempts'],
+                    'checkedAt' => (string) ($social_result['audit']['checkedAt'] ?? current_time('c')),
+                ],
             ]
         );
     } finally {

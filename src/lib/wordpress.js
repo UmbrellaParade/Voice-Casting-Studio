@@ -165,7 +165,7 @@ export const saveWordPressAuditionAutomationSettings = (settings) => wordpressRe
   { method: "POST", body: JSON.stringify(settings) }
 );
 
-export const createWordPressAuditionForm = ({ projectId, characterId }) => wordpressRequest(
+export const createWordPressAuditionForm = ({ projectId, characterId, replaceImages = false }) => wordpressRequest(
   "audition-automation/create",
-  { method: "POST", body: JSON.stringify({ projectId, characterId }) }
+  { method: "POST", body: JSON.stringify({ projectId, characterId, replaceImages }) }
 );

@@ -1741,12 +1741,14 @@ function TasksView({
     }
   };
 
-  const createAuditionFormForCharacter = async (character) => {
+  const createAuditionFormForCharacter = async (character, replaceImages = false) => {
     if (!onCreateAuditionForm || creatingCharacterId) return;
     setCreatingCharacterId(character.id);
-    setAutomationMessage(`${character.name}の画像を生成し、フォームを作成しています。数分かかる場合があります…`);
+    setAutomationMessage(replaceImages
+      ? `${character.name}の画像を再生成し、文字と余白を監査しています。合格後に古い画像を差し替えます…`
+      : `${character.name}の画像を生成し、文字と余白を監査してからフォームを作成しています…`);
     try {
-      const result = await onCreateAuditionForm(project.id, character.id);
+      const result = await onCreateAuditionForm(project.id, character.id, { replaceImages });
       const imageFiles = Array.isArray(result.imageFiles) ? result.imageFiles : [];
       if (!imageFiles.length) {
         setAutomationMessage(`${character.name}の作成済みフォームを確認し、ツールへ反映しました。`);
@@ -1754,9 +1756,13 @@ function TasksView({
       }
       const saveResult = await saveAuditionImageFiles(imageFiles);
       if (!saveResult.saved && imageFiles.length) downloadAuditionImageFiles(imageFiles);
+      const headerAttempts = Number(result.imageAudit?.header?.attempts) || 1;
+      const socialAttempts = Number(result.imageAudit?.social?.attempts) || 1;
+      const auditSummary = `画像監査はヘッダー${headerAttempts}回目、SNS${socialAttempts}回目で合格しました。`;
+      const actionSummary = replaceImages ? "Driveの古い画像を削除し、合格画像へ差し替えました。" : "フォームを作成しました。";
       setAutomationMessage(saveResult.saved
-        ? `${character.name}のフォームを作成し、画像を「${saveResult.folderName}」へ保存しました。`
-        : `${character.name}のフォームを作成しました。PC保存先が未選択のため、画像はダウンロードしました。`);
+        ? `${character.name}：${actionSummary}${auditSummary}PCの「${saveResult.folderName}」にも保存しました。`
+        : `${character.name}：${actionSummary}${auditSummary}PC保存先が未選択のため、画像をダウンロードしました。`);
     } catch (error) {
       setAutomationMessage(error.message);
     } finally {
@@ -1801,7 +1807,7 @@ function TasksView({
 
             {canEditScript && <section className="audition-automation-panel" aria-label="オーディションフォーム自動作成設定">
               <div className="audition-automation-heading">
-                <div><Sparkles size={19} /><div><b>フォーム自動作成</b><span>OpenAIで2種類の画像を作り、見本フォームを役名入りで複製します。</span></div></div>
+                <div><Sparkles size={19} /><div><b>フォーム自動作成</b><span>2種類の画像を生成し、文字と余白の監査に合格してから見本フォームを複製します。</span></div></div>
                 <div className="audition-automation-badges">
                   <span className={automationSettings.hasOpenAiKey ? "ready" : "waiting"}>{automationSettings.hasOpenAiKey ? "APIキー設定済み" : "APIキー未設定"}</span>
                   <span className={automationSettings.appsScriptConfigured ? "ready" : "waiting"}>{automationSettings.appsScriptConfigured ? "Google連携済み" : "Google連携準備中"}</span>
@@ -1859,6 +1865,7 @@ function TasksView({
               </details>}
               <div className="audition-automation-notes">
                 <span><ShieldCheck size={15} />APIキーと作成ボタンは制作オーナーだけに表示され、キーそのものは画面へ再表示しません。</span>
+                <span><ShieldCheck size={15} />文字切れ・誤字・ロゴ欠けを監査し、不合格なら最大{automationSettings.maxImageAttempts || 3}回まで自動で作り直します。</span>
                 <span>PC保存先：{imageFolderStatus.selected ? imageFolderStatus.name : "オーディションフォームサムネ一覧（最初に一度選択）"}</span>
               </div>
               {(automationMessage || auditionAutomation.message) && <p className={`audition-automation-message${auditionAutomation.status === "error" ? " error" : ""}`} role="status">{automationMessage || auditionAutomation.message}</p>}
@@ -1882,7 +1889,15 @@ function TasksView({
                       disabled={!automationReady || Boolean(creatingCharacterId) || !character.imageUrl || Boolean(roleProgress?.formEditUrl)}
                       title={!character.imageUrl ? "先にキャラクター画像を登録してください" : !automationReady ? "先にAPIキーとGoogle連携を設定してください" : ""}
                       onClick={() => createAuditionFormForCharacter(character)}
-                    >{isCreating ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}{isCreating ? "作成中…" : roleProgress?.formEditUrl ? "作成済み" : "フォームを自動作成"}</button>}
+                    >{roleProgress?.formEditUrl
+                      ? <><CheckCircle2 size={15} />作成済み</>
+                      : <>{isCreating ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}{isCreating ? "作成中…" : "フォームを自動作成"}</>}</button>}
+                    {canEditScript && roleProgress?.formEditUrl && <button
+                      type="button"
+                      className="secondary audition-rebuild-button"
+                      disabled={!automationReady || Boolean(creatingCharacterId) || !character.imageUrl}
+                      onClick={() => createAuditionFormForCharacter(character, true)}
+                    >{isCreating ? <LoaderCircle className="spin" size={15} /> : <RotateCcw size={15} />}{isCreating ? "監査・再生成中…" : "画像を監査して作り直す"}</button>}
                     {canEditScript && canOpenAuditionFolder && <a className="secondary" href={project.auditionFormsFolderUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />フォーム一覧</a>}
                     {canEditScript && <button type="button" className="secondary" onClick={() => openCharacterEditor(character.id)}><Users size={15} />担当声優を登録</button>}
                   </div>
@@ -1913,6 +1928,7 @@ function TasksView({
                     {roleProgress.formResponderUrl && <a href={roleProgress.formResponderUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} />応募画面を確認</a>}
                     {roleProgress.headerImageUrl && <a href={roleProgress.headerImageUrl} target="_blank" rel="noreferrer"><FileImage size={14} />ヘッダー画像</a>}
                     {roleProgress.socialImageUrl && <a href={roleProgress.socialImageUrl} target="_blank" rel="noreferrer"><FileImage size={14} />SNS画像</a>}
+                    {roleProgress.imageAudit?.passed && <span className="audition-audit-pass"><ShieldCheck size={14} />画像監査済み（ヘッダー{roleProgress.imageAudit.header?.attempts || 1}回・SNS{roleProgress.imageAudit.social?.attempts || 1}回）</span>}
                     <span>Googleフォームのテーマ画面で、生成済みヘッダー画像を選ぶと完成です。</span>
                   </div>}
                 </article>

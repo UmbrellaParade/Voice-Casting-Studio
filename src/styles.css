@@ -2719,6 +2719,20 @@ h1 {
   line-height: 1.45;
 }
 
+.audition-created-links > .audition-audit-pass {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid #80bda7;
+  border-radius: 5px;
+  background: #e9f7f1;
+  color: #236248;
+  font-weight: 900;
+}
+
 .unassigned-role-statuses input {
   width: 17px;
   height: 17px;
@@ -3256,6 +3270,10 @@ h1 {
   }
 
   .unassigned-role-actions .audition-create-button {
+    grid-column: 1 / -1;
+  }
+
+  .unassigned-role-actions .audition-rebuild-button {
     grid-column: 1 / -1;
   }
 

@@ -21,6 +21,9 @@ function doPost(event) {
     if (request.action === "createAuditionForm") {
       return vcsJsonResponse_(vcsCreateAuditionForm_(request));
     }
+    if (request.action === "replaceAuditionImages") {
+      return vcsJsonResponse_(vcsReplaceAuditionImages_(request));
+    }
     return vcsJsonResponse_({ ok: false, error: "Unsupported action" });
   } catch (error) {
     console.error(error && error.stack ? error.stack : error);
@@ -140,13 +143,68 @@ function vcsCreateAuditionForm_(request) {
   }
 }
 
-function vcsSaveImage_(folder, image, fileName) {
-  const existing = vcsFindFile_(folder, fileName);
-  if (existing) return existing;
+function vcsImageBlob_(image, fileName) {
   const base64 = String(image && image.base64 ? image.base64 : "").replace(/^data:[^;]+;base64,/, "");
   if (!base64) throw new Error(`${fileName} is missing.`);
   const mimeType = String(image.mimeType || "image/png");
-  return folder.createFile(Utilities.newBlob(Utilities.base64Decode(base64), mimeType, fileName));
+  return Utilities.newBlob(Utilities.base64Decode(base64), mimeType, fileName);
+}
+
+function vcsListFiles_(folder, fileName) {
+  const files = [];
+  const iterator = folder.getFilesByName(fileName);
+  while (iterator.hasNext()) files.push(iterator.next());
+  return files;
+}
+
+function vcsSaveImage_(folder, image, fileName) {
+  const existing = vcsFindFile_(folder, fileName);
+  if (existing) return existing;
+  return folder.createFile(vcsImageBlob_(image, fileName));
+}
+
+function vcsReplaceAuditionImages_(request) {
+  const names = vcsGetAuditionNames_(request);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const folder = DriveApp.getFolderById(VCS_AUDITION_FOLDER_ID);
+    const formFile = vcsFindFile_(folder, names.formName);
+    if (!formFile) throw new Error(`${names.formName} was not found.`);
+
+    const oldHeaderFiles = vcsListFiles_(folder, names.headerName);
+    const oldSocialFiles = vcsListFiles_(folder, names.socialName);
+    const newFiles = [];
+    const trashedOldFiles = [];
+    try {
+      const headerFile = folder.createFile(vcsImageBlob_(request.headerImage, names.headerName));
+      newFiles.push(headerFile);
+      const socialFile = folder.createFile(vcsImageBlob_(request.socialImage, names.socialName));
+      newFiles.push(socialFile);
+
+      oldHeaderFiles.concat(oldSocialFiles).forEach((file) => {
+        file.setTrashed(true);
+        trashedOldFiles.push(file);
+      });
+
+      const form = FormApp.openById(formFile.getId());
+      const result = vcsBuildAuditionResult_(form, headerFile, socialFile, false);
+      result.imagesReplaced = true;
+      const propertyKey = `VCS_AUDITION_RESULT_${names.requestKey}`;
+      PropertiesService.getScriptProperties().setProperty(propertyKey, JSON.stringify(result));
+      return result;
+    } catch (error) {
+      trashedOldFiles.forEach((file) => {
+        try { file.setTrashed(false); } catch (restoreError) { console.error(restoreError); }
+      });
+      newFiles.forEach((file) => {
+        try { file.setTrashed(true); } catch (cleanupError) { console.error(cleanupError); }
+      });
+      throw error;
+    }
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function vcsJsonResponse_(payload) {
