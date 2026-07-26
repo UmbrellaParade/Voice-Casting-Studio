@@ -114,6 +114,16 @@ function MemberProjectBar({ projects, project, setProjectId, runtime, connection
   );
 }
 
+function MemberKeyDates({ project }) {
+  return (
+    <section className="production-key-dates" aria-label="締切と制作状況">
+      <div><span>収録締切</span><strong>{formatDate(project.recordingDeadline)}</strong></div>
+      <div><span>公開予定</span><strong>{formatDate(project.releaseDate)}</strong></div>
+      <div><span>編集状況</span><strong>{project.editingStatus || "未設定"}</strong></div>
+    </section>
+  );
+}
+
 function MemberHome({ project, assignedCharacterIds, setActive }) {
   const assignedLines = project.lines.filter((line) => line.kind !== "direction" && assignedCharacterIds.has(line.characterId));
   const progress = getRecordingProgress({ ...project, lines: assignedLines });
@@ -123,6 +133,7 @@ function MemberHome({ project, assignedCharacterIds, setActive }) {
   const schedule = project.scheduleItems.filter((item) => item.status !== "完了").sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
   return (
     <div className="production-page-stack member-home">
+      <MemberKeyDates project={project} />
       <div className="production-metrics-grid">
         <button type="button" className="production-metric" onClick={() => setActive("script")}><CheckCircle2 size={20} /><span>担当セリフ収録済み</span><strong>{progress.recorded}/{progress.total}</strong><small>{progress.recordedPercent}%</small></button>
         <button type="button" className={`production-metric ${unreviewed.length ? "attention" : ""}`} onClick={() => setActive("script")}><FileAudio size={20} /><span>確認待ち</span><strong>{unreviewed.length}</strong><small>提出済み録音</small></button>
@@ -330,7 +341,7 @@ function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQ
 }
 
 function MemberSchedule({ project }) {
-  return <div className="production-page-stack"><section className="production-key-dates"><div><span>収録締切</span><strong>{formatDate(project.recordingDeadline)}</strong></div><div><span>公開予定</span><strong>{formatDate(project.releaseDate)}</strong></div><div><span>編集状況</span><strong>{project.editingStatus}</strong></div></section><div className="member-schedule-list">{[...project.scheduleItems].sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999")).map((item) => <article key={item.id}><time>{formatDate(item.date)}</time><div><span>{item.type} / {item.status}</span><h3>{item.title}</h3>{item.notes && <p>{item.notes}</p>}</div></article>)}</div></div>;
+  return <div className="production-page-stack"><MemberKeyDates project={project} /><div className="member-schedule-list">{[...project.scheduleItems].sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999")).map((item) => <article key={item.id}><time>{formatDate(item.date)}</time><div><span>{item.type} / {item.status}</span><h3>{item.title}</h3>{item.notes && <p>{item.notes}</p>}</div></article>)}</div></div>;
 }
 
 export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voice Cast Studio", connectionState, onRefresh, onUpdateLine, onCreateQuestion }) {

@@ -179,7 +179,28 @@ function ProgressMetric({ icon: Icon, label, value, detail, tone = "", onClick }
   );
 }
 
-function ProductionHome({ project, setActive }) {
+function ProductionKeyDates({ project, updateProject, canEditScript = true }) {
+  return (
+    <div className="production-key-dates">
+      <label>
+        <span>作品全体の収録締切</span>
+        <input type="date" value={project.recordingDeadline} disabled={!canEditScript} onChange={(event) => updateProject({ recordingDeadline: event.target.value })} />
+      </label>
+      <label>
+        <span>公開予定日</span>
+        <input type="date" value={project.releaseDate} disabled={!canEditScript} onChange={(event) => updateProject({ releaseDate: event.target.value })} />
+      </label>
+      <label>
+        <span>現在の編集状況</span>
+        <select value={project.editingStatus} disabled={!canEditScript} onChange={(event) => updateProject({ editingStatus: event.target.value })}>
+          {EDITING_STATUS_OPTIONS.map((status) => <option key={status}>{status}</option>)}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+function ProductionHome({ project, setActive, updateProject, canEditScript }) {
   const progress = getRecordingProgress(project);
   const unreviewedLines = project.lines.filter((line) =>
     line.kind !== "direction" && line.actorStatus !== "未収録" && ["未確認", "確認中"].includes(line.reviewStatus)
@@ -193,6 +214,14 @@ function ProductionHome({ project, setActive }) {
 
   return (
     <div className="production-page-stack">
+      <section className="production-home-key-dates">
+        <header>
+          <div><CalendarClock size={19} /><h3>締切・制作状況</h3></div>
+          <button type="button" onClick={() => setActive("schedule")}>予定の詳細</button>
+        </header>
+        <ProductionKeyDates project={project} updateProject={updateProject} canEditScript={canEditScript} />
+      </section>
+
       <div className="production-metrics-grid">
         <ProgressMetric icon={CheckCircle2} label="収録済み" value={`${progress.recorded}/${progress.total}`} detail={`${progress.recordedPercent}% 完了`} onClick={() => setActive("recording")} />
         <ProgressMetric icon={FileAudio} label="未確認録音" value={unreviewedLines.length} detail="管理者の確認待ち" tone={unreviewedLines.length ? "attention" : ""} onClick={() => setActive("recording")} />
@@ -1221,11 +1250,7 @@ function ScheduleView({ project, updateProject, canEditScript = true }) {
 
   return (
     <div className="production-page-stack schedule-workspace">
-      <section className="production-key-dates">
-        <label><span>作品全体の収録締切</span><input type="date" value={project.recordingDeadline} disabled={!canEditScript} onChange={(event) => updateProject({ recordingDeadline: event.target.value })} /></label>
-        <label><span>公開予定日</span><input type="date" value={project.releaseDate} disabled={!canEditScript} onChange={(event) => updateProject({ releaseDate: event.target.value })} /></label>
-        <label><span>現在の編集状況</span><select value={project.editingStatus} disabled={!canEditScript} onChange={(event) => updateProject({ editingStatus: event.target.value })}>{EDITING_STATUS_OPTIONS.map((status) => <option key={status}>{status}</option>)}</select></label>
-      </section>
+      <ProductionKeyDates project={project} updateProject={updateProject} canEditScript={canEditScript} />
 
       <section className="schedule-section">
         <header><div><CalendarClock size={20} /><div><h3>制作予定</h3><p>収録、編集、公開までの予定を全員で確認します。</p></div></div>{canEditScript && <button type="button" className="primary" onClick={() => updateProject((current) => ({ ...current, scheduleItems: [...current.scheduleItems, { id: newId("schedule"), type: "収録", title: "新しい予定", date: "", status: "予定", notes: "" }] }))}><Plus size={16} />予定</button>}</header>
@@ -1303,7 +1328,7 @@ export function ProductionWorkspace({
         updateProject={updateProject}
         canEditScript={canEditScript}
       />
-      {view === "home" && <ProductionHome project={project} setActive={setActive} />}
+      {view === "home" && <ProductionHome project={project} setActive={setActive} updateProject={updateProject} canEditScript={canEditScript} />}
       {view === "characters" && <CharactersView project={project} updateProject={updateProject} siteUsers={siteUsers} canEditScript={canEditScript} />}
       {view === "links" && <LinksView project={project} updateProject={updateProject} canEditScript={canEditScript} />}
       {view === "materials" && <MaterialsView project={project} updateProject={updateProject} canEditScript={canEditScript} />}
