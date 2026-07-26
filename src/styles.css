@@ -2310,6 +2310,24 @@ h1 {
   font-weight: 900;
 }
 
+.task-section-counts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.task-section-counts > span:not(.task-section-count) {
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: #f4f1ed;
+  color: #695f6c;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .unassigned-role-section.attention {
   border-color: #dfc395;
 }
@@ -2451,6 +2469,47 @@ h1 {
 .unassigned-role-actions {
   display: grid;
   gap: 6px;
+}
+
+.unassigned-role-statuses {
+  display: flex;
+  grid-column: 2 / -1;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding-top: 9px;
+  border-top: 1px solid #ece4dc;
+}
+
+.unassigned-role-statuses label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid #d9d0c7;
+  border-radius: 6px;
+  background: #fff;
+  color: #5f5662;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.unassigned-role-statuses label.checked {
+  border-color: #76b29c;
+  background: #e9f7f1;
+  color: #236248;
+}
+
+.unassigned-role-statuses input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: #168b9a;
+}
+
+.unassigned-role-statuses label:has(input:disabled) {
+  cursor: default;
 }
 
 .unassigned-role-actions a,
@@ -2939,6 +2998,11 @@ h1 {
     width: 100%;
   }
 
+  .task-section-counts {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
   .production-task-list > article {
     grid-template-columns: minmax(0, 1fr) 36px;
   }
@@ -2961,6 +3025,10 @@ h1 {
   .unassigned-role-actions {
     grid-column: 2;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .unassigned-role-statuses {
+    grid-column: 2;
   }
 
   .question-thread > header > div,

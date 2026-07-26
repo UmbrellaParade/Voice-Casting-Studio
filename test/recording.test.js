@@ -44,6 +44,7 @@ test("keeps unassigned role tasks in sync with actor assignments", () => {
       { id: "old_role", name: "旧台本の役" }
     ],
     castMembers: [{ id: "actor_a", actorName: "声優A", characterIds: ["role_a"] }],
+    auditionRoleProgress: [{ characterId: "role_b", formCreated: true, recruitmentStarted: true }],
     lines: [
       { id: "line_a", characterId: "role_a", text: "Aのセリフ", kind: "dialogue" },
       { id: "line_b", characterId: "role_b", text: "Bのセリフ", kind: "dialogue" }
@@ -54,14 +55,24 @@ test("keeps unassigned role tasks in sync with actor assignments", () => {
 
   const assigned = normalizeRecordingProject(assignProductionActorName(project, "role_b", "声優B"));
   assert.deepEqual(getUnassignedProductionCharacters(assigned), []);
+  assert.deepEqual(assigned.auditionRoleProgress[0], {
+    characterId: "role_b",
+    formCreated: true,
+    recruitmentStarted: true,
+    updatedAt: ""
+  });
 
   const cleared = normalizeRecordingProject(assignProductionActorName(assigned, "role_b", ""));
   assert.deepEqual(getUnassignedProductionCharacters(cleared).map((character) => character.name), ["役B"]);
+  assert.equal(cleared.auditionRoleProgress[0].recruitmentStarted, true);
 });
 
 test("normalizes and sorts manual production tasks", () => {
   const project = normalizeRecordingProject({
     auditionFormUrl: "https://docs.google.com/forms/d/example/viewform",
+    auditionRoleProgress: {
+      role_b: { formCreated: 1, recruitmentStarted: false }
+    },
     tasks: [
       { id: "done", title: "完了済み", completed: true, dueDate: "2026-07-20" },
       { id: "later", title: "通常", dueDate: "2026-08-10" },
@@ -69,7 +80,13 @@ test("normalizes and sorts manual production tasks", () => {
     ]
   });
 
-  assert.equal(project.auditionFormUrl, "https://docs.google.com/forms/d/example/viewform");
+  assert.equal(project.auditionFormsFolderUrl, "https://docs.google.com/forms/d/example/viewform");
+  assert.deepEqual(project.auditionRoleProgress, [{
+    characterId: "role_b",
+    formCreated: true,
+    recruitmentStarted: false,
+    updatedAt: ""
+  }]);
   assert.deepEqual(sortProductionTasks(project.tasks).map((task) => task.id), ["important", "later", "done"]);
 });
 

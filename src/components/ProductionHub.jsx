@@ -1616,7 +1616,12 @@ function TasksView({ project, updateProject, canEditScript = true, setActive }) 
   const unassignedCharacters = getUnassignedProductionCharacters(project);
   const tasks = sortProductionTasks(project.tasks);
   const incompleteTaskCount = tasks.filter((task) => !task.completed).length;
-  const canOpenAuditionForm = isWebUrl(project.auditionFormUrl);
+  const auditionProgressByCharacterId = new Map(
+    (project.auditionRoleProgress || []).map((progress) => [progress.characterId, progress])
+  );
+  const formCreatedCount = unassignedCharacters.filter((character) => auditionProgressByCharacterId.get(character.id)?.formCreated).length;
+  const recruitmentStartedCount = unassignedCharacters.filter((character) => auditionProgressByCharacterId.get(character.id)?.recruitmentStarted).length;
+  const canOpenAuditionFolder = isWebUrl(project.auditionFormsFolderUrl);
 
   const patchTask = (taskId, patch) => updateProject((current) => ({
     ...current,
@@ -1633,6 +1638,25 @@ function TasksView({ project, updateProject, canEditScript = true, setActive }) 
     }));
   };
 
+  const patchAuditionRoleProgress = (characterId, patch) => updateProject((current) => {
+    const progressItems = current.auditionRoleProgress || [];
+    const existing = progressItems.find((progress) => progress.characterId === characterId);
+    const nextProgress = {
+      characterId,
+      formCreated: false,
+      recruitmentStarted: false,
+      ...existing,
+      ...patch,
+      updatedAt: new Date().toISOString()
+    };
+    return {
+      ...current,
+      auditionRoleProgress: existing
+        ? progressItems.map((progress) => progress.characterId === characterId ? nextProgress : progress)
+        : [...progressItems, nextProgress]
+    };
+  });
+
   const openCharacterEditor = (characterId) => {
     setActive("characters");
     globalThis.setTimeout(() => {
@@ -1645,29 +1669,33 @@ function TasksView({ project, updateProject, canEditScript = true, setActive }) 
       <section className={`task-section unassigned-role-section${unassignedCharacters.length ? " attention" : " complete"}`}>
         <header>
           <div><Users size={20} /><div><h3>配役が決まっていない役</h3><p>台本にセリフがあり、担当声優が未登録の役を自動で表示します。</p></div></div>
-          <span className="task-section-count">{unassignedCharacters.length ? `${unassignedCharacters.length}役` : "全役決定"}</span>
+          <div className="task-section-counts">
+            <span className="task-section-count">{unassignedCharacters.length ? `${unassignedCharacters.length}役` : "全役決定"}</span>
+            {unassignedCharacters.length > 0 && <span>フォーム作成 {formCreatedCount}/{unassignedCharacters.length}</span>}
+            {unassignedCharacters.length > 0 && <span>募集開始 {recruitmentStartedCount}/{unassignedCharacters.length}</span>}
+          </div>
         </header>
 
         {unassignedCharacters.length > 0 ? (
           <>
             <div className="audition-form-panel">
-              <div><ClipboardCopy size={18} /><div><b>オーディションフォーム</b><span>未配役の募集に使用するGoogleフォームなどのURLです。</span></div></div>
+              <div><FolderOpen size={18} /><div><b>オーディションフォーム保管フォルダー</b><span>作成したフォームをまとめているGoogle Driveフォルダーです。</span></div></div>
               <div className="audition-form-control">
                 <input
                   type="url"
-                  aria-label="オーディションフォームURL"
-                  value={project.auditionFormUrl || ""}
-                  placeholder="https://docs.google.com/forms/..."
+                  aria-label="オーディションフォームフォルダーURL"
+                  value={project.auditionFormsFolderUrl || ""}
+                  placeholder="https://drive.google.com/drive/folders/..."
                   readOnly={!canEditScript}
-                  onChange={(event) => updateProject((current) => ({ ...current, auditionFormUrl: event.target.value }))}
+                  onChange={(event) => updateProject((current) => ({ ...current, auditionFormsFolderUrl: event.target.value }))}
                 />
                 <a
-                  className={`secondary audition-form-open${canOpenAuditionForm ? "" : " disabled"}`}
-                  href={canOpenAuditionForm ? project.auditionFormUrl : undefined}
+                  className={`secondary audition-form-open${canOpenAuditionFolder ? "" : " disabled"}`}
+                  href={canOpenAuditionFolder ? project.auditionFormsFolderUrl : undefined}
                   target="_blank"
                   rel="noreferrer"
-                  aria-disabled={!canOpenAuditionForm}
-                ><ExternalLink size={16} />フォームを開く</a>
+                  aria-disabled={!canOpenAuditionFolder}
+                ><ExternalLink size={16} />フォルダーを開く</a>
               </div>
             </div>
 
@@ -1681,8 +1709,30 @@ function TasksView({ project, updateProject, canEditScript = true, setActive }) 
                     <p>担当声優名を登録すると、このタスクは自動で一覧から外れます。</p>
                   </div>
                   <div className="unassigned-role-actions">
-                    {canOpenAuditionForm && <a className="secondary" href={project.auditionFormUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />応募フォーム</a>}
+                    {canOpenAuditionFolder && <a className="secondary" href={project.auditionFormsFolderUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />フォーム一覧</a>}
                     {canEditScript && <button type="button" className="secondary" onClick={() => openCharacterEditor(character.id)}><Users size={15} />担当声優を登録</button>}
+                  </div>
+                  <div className="unassigned-role-statuses" aria-label={`${character.name}のオーディション進捗`}>
+                    <label className={auditionProgressByCharacterId.get(character.id)?.formCreated ? "checked" : ""}>
+                      <input
+                        type="checkbox"
+                        aria-label={`${character.name} フォーム作成済み`}
+                        checked={Boolean(auditionProgressByCharacterId.get(character.id)?.formCreated)}
+                        disabled={!canEditScript}
+                        onChange={(event) => patchAuditionRoleProgress(character.id, { formCreated: event.target.checked })}
+                      />
+                      <span>フォーム作成済み</span>
+                    </label>
+                    <label className={auditionProgressByCharacterId.get(character.id)?.recruitmentStarted ? "checked" : ""}>
+                      <input
+                        type="checkbox"
+                        aria-label={`${character.name} 募集開始済み`}
+                        checked={Boolean(auditionProgressByCharacterId.get(character.id)?.recruitmentStarted)}
+                        disabled={!canEditScript}
+                        onChange={(event) => patchAuditionRoleProgress(character.id, { recruitmentStarted: event.target.checked })}
+                      />
+                      <span>募集開始済み</span>
+                    </label>
                   </div>
                 </article>
               ))}

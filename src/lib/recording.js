@@ -46,6 +46,27 @@ export const sortProductionTasks = (tasks = []) => [...(Array.isArray(tasks) ? t
     return String(first?.createdAt || "").localeCompare(String(second?.createdAt || ""));
   });
 
+const normalizeAuditionRoleProgress = (value) => {
+  const entries = Array.isArray(value)
+    ? value
+    : Object.entries(value && typeof value === "object" ? value : {}).map(([characterId, progress]) => ({
+      characterId,
+      ...(progress && typeof progress === "object" ? progress : {})
+    }));
+  const byCharacterId = new Map();
+  entries.forEach((progress) => {
+    const characterId = String(progress?.characterId || "").trim();
+    if (!characterId) return;
+    byCharacterId.set(characterId, {
+      characterId,
+      formCreated: Boolean(progress.formCreated),
+      recruitmentStarted: Boolean(progress.recruitmentStarted),
+      updatedAt: String(progress.updatedAt || "")
+    });
+  });
+  return [...byCharacterId.values()];
+};
+
 export const canResolveProductionQuestion = (question = {}, userId, castMemberId = "") => {
   const questionUserId = Number(question.wpUserId);
   const currentUserId = Number(userId);
@@ -668,7 +689,8 @@ export const createRecordingProject = ({ episodeId = "", title = "新しい収�
   materials: [],
   questions: [],
   tasks: [],
-  auditionFormUrl: "",
+  auditionFormsFolderUrl: "",
+  auditionRoleProgress: [],
   scheduleItems: [],
   announcements: [],
   sharedLinks: [],
@@ -877,7 +899,8 @@ export const sampleRecordingProjects = [
       }
     ],
     tasks: [],
-    auditionFormUrl: "",
+    auditionFormsFolderUrl: "",
+    auditionRoleProgress: [],
     scheduleItems: [
       {
         id: "schedule_sample_001",
@@ -1206,7 +1229,14 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       createdAt: String(task.createdAt || new Date().toISOString()),
       updatedAt: String(task.updatedAt || task.createdAt || "")
     })),
-    auditionFormUrl: String(project.auditionFormUrl || project.auditionUrl || ""),
+    auditionFormsFolderUrl: String(
+      project.auditionFormsFolderUrl
+      || project.auditionFormFolderUrl
+      || project.auditionFormUrl
+      || project.auditionUrl
+      || ""
+    ),
+    auditionRoleProgress: normalizeAuditionRoleProgress(project.auditionRoleProgress),
     scheduleItems: (Array.isArray(project.scheduleItems) ? project.scheduleItems : []).map((item, itemIndex) => {
       const scheduleDateTime = normalizeScheduleDateTime(item);
       return {
