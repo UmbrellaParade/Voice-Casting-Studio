@@ -15,6 +15,7 @@ import {
   Image,
   LayoutDashboard,
   Link,
+  ListTodo,
   MessageSquareText,
   Mic2,
   Music,
@@ -306,6 +307,7 @@ const MAIN_NAV_ITEMS = [
   ["links", "共有リンク", Link],
   ["materials", "素材", Music],
   ["questions", "質問", MessageSquareText],
+  ["tasks", "タスク", ListTodo],
   ["schedule", "予定", CalendarDays],
   ...(SHOW_AUDITION_WORKFLOW ? AUDITION_NAV_ITEMS : []),
   ["manual", "マニュアル", BookOpen],
@@ -313,7 +315,7 @@ const MAIN_NAV_ITEMS = [
 ];
 
 const MAIN_NAV_KEYS = new Set(MAIN_NAV_ITEMS.map(([key]) => key));
-const PRODUCTION_HUB_KEYS = new Set(["home", "characters", "links", "materials", "questions", "schedule"]);
+const PRODUCTION_HUB_KEYS = new Set(["home", "characters", "links", "materials", "questions", "tasks", "schedule"]);
 const UI_STATE_KEY = `${STORAGE_KEY}:ui:v2`;
 const formAnchorId = (formId) => `form-section-${formId}`;
 

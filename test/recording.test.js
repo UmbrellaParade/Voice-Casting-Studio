@@ -18,6 +18,7 @@ import {
   getShareableRecordingProject,
   getScriptHierarchyRepairPlan,
   getScriptImportPlan,
+  getUnassignedProductionCharacters,
   getUnregisteredScriptSpeakers,
   normalizeRecordingProject,
   patchRecordingLineProgress,
@@ -31,8 +32,46 @@ import {
   renameProductionCharacter,
   repairScriptHierarchy,
   restoreScriptSnapshot,
+  sortProductionTasks,
   sortProductionScheduleItems
 } from "../src/lib/recording.js";
+
+test("keeps unassigned role tasks in sync with actor assignments", () => {
+  const project = normalizeRecordingProject({
+    characters: [
+      { id: "role_a", name: "役A" },
+      { id: "role_b", name: "役B" },
+      { id: "old_role", name: "旧台本の役" }
+    ],
+    castMembers: [{ id: "actor_a", actorName: "声優A", characterIds: ["role_a"] }],
+    lines: [
+      { id: "line_a", characterId: "role_a", text: "Aのセリフ", kind: "dialogue" },
+      { id: "line_b", characterId: "role_b", text: "Bのセリフ", kind: "dialogue" }
+    ]
+  });
+
+  assert.deepEqual(getUnassignedProductionCharacters(project).map((character) => character.name), ["役B"]);
+
+  const assigned = normalizeRecordingProject(assignProductionActorName(project, "role_b", "声優B"));
+  assert.deepEqual(getUnassignedProductionCharacters(assigned), []);
+
+  const cleared = normalizeRecordingProject(assignProductionActorName(assigned, "role_b", ""));
+  assert.deepEqual(getUnassignedProductionCharacters(cleared).map((character) => character.name), ["役B"]);
+});
+
+test("normalizes and sorts manual production tasks", () => {
+  const project = normalizeRecordingProject({
+    auditionFormUrl: "https://docs.google.com/forms/d/example/viewform",
+    tasks: [
+      { id: "done", title: "完了済み", completed: true, dueDate: "2026-07-20" },
+      { id: "later", title: "通常", dueDate: "2026-08-10" },
+      { id: "important", title: "重要", priority: "重要", dueDate: "2026-08-20" }
+    ]
+  });
+
+  assert.equal(project.auditionFormUrl, "https://docs.google.com/forms/d/example/viewform");
+  assert.deepEqual(sortProductionTasks(project.tasks).map((task) => task.id), ["important", "later", "done"]);
+});
 
 test("offers only unregistered dialogue speakers from manually pasted script bodies", () => {
   const project = normalizeRecordingProject({

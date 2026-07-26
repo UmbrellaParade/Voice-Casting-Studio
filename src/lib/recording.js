@@ -6,6 +6,7 @@ export const PRODUCTION_MATERIAL_STATUSES = ["準備中", "制作中", "確認�
 export const PRODUCTION_QUESTION_STATUSES = ["未回答", "回答済み", "解決済み"];
 export const PRODUCTION_SCHEDULE_TYPES = ["収録締切", "リテイク締切", "確認日", "公開予定", "編集", "収録", "打ち合わせ", "その他"];
 export const PRODUCTION_SCHEDULE_STATUSES = ["予定", "進行中", "完了", "延期"];
+export const PRODUCTION_TASK_PRIORITIES = ["通常", "重要"];
 export const SHARED_LINK_COLORS = [
   "#168b9a", "#b04f74", "#6f5aa7", "#b36b1f",
   "#397c50", "#4b6fa9", "#9b4b45", "#7c5c3d"
@@ -32,6 +33,17 @@ export const sortProductionScheduleItems = (items = []) => [...(Array.isArray(it
     const dateOrder = firstDate.localeCompare(secondDate);
     if (dateOrder) return dateOrder;
     return String(first?.time || "00:00").localeCompare(String(second?.time || "00:00"));
+  });
+
+export const sortProductionTasks = (tasks = []) => [...(Array.isArray(tasks) ? tasks : [])]
+  .sort((first, second) => {
+    if (Boolean(first?.completed) !== Boolean(second?.completed)) return first?.completed ? 1 : -1;
+    if (first?.priority !== second?.priority) return first?.priority === "重要" ? -1 : 1;
+    const firstDate = String(first?.dueDate || "9999-12-31");
+    const secondDate = String(second?.dueDate || "9999-12-31");
+    const dateOrder = firstDate.localeCompare(secondDate);
+    if (dateOrder) return dateOrder;
+    return String(first?.createdAt || "").localeCompare(String(second?.createdAt || ""));
   });
 
 export const canResolveProductionQuestion = (question = {}, userId, castMemberId = "") => {
@@ -655,6 +667,8 @@ export const createRecordingProject = ({ episodeId = "", title = "新しい収�
   lines: [],
   materials: [],
   questions: [],
+  tasks: [],
+  auditionFormUrl: "",
   scheduleItems: [],
   announcements: [],
   sharedLinks: [],
@@ -862,6 +876,8 @@ export const sampleRecordingProjects = [
         updatedAt: "2026-07-25T09:00:00.000Z"
       }
     ],
+    tasks: [],
+    auditionFormUrl: "",
     scheduleItems: [
       {
         id: "schedule_sample_001",
@@ -1180,6 +1196,17 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       createdAt: String(question.createdAt || new Date().toISOString()),
       updatedAt: String(question.updatedAt || question.createdAt || "")
     })),
+    tasks: (Array.isArray(project.tasks) ? project.tasks : []).map((task, taskIndex) => ({
+      id: task.id || createLocalId("task"),
+      title: String(task.title || `タスク${taskIndex + 1}`),
+      completed: Boolean(task.completed ?? task.status === "完了"),
+      priority: PRODUCTION_TASK_PRIORITIES.includes(task.priority) ? task.priority : "通常",
+      dueDate: String(task.dueDate || task.date || "").slice(0, 10),
+      notes: String(task.notes || task.description || ""),
+      createdAt: String(task.createdAt || new Date().toISOString()),
+      updatedAt: String(task.updatedAt || task.createdAt || "")
+    })),
+    auditionFormUrl: String(project.auditionFormUrl || project.auditionUrl || ""),
     scheduleItems: (Array.isArray(project.scheduleItems) ? project.scheduleItems : []).map((item, itemIndex) => {
       const scheduleDateTime = normalizeScheduleDateTime(item);
       return {
@@ -2113,6 +2140,21 @@ export const partitionCharactersByScript = (project = {}) => {
   });
 
   return { dialogueCounts, linkedCharacters, unlinkedCharacters };
+};
+
+export const getUnassignedProductionCharacters = (project = {}) => {
+  const { dialogueCounts, linkedCharacters } = partitionCharactersByScript(project);
+  const assignedCharacterIds = new Set(
+    (Array.isArray(project.castMembers) ? project.castMembers : [])
+      .filter((member) => String(member.actorName || "").trim())
+      .flatMap((member) => Array.isArray(member.characterIds) ? member.characterIds : [])
+  );
+  return linkedCharacters
+    .filter((character) => !assignedCharacterIds.has(character.id))
+    .map((character) => ({
+      ...character,
+      dialogueCount: dialogueCounts[character.id] || 0
+    }));
 };
 
 export const getRecordingDisplayProject = (project = {}) => {

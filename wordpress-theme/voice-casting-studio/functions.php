@@ -470,6 +470,8 @@ function vcs_extract_script_structure(array $data): array
             'recordingFolderOrder' => $recording_folder_order,
             'castMembers' => vcs_canonicalize_value($project['castMembers'] ?? []),
             'materials' => vcs_canonicalize_value($project['materials'] ?? []),
+            'tasks' => vcs_canonicalize_value($project['tasks'] ?? []),
+            'auditionFormUrl' => (string) ($project['auditionFormUrl'] ?? ''),
             'scheduleItems' => vcs_canonicalize_value($project['scheduleItems'] ?? []),
             'deadlineItems' => vcs_canonicalize_value($project['deadlineItems'] ?? []),
             'announcements' => vcs_canonicalize_value($project['announcements'] ?? []),

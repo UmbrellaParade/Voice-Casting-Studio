@@ -16,6 +16,7 @@ import {
   ImagePlus,
   LayoutDashboard,
   Link,
+  ListTodo,
   KeyRound,
   Megaphone,
   MessageSquareText,
@@ -42,6 +43,7 @@ import {
   PRODUCTION_QUESTION_STATUSES,
   PRODUCTION_SCHEDULE_STATUSES,
   PRODUCTION_SCHEDULE_TYPES,
+  PRODUCTION_TASK_PRIORITIES,
   SHARED_LINK_COLORS,
   addProductionCharacterFromScriptSpeaker,
   archiveScriptVersion,
@@ -53,6 +55,7 @@ import {
   getCharacterName,
   getCharacterScriptName,
   getRecordingProgress,
+  getUnassignedProductionCharacters,
   getUnregisteredScriptSpeakers,
   normalizeImagePosition,
   normalizeImageScale,
@@ -64,7 +67,8 @@ import {
   reorderProductionMaterials,
   reorderProductionRecordingFolders,
   reorderProductionSharedLinks,
-  sortProductionScheduleItems
+  sortProductionScheduleItems,
+  sortProductionTasks
 } from "../lib/recording.js";
 import { getWordPressRuntime, makeWordPressMemberShareUrl, uploadWordPressImage } from "../lib/wordpress.js";
 import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
@@ -113,6 +117,18 @@ const createDeadlineItem = (overrides = {}) => ({
   time: "",
   status: "予定",
   notes: "",
+  ...overrides
+});
+
+const createProductionTask = (overrides = {}) => ({
+  id: newId("task"),
+  title: "新しいタスク",
+  completed: false,
+  priority: "通常",
+  dueDate: "",
+  notes: "",
+  createdAt: new Date().toISOString(),
+  updatedAt: "",
   ...overrides
 });
 
@@ -759,6 +775,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
     const lineCount = dialogueCounts[character.id] || 0;
     return (
       <article
+        id={`character-${character.id}`}
         className={`character-editor${isLinked ? "" : " script-unlinked"}${draggingCharacterId === character.id ? " dragging" : ""}${dragOverCharacterId === character.id ? " drag-over" : ""}`}
         data-character-id={character.id}
         key={character.id}
@@ -1595,12 +1612,120 @@ function ScheduleView({ project, updateProject, canEditScript = true }) {
   );
 }
 
+function TasksView({ project, updateProject, canEditScript = true, setActive }) {
+  const unassignedCharacters = getUnassignedProductionCharacters(project);
+  const tasks = sortProductionTasks(project.tasks);
+  const incompleteTaskCount = tasks.filter((task) => !task.completed).length;
+  const canOpenAuditionForm = isWebUrl(project.auditionFormUrl);
+
+  const patchTask = (taskId, patch) => updateProject((current) => ({
+    ...current,
+    tasks: (current.tasks || []).map((task) => task.id === taskId
+      ? { ...task, ...patch, updatedAt: new Date().toISOString() }
+      : task)
+  }));
+
+  const removeTask = (task) => {
+    if (!confirm(`「${task.title || "タスク"}」を削除しますか？`)) return;
+    updateProject((current) => ({
+      ...current,
+      tasks: (current.tasks || []).filter((item) => item.id !== task.id)
+    }));
+  };
+
+  const openCharacterEditor = (characterId) => {
+    setActive("characters");
+    globalThis.setTimeout(() => {
+      globalThis.document?.getElementById(`character-${characterId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  };
+
+  return (
+    <div className="production-page-stack tasks-workspace">
+      <section className={`task-section unassigned-role-section${unassignedCharacters.length ? " attention" : " complete"}`}>
+        <header>
+          <div><Users size={20} /><div><h3>配役が決まっていない役</h3><p>台本にセリフがあり、担当声優が未登録の役を自動で表示します。</p></div></div>
+          <span className="task-section-count">{unassignedCharacters.length ? `${unassignedCharacters.length}役` : "全役決定"}</span>
+        </header>
+
+        {unassignedCharacters.length > 0 ? (
+          <>
+            <div className="audition-form-panel">
+              <div><ClipboardCopy size={18} /><div><b>オーディションフォーム</b><span>未配役の募集に使用するGoogleフォームなどのURLです。</span></div></div>
+              <div className="audition-form-control">
+                <input
+                  type="url"
+                  aria-label="オーディションフォームURL"
+                  value={project.auditionFormUrl || ""}
+                  placeholder="https://docs.google.com/forms/..."
+                  readOnly={!canEditScript}
+                  onChange={(event) => updateProject((current) => ({ ...current, auditionFormUrl: event.target.value }))}
+                />
+                <a
+                  className={`secondary audition-form-open${canOpenAuditionForm ? "" : " disabled"}`}
+                  href={canOpenAuditionForm ? project.auditionFormUrl : undefined}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-disabled={!canOpenAuditionForm}
+                ><ExternalLink size={16} />フォームを開く</a>
+              </div>
+            </div>
+
+            <div className="unassigned-role-grid">
+              {unassignedCharacters.map((character) => (
+                <article className="unassigned-role-card" key={character.id} style={{ "--character-color": character.color }}>
+                  <i />
+                  <div className="unassigned-role-main">
+                    <div><strong>{character.name}</strong><span>{character.dialogueCount}セリフ</span></div>
+                    {character.scriptName && character.scriptName !== character.name && <small>台本表記：{character.scriptName}</small>}
+                    <p>担当声優名を登録すると、このタスクは自動で一覧から外れます。</p>
+                  </div>
+                  <div className="unassigned-role-actions">
+                    {canOpenAuditionForm && <a className="secondary" href={project.auditionFormUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />応募フォーム</a>}
+                    {canEditScript && <button type="button" className="secondary" onClick={() => openCharacterEditor(character.id)}><Users size={15} />担当声優を登録</button>}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="production-empty-state compact"><CheckCircle2 size={28} /><b>台本内のすべての役に担当声優が登録されています</b><span>担当声優名を外した役は、自動でこの一覧へ戻ります。</span></div>
+        )}
+      </section>
+
+      <section className="task-section manual-task-section">
+        <header>
+          <div><ListTodo size={20} /><div><h3>手動タスク</h3><p>配役以外の作業を自由に追加し、完了状況を全員で共有します。</p></div></div>
+          <div className="task-section-actions"><span>{incompleteTaskCount}件 未完了</span>{canEditScript && <button type="button" className="primary" onClick={() => updateProject((current) => ({ ...current, tasks: [...(current.tasks || []), createProductionTask()] }))}><Plus size={16} />タスクを追加</button>}</div>
+        </header>
+        <div className="production-task-list">
+          {tasks.map((task) => (
+            <article className={`${task.completed ? "completed" : ""}${task.priority === "重要" ? " important" : ""}`} key={task.id}>
+              <label className="task-complete-control">
+                <input type="checkbox" checked={task.completed} disabled={!canEditScript} onChange={(event) => patchTask(task.id, { completed: event.target.checked })} />
+                <span>{task.completed ? "完了" : "未完了"}</span>
+              </label>
+              <label className="task-title-field"><span>タスク名</span><input value={task.title} readOnly={!canEditScript} onChange={(event) => patchTask(task.id, { title: event.target.value })} /></label>
+              <label><span>期日（任意）</span><input type="date" value={task.dueDate} disabled={!canEditScript} onChange={(event) => patchTask(task.id, { dueDate: event.target.value })} /></label>
+              <label><span>優先度</span><select value={task.priority} disabled={!canEditScript} onChange={(event) => patchTask(task.id, { priority: event.target.value })}>{PRODUCTION_TASK_PRIORITIES.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
+              <label className="task-notes-field"><span>共有メモ</span><textarea value={task.notes} readOnly={!canEditScript} onChange={(event) => patchTask(task.id, { notes: event.target.value })} /></label>
+              {canEditScript && <button type="button" className="icon-button danger-icon" title="タスクを削除" aria-label={`${task.title || "タスク"}を削除`} onClick={() => removeTask(task)}><Trash2 size={16} /></button>}
+            </article>
+          ))}
+          {!tasks.length && <div className="production-empty-state compact"><ListTodo size={28} /><b>手動タスクはまだありません</b><span>「タスクを追加」から、配役以外の作業を登録できます。</span></div>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 const PAGE_COPY = {
   home: ["ホーム", "収録、確認、質問、締切、追加の期日、直近の予定を作品単位でまとめて確認します。"],
   characters: ["キャラクター", "人物設定、担当声優、担当者SNSと収録フォルダーを管理します。"],
   links: ["共有リンク", "キャラクター別の収録フォルダーと作品全体の共有URLを管理します。"],
   materials: ["素材", "音源とサムネイルを種類別に登録し、その場で確認します。"],
   questions: ["質問", "作品やセリフに紐づく質問と回答状況を共有します。"],
+  tasks: ["タスク", "未配役の役を自動で確認し、オーディションと制作作業をまとめて管理します。"],
   schedule: ["予定", "締切・期日と直近の制作予定を分けて、編集状況や全体連絡と一緒に管理します。"]
 };
 
@@ -1650,6 +1775,7 @@ export function ProductionWorkspace({
           onResolveQuestion={onResolveQuestion}
         />
       )}
+      {view === "tasks" && <TasksView project={project} updateProject={updateProject} canEditScript={canEditScript} setActive={setActive} />}
       {view === "schedule" && <ScheduleView project={project} updateProject={updateProject} canEditScript={canEditScript} />}
     </div>
   );
