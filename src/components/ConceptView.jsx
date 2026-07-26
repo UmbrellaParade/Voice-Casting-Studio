@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Heart, Save, Sparkles, Telescope } from "lucide-react";
-import { normalizeStudioConcept } from "../lib/core.js";
+import { normalizeStudioConcept, publicAsset } from "../lib/core.js";
 import { SectionTitle } from "./ui.jsx";
 
 export function ConceptView({ concept = {}, canEdit = false, onSave = () => {}, showTitle = true }) {
@@ -58,7 +58,8 @@ export function ConceptView({ concept = {}, canEdit = false, onSave = () => {}, 
         <div className="concept-hero-mark"><Sparkles size={23} /></div>
         <div>
           <p>OUR CONCEPT &amp; VISION</p>
-          <h2 id="concept-brand-title">{normalized.title}</h2>
+          <h2 className="sr-only" id="concept-brand-title">{normalized.title}</h2>
+          <img className="concept-brand-logo" src={publicAsset("assets/umbrella-parade-concept-logo.png")} alt={normalized.title || "Umbrella Parade"} />
           {normalized.tagline && <strong>{normalized.tagline}</strong>}
         </div>
       </section>

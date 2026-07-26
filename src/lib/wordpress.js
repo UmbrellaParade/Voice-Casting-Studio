@@ -43,7 +43,7 @@ const wordpressRequest = async (path, options = {}) => {
     if (path === "line") return { ok: true, line: { ...body.patch, updatedAt: new Date().toISOString() } };
     if (path === "question") {
       const now = new Date().toISOString();
-      return { ok: true, question: { id: `question_preview_${Date.now()}`, lineId: body.lineId || "", characterId: "", authorName: runtime.currentUser.name, wpUserId: runtime.currentUser.id, body: body.body, answer: "", status: "未回答", createdAt: now, updatedAt: now } };
+      return { ok: true, question: { id: `question_preview_${Date.now()}`, lineId: body.lineId || "", characterId: "", authorName: runtime.currentUser.name, wpUserId: runtime.currentUser.id, castMemberId: "", parentQuestionId: body.parentQuestionId || "", body: body.body, answer: "", status: "未回答", createdAt: now, updatedAt: now } };
     }
     if (path === "question/resolve") {
       return { ok: true, question: { id: body.questionId, status: "解決済み", updatedAt: new Date().toISOString() } };
@@ -113,9 +113,9 @@ export const updateWordPressRecordingLine = ({ projectId, lineId, patch, lineCon
   body: JSON.stringify({ projectId, lineId, patch, lineContext })
 });
 
-export const createWordPressQuestion = ({ projectId, lineId = "", body }) => wordpressRequest("question", {
+export const createWordPressQuestion = ({ projectId, lineId = "", body, parentQuestionId = "" }) => wordpressRequest("question", {
   method: "POST",
-  body: JSON.stringify({ projectId, lineId, body })
+  body: JSON.stringify({ projectId, lineId, body, parentQuestionId })
 });
 
 export const resolveWordPressQuestion = ({ projectId, questionId }) => wordpressRequest("question/resolve", {

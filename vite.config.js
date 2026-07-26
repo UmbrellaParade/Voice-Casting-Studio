@@ -16,6 +16,10 @@ const copyWordPressBrandAsset = () => ({
       resolve(repositoryRoot, "public/assets/umbrella-parade-logo.png"),
       resolve(destinationDir, "umbrella-parade-logo.png")
     );
+    copyFileSync(
+      resolve(repositoryRoot, "public/assets/umbrella-parade-concept-logo.png"),
+      resolve(destinationDir, "umbrella-parade-concept-logo.png")
+    );
   }
 });
 

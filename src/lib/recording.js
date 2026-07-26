@@ -34,14 +34,48 @@ export const sortProductionScheduleItems = (items = []) => [...(Array.isArray(it
     return String(first?.time || "00:00").localeCompare(String(second?.time || "00:00"));
   });
 
-export const canResolveProductionQuestion = (question = {}, userId) => {
+export const canResolveProductionQuestion = (question = {}, userId, castMemberId = "") => {
   const questionUserId = Number(question.wpUserId);
   const currentUserId = Number(userId);
-  return question.status === "回答済み"
-    && Boolean(String(question.answer || "").trim())
+  const memberOwnsQuestion = Boolean(castMemberId)
+    && String(question.castMemberId || "") === String(castMemberId);
+  const userOwnsQuestion = questionUserId > 0
+    && currentUserId > 0
     && Number.isFinite(questionUserId)
     && Number.isFinite(currentUserId)
     && questionUserId === currentUserId;
+  return question.status === "回答済み"
+    && Boolean(String(question.answer || "").trim())
+    && (memberOwnsQuestion || userOwnsQuestion);
+};
+
+export const buildProductionQuestionThreads = (questions = []) => {
+  const list = Array.isArray(questions) ? questions : [];
+  const ids = new Set(list.map((question) => String(question.id || "")).filter(Boolean));
+  const children = new Map();
+  list.forEach((question) => {
+    const parentId = String(question.parentQuestionId || "");
+    if (!parentId || parentId === question.id || !ids.has(parentId)) return;
+    if (!children.has(parentId)) children.set(parentId, []);
+    children.get(parentId).push(question);
+  });
+  const visited = new Set();
+  const ordered = [];
+  const append = (question, depth = 0) => {
+    const id = String(question.id || "");
+    if (!id || visited.has(id)) return;
+    visited.add(id);
+    ordered.push({ question, depth });
+    (children.get(id) || []).forEach((child) => append(child, depth + 1));
+  };
+  list
+    .filter((question) => {
+      const parentId = String(question.parentQuestionId || "");
+      return !parentId || parentId === question.id || !ids.has(parentId);
+    })
+    .forEach((question) => append(question));
+  list.forEach((question) => append(question));
+  return ordered;
 };
 
 const normalizeSharedLinkColor = (value = "") => {
@@ -1076,6 +1110,8 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
         : "",
       authorName: String(question.authorName || "メンバー"),
       wpUserId: Number.isFinite(Number(question.wpUserId)) ? Number(question.wpUserId) : 0,
+      castMemberId: String(question.castMemberId || ""),
+      parentQuestionId: String(question.parentQuestionId || ""),
       body: String(question.body || question.question || ""),
       answer: String(question.answer || ""),
       status: PRODUCTION_QUESTION_STATUSES.includes(question.status) ? question.status : "未回答",
@@ -1088,6 +1124,18 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
         id: item.id || createLocalId("schedule"),
         type: PRODUCTION_SCHEDULE_TYPES.includes(item.type) ? item.type : "その他",
         title: String(item.title || `予定${itemIndex + 1}`),
+        date: scheduleDateTime.date,
+        time: scheduleDateTime.time,
+        status: PRODUCTION_SCHEDULE_STATUSES.includes(item.status) ? item.status : "予定",
+        notes: String(item.notes || "")
+      };
+    }),
+    deadlineItems: (Array.isArray(project.deadlineItems) ? project.deadlineItems : []).map((item, itemIndex) => {
+      const scheduleDateTime = normalizeScheduleDateTime(item);
+      return {
+        id: item.id || createLocalId("deadline"),
+        type: PRODUCTION_SCHEDULE_TYPES.includes(item.type) ? item.type : "その他",
+        title: String(item.title || `期日${itemIndex + 1}`),
         date: scheduleDateTime.date,
         time: scheduleDateTime.time,
         status: PRODUCTION_SCHEDULE_STATUSES.includes(item.status) ? item.status : "予定",

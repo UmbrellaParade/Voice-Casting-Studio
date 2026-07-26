@@ -44,6 +44,7 @@ import {
   PRODUCTION_SCHEDULE_TYPES,
   SHARED_LINK_COLORS,
   archiveScriptVersion,
+  buildProductionQuestionThreads,
   createRecordingAccessKey,
   getCharacterImageCropStyle,
   getCharacterName,
@@ -82,7 +83,18 @@ const toDateInputValue = (value) => String(value || "").slice(0, 10);
 
 const createScheduleItem = (overrides = {}) => ({
   id: newId("schedule"),
-  type: "収録締切",
+  type: "収録",
+  title: "新しい予定",
+  date: "",
+  time: "",
+  status: "予定",
+  notes: "",
+  ...overrides
+});
+
+const createDeadlineItem = (overrides = {}) => ({
+  id: newId("deadline"),
+  type: "リテイク締切",
   title: "新しい期日",
   date: "",
   time: "",
@@ -222,20 +234,21 @@ function ProductionKeyDates({ project, updateProject, canEditScript = true }) {
   );
 }
 
-function ScheduleItemsEditor({ project, updateProject, canEditScript = true, compact = false }) {
+function ScheduleItemsEditor({ project, updateProject, canEditScript = true, compact = false, collectionKey = "scheduleItems", itemLabel = "予定" }) {
+  const sourceItems = Array.isArray(project[collectionKey]) ? project[collectionKey] : [];
   const scheduleItems = [
-    ...project.scheduleItems.filter((item) => !item.date),
-    ...sortProductionScheduleItems(project.scheduleItems.filter((item) => item.date))
+    ...sourceItems.filter((item) => !item.date),
+    ...sortProductionScheduleItems(sourceItems.filter((item) => item.date))
   ];
   const patchScheduleItem = (itemId, patch) => updateProject((current) => ({
     ...current,
-    scheduleItems: current.scheduleItems.map((item) => item.id === itemId ? { ...item, ...patch } : item)
+    [collectionKey]: (current[collectionKey] || []).map((item) => item.id === itemId ? { ...item, ...patch } : item)
   }));
   const removeScheduleItem = (itemId) => {
-    if (!confirm("この期日を削除しますか？")) return;
+    if (!confirm(`この${itemLabel}を削除しますか？`)) return;
     updateProject((current) => ({
       ...current,
-      scheduleItems: current.scheduleItems.filter((item) => item.id !== itemId)
+      [collectionKey]: (current[collectionKey] || []).filter((item) => item.id !== itemId)
     }));
   };
 
@@ -246,13 +259,13 @@ function ScheduleItemsEditor({ project, updateProject, canEditScript = true, com
           <label><span>日付</span><input type="date" value={item.date} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { date: event.target.value })} /></label>
           <label><span>時刻（任意）</span><input type="time" value={item.time || ""} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { time: event.target.value })} /></label>
           <label><span>種類</span><select value={item.type} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { type: event.target.value })}>{PRODUCTION_SCHEDULE_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
-          <label className="schedule-title-field"><span>期日名</span><input value={item.title} readOnly={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { title: event.target.value })} /></label>
+          <label className="schedule-title-field"><span>{itemLabel}名</span><input value={item.title} readOnly={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { title: event.target.value })} /></label>
           <label><span>状態</span><select value={item.status} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { status: event.target.value })}>{PRODUCTION_SCHEDULE_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label>
           <label className="wide"><span>共有メモ</span><textarea value={item.notes} readOnly={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { notes: event.target.value })} /></label>
-          {canEditScript && <button type="button" className="icon-button danger-icon" title="期日を削除" aria-label={`${item.title || "期日"}を削除`} onClick={() => removeScheduleItem(item.id)}><Trash2 size={16} /></button>}
+          {canEditScript && <button type="button" className="icon-button danger-icon" title={`${itemLabel}を削除`} aria-label={`${item.title || itemLabel}を削除`} onClick={() => removeScheduleItem(item.id)}><Trash2 size={16} /></button>}
         </article>
       ))}
-      {!project.scheduleItems.length && <p className="production-list-empty">追加の期日はまだ登録されていません。</p>}
+      {!sourceItems.length && <p className="production-list-empty">{itemLabel}はまだ登録されていません。</p>}
     </div>
   );
 }
@@ -263,11 +276,7 @@ function ProductionHome({ project, setActive, updateProject, canEditScript }) {
     line.kind !== "direction" && line.actorStatus !== "未収録" && ["未確認", "確認中"].includes(line.reviewStatus)
   );
   const unansweredQuestions = project.questions.filter((question) => question.status === "未回答");
-  const schedule = sortProductionScheduleItems([
-    ...(project.recordingDeadline ? [{ id: "recording-deadline", type: "収録締切", title: "作品全体の収録締切", date: project.recordingDeadline, time: project.recordingDeadlineTime || "", status: "予定" }] : []),
-    ...(project.releaseDate ? [{ id: "release-date", type: "公開予定", title: "作品の公開予定", date: project.releaseDate, time: project.releaseTime || "", status: "予定" }] : []),
-    ...project.scheduleItems
-  ].filter((item) => item.date && item.status !== "完了"));
+  const schedule = sortProductionScheduleItems(project.scheduleItems.filter((item) => item.date && item.status !== "完了"));
 
   return (
     <div className="production-page-stack">
@@ -276,13 +285,13 @@ function ProductionHome({ project, setActive, updateProject, canEditScript }) {
           <div><CalendarClock size={19} /><h3>締切・期日・制作状況</h3></div>
           <div className="production-home-key-date-actions">
             <button type="button" className="key-date-detail-button" onClick={() => setActive("schedule")}>予定の詳細</button>
-            {canEditScript && <button type="button" className="secondary" onClick={() => updateProject((current) => ({ ...current, scheduleItems: [...current.scheduleItems, createScheduleItem()] }))}><Plus size={16} />期日を追加</button>}
+            {canEditScript && <button type="button" className="secondary" onClick={() => updateProject((current) => ({ ...current, deadlineItems: [...(current.deadlineItems || []), createDeadlineItem()] }))}><Plus size={16} />期日を追加</button>}
           </div>
         </header>
         <ProductionKeyDates project={project} updateProject={updateProject} canEditScript={canEditScript} />
         <div className="production-home-deadlines">
-          <div className="production-home-deadlines-heading"><span>追加した期日</span><strong>{project.scheduleItems.length}件</strong></div>
-          <ScheduleItemsEditor project={project} updateProject={updateProject} canEditScript={canEditScript} compact />
+          <div className="production-home-deadlines-heading"><span>追加した期日</span><strong>{(project.deadlineItems || []).length}件</strong></div>
+          <ScheduleItemsEditor project={project} updateProject={updateProject} canEditScript={canEditScript} compact collectionKey="deadlineItems" itemLabel="期日" />
         </div>
       </section>
 
@@ -1256,7 +1265,8 @@ function QuestionContext({ project, question }) {
 function QuestionsView({ project, updateProject }) {
   const [filter, setFilter] = useState("未回答");
   const [draft, setDraft] = useState({ authorName: "", lineId: "", body: "" });
-  const visibleQuestions = filter === "すべて" ? project.questions : project.questions.filter((question) => question.status === filter);
+  const visibleQuestionThreads = buildProductionQuestionThreads(project.questions)
+    .filter(({ question }) => filter === "すべて" || question.status === filter);
 
   const addQuestion = () => {
     if (!draft.body.trim()) return;
@@ -1264,7 +1274,7 @@ function QuestionsView({ project, updateProject }) {
     const now = new Date().toISOString();
     updateProject((current) => ({
       ...current,
-      questions: [{ id: newId("question"), lineId: draft.lineId, characterId: line?.characterId || "", authorName: draft.authorName.trim() || "メンバー", body: draft.body.trim(), answer: "", status: "未回答", createdAt: now, updatedAt: now }, ...current.questions]
+      questions: [{ id: newId("question"), lineId: draft.lineId, characterId: line?.characterId || "", authorName: draft.authorName.trim() || "メンバー", wpUserId: 0, castMemberId: "", parentQuestionId: "", body: draft.body.trim(), answer: "", status: "未回答", createdAt: now, updatedAt: now }, ...current.questions]
     }));
     setDraft({ ...draft, lineId: "", body: "" });
     setFilter("未回答");
@@ -1294,8 +1304,8 @@ function QuestionsView({ project, updateProject }) {
       </div>
 
       <div className="question-thread-list">
-        {visibleQuestions.map((question) => (
-          <article className={`question-thread status-${question.status}`} key={question.id}>
+        {visibleQuestionThreads.map(({ question, depth }) => (
+          <article className={`question-thread status-${question.status}${depth ? " is-follow-up" : ""}`} style={{ "--question-depth": Math.min(depth, 3) }} key={question.id}>
             <header>
               <div><b>{question.authorName}</b><time>{formatDate(question.createdAt, true)}</time></div>
               <div><span className={`question-status-label status-${question.status}`}>{question.status}</span><button type="button" className="icon-button danger-icon" title="質問を削除" onClick={() => {
@@ -1303,6 +1313,7 @@ function QuestionsView({ project, updateProject }) {
                 updateProject((current) => ({ ...current, questions: current.questions.filter((item) => item.id !== question.id) }));
               }}><Trash2 size={16} /></button></div>
             </header>
+            {question.parentQuestionId && <div className="question-follow-up-label"><MessageSquareText size={15} />前の回答への追加質問</div>}
             <QuestionContext project={project} question={question} />
             <p className="question-body">{question.body}</p>
             <label className="question-answer"><span>管理者からの回答</span><textarea value={question.answer} placeholder="回答を入力" onChange={(event) => patchQuestion(question.id, { answer: event.target.value })} /></label>
@@ -1310,13 +1321,13 @@ function QuestionsView({ project, updateProject }) {
               <span>最終更新 {formatDate(question.updatedAt, true)}</span>
               <button type="button" className="primary" disabled={!question.answer.trim()} onClick={() => patchQuestion(question.id, { status: question.status === "解決済み" ? "解決済み" : "回答済み" })}>
                 <MessageSquareText size={16} />
-                {question.status === "未回答" ? "回答を確定" : "回答を更新"}
+                {question.status === "未回答" ? "回答を確定" : "回答内容を保存"}
               </button>
             </footer>
           </article>
         ))}
       </div>
-      {!visibleQuestions.length && <div className="production-empty-state"><CheckCircle2 size={30} /><b>{filter}の質問はありません</b></div>}
+      {!visibleQuestionThreads.length && <div className="production-empty-state"><CheckCircle2 size={30} /><b>{filter}の質問はありません</b></div>}
     </div>
   );
 }
@@ -1332,8 +1343,13 @@ function ScheduleView({ project, updateProject, canEditScript = true }) {
       <ProductionKeyDates project={project} updateProject={updateProject} canEditScript={canEditScript} />
 
       <section className="schedule-section">
-        <header><div><CalendarClock size={20} /><div><h3>制作予定・期日</h3><p>収録、編集、公開までの予定を全員で確認します。</p></div></div>{canEditScript && <button type="button" className="primary" onClick={() => updateProject((current) => ({ ...current, scheduleItems: [...current.scheduleItems, createScheduleItem()] }))}><Plus size={16} />期日を追加</button>}</header>
-        <ScheduleItemsEditor project={project} updateProject={updateProject} canEditScript={canEditScript} />
+        <header><div><CalendarClock size={20} /><div><h3>追加の期日</h3><p>リテイク期限や確認日など、守る必要がある期日を管理します。</p></div></div>{canEditScript && <button type="button" className="primary" onClick={() => updateProject((current) => ({ ...current, deadlineItems: [...(current.deadlineItems || []), createDeadlineItem()] }))}><Plus size={16} />期日を追加</button>}</header>
+        <ScheduleItemsEditor project={project} updateProject={updateProject} canEditScript={canEditScript} collectionKey="deadlineItems" itemLabel="期日" />
+      </section>
+
+      <section className="schedule-section">
+        <header><div><CalendarClock size={20} /><div><h3>直近の予定</h3><p>収録、編集、打ち合わせ、公開などの制作予定を共有します。</p></div></div>{canEditScript && <button type="button" className="secondary" onClick={() => updateProject((current) => ({ ...current, scheduleItems: [...current.scheduleItems, createScheduleItem()] }))}><Plus size={16} />予定を追加</button>}</header>
+        <ScheduleItemsEditor project={project} updateProject={updateProject} canEditScript={canEditScript} itemLabel="予定" />
       </section>
 
       <section className="schedule-section announcements-editor">
@@ -1358,12 +1374,12 @@ function ScheduleView({ project, updateProject, canEditScript = true }) {
 }
 
 const PAGE_COPY = {
-  home: ["ホーム", "収録、確認、質問、締切と追加した期日を作品単位でまとめて確認します。"],
+  home: ["ホーム", "収録、確認、質問、締切、追加の期日、直近の予定を作品単位でまとめて確認します。"],
   characters: ["キャラクター", "人物設定、担当声優、担当者SNSと収録フォルダーを管理します。"],
   links: ["共有リンク", "キャラクター別の収録フォルダーと作品全体の共有URLを管理します。"],
   materials: ["素材", "音源とサムネイルを種類別に登録し、その場で確認します。"],
   questions: ["質問", "作品やセリフに紐づく質問と回答状況を共有します。"],
-  schedule: ["予定", "収録締切、追加の期日、公開予定、編集状況と全体連絡を管理します。"]
+  schedule: ["予定", "締切・期日と直近の制作予定を分けて、編集状況や全体連絡と一緒に管理します。"]
 };
 
 export function ProductionWorkspace({

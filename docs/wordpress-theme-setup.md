@@ -4,7 +4,7 @@
 
 サブドメイン専用のカスタムテーマとしてVoice Casting Studioを動かします。WordPress本体のファイルは変更しません。
 
-- WordPress: ログイン、ユーザー、権限、作品データ、更新履歴を担当
+- WordPress: 制作側のログイン、権限、作品データ、更新履歴と、声優さん専用共有URLの検証を担当
 - Voice Casting Studioテーマ: ホーム、台本、キャラクター、素材、質問、予定の全画面を担当
 - Google Drive: 声優さんの録音、主題歌、BGM、SE、完成音源を保存
 - WordPressメディア: キャラクター画像、サムネイル画像だけを保存
@@ -17,7 +17,7 @@ WordPressへ録音ファイル本体は保存しません。作品データに�
 2. HTTPSを有効にする。
 3. 検索エンジンのインデックスを無効にする。
 4. WordPressとサーバーのバックアップを有効にする。
-5. キャッシュ機能では、ログイン中のページとREST APIをキャッシュ対象外にする。
+5. キャッシュ機能では、ログイン中のページ、専用共有URL付きページ、REST APIをキャッシュ対象外にする。
 
 ## テーマを作る
 
@@ -47,12 +47,11 @@ wordpress-theme/voice-casting-studio
 
 1. `Administrator`または`Voice Script Owner`でサブドメインへログインする。
 2. キャラクターページで担当声優を追加する。
-3. WordPress管理画面で声優さんのユーザーを作り、役割を`Voice Actor`にする。
-4. Voice Casting Studioのキャラクターページで、担当声優の「WordPressアカウント」を選ぶ。
-5. 各キャラクターへGoogle Drive収録フォルダーURLとLINEオープンチャットURLを登録する。
-6. 台本を取り込み、章とシーンのプレビューを確認して反映する。
+3. 各キャラクターへGoogle Drive収録フォルダーURLを登録する。
+4. キャラクターページ下部の担当声優一覧で「URLをコピー」を押し、本人へ専用URLを渡す。
+5. 台本を取り込み、章とシーンのプレビューを確認して反映する。
 
-声優さんがログインすると、紐づいた担当作品だけが表示されます。全作品データ、同期トークン、他メンバーの連絡先、他の役の録音URL・収録フォルダー・個別質問はREST APIから返しません。
+声優さんはユーザー名・パスワードを入力せず、専用URLを開くだけで担当作品を利用できます。専用URLには推測困難なアクセスキーが含まれるため、本人以外へ転送しないでください。全作品データ、他メンバーの連絡先、他の役の録音URL・収録フォルダー・個別質問はREST APIから返しません。URLが漏れた場合は担当声優一覧の鍵ボタンで再発行すると、古いURLは無効になります。
 
 ## Google Driveの共有
 
@@ -67,7 +66,7 @@ wordpress-theme/voice-casting-studio
     ヴェル/
 ```
 
-情報漏洩を避けるため、「リンクを知っている全員」にはしません。各声優さんが使うGoogleアカウントを閲覧者または編集者として個別に追加します。WordPressのログインアカウントとGoogleアカウントは別物なので、両方のアクセス権を設定します。
+声優さんがフォルダーへアップロードできる共有設定にします。「リンクを知っている全員」を使う場合はフォルダーURL自体がアクセス権になるため、作品外へ転送しないことをメンバーへ伝えます。より厳密に管理する作品では、各声優さんのGoogleアカウントを編集者として個別追加します。
 
 録音提出ではGoogle Driveの共有URLだけを登録します。WordPress側のAPIは`drive.google.com`または`docs.google.com`以外の録音URLを受け付けません。
 
@@ -122,7 +121,7 @@ Googleドキュメントでは、章見出しの下へシーン見出しを置�
 - 台本の保存版と取り込み原文は制作オーナー・制作管理者だけに返し、声優さん用RESTデータやApps Script共有データには含めません。
 - 声優さんは作品JSON全体を保存できません。
 - 声優さんが変更できるのは、担当キャラクターの収録状態、Google Drive URL、提出メモだけです。
-- 質問はログイン中のWordPressユーザー名で記録されます。
+- 質問は専用共有URLに紐づく担当声優名で記録されます。回答後は本人だけが解決または追加質問を実行できます。
 - JPEG、PNG、WebP画像だけがWordPressメディアへアップロードできます。
 
 ## 更新
@@ -137,12 +136,13 @@ npm run build:wordpress
 
 ## REST API
 
-テーマはログインCookieとWordPress REST nonceを使います。
+制作側はログインCookieとWordPress REST nonce、声優さん側は担当者別アクセスキーを使います。
 
-- `GET /wp-json/voice-casting-studio/v1/workspace`: ログイン中の閲覧データ
+- `GET /wp-json/voice-casting-studio/v1/workspace`: 制作側の全データ、または専用URLに対応する担当者向けデータ
 - `POST /wp-json/voice-casting-studio/v1/workspace`: 制作オーナーと制作管理者が作品データを保存。台本構造の変更は制作オーナーだけ許可
 - `POST /wp-json/voice-casting-studio/v1/line`: 担当セリフまたは管理者の進捗更新
-- `POST /wp-json/voice-casting-studio/v1/question`: ログインメンバーの質問投稿
+- `POST /wp-json/voice-casting-studio/v1/question`: 担当メンバーの質問・追加質問投稿
+- `POST /wp-json/voice-casting-studio/v1/question/resolve`: 質問者本人による回答確認・解決
 - `POST /wp-json/voice-casting-studio/v1/image`: 管理者の画像アップロード
 
 すべてのエンドポイントに`permission_callback`があり、録音ファイルを受け取るエンドポイントはありません。

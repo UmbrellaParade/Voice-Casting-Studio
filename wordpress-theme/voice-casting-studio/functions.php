@@ -458,6 +458,7 @@ function vcs_extract_script_structure(array $data): array
             'castMembers' => vcs_canonicalize_value($project['castMembers'] ?? []),
             'materials' => vcs_canonicalize_value($project['materials'] ?? []),
             'scheduleItems' => vcs_canonicalize_value($project['scheduleItems'] ?? []),
+            'deadlineItems' => vcs_canonicalize_value($project['deadlineItems'] ?? []),
             'announcements' => vcs_canonicalize_value($project['announcements'] ?? []),
             'sharedLinks' => vcs_canonicalize_value($project['sharedLinks'] ?? []),
             'lines' => $lines,
@@ -537,6 +538,7 @@ function vcs_rest_get_workspace(WP_REST_Request $request): WP_REST_Response
     $user = wp_get_current_user();
     $can_manage = current_user_can(VCS_MANAGER_CAPABILITY);
     $can_edit_script = current_user_can(VCS_SCRIPT_CAPABILITY);
+    $current_cast_member_id = '';
     $workspace = $post ? vcs_decode_workspace($post) : null;
     if (is_array($workspace) && !$can_manage && !is_user_logged_in()) {
         $share_context = vcs_get_share_context($request, $workspace);
@@ -554,6 +556,7 @@ function vcs_rest_get_workspace(WP_REST_Request $request): WP_REST_Response
             'ID' => 0,
             'display_name' => (string) ($member['actorName'] ?? '声優さん'),
         ];
+        $current_cast_member_id = (string) ($member['id'] ?? '');
     } elseif (is_array($workspace) && !$can_manage) {
         $assigned_projects = [];
         foreach (($workspace['recordingProjects'] ?? []) as $project) {
@@ -577,7 +580,11 @@ function vcs_rest_get_workspace(WP_REST_Request $request): WP_REST_Response
     return rest_ensure_response([
         'data' => $workspace,
         'version' => $post ? (int) get_post_meta($post->ID, '_vcs_workspace_version', true) : 0,
-        'currentUser' => ['id' => (int) $user->ID, 'name' => $user->display_name],
+        'currentUser' => [
+            'id' => (int) $user->ID,
+            'name' => $user->display_name,
+            'castMemberId' => $current_cast_member_id,
+        ],
         'canManage' => $can_manage,
         'canEditScript' => $can_edit_script,
         'users' => $users,
@@ -632,6 +639,22 @@ function vcs_user_character_ids(array $project, int $user_id): array
         }
     }
     return [];
+}
+
+function vcs_question_is_owned_by_actor(array $question, int $user_id, array $share_member = []): bool
+{
+    if ($share_member) {
+        $member_id = (string) ($share_member['id'] ?? '');
+        $question_member_id = (string) ($question['castMemberId'] ?? '');
+        if ('' !== $member_id && $question_member_id === $member_id) {
+            return true;
+        }
+        $member_user_id = (int) ($share_member['wpUserId'] ?? 0);
+        return '' === $question_member_id
+            && $member_user_id > 0
+            && (int) ($question['wpUserId'] ?? 0) === $member_user_id;
+    }
+    return $user_id > 0 && (int) ($question['wpUserId'] ?? 0) === $user_id;
 }
 
 function vcs_merge_concurrent_actor_data(array $incoming, array $current): array
@@ -880,6 +903,7 @@ function vcs_rest_create_question(WP_REST_Request $request): WP_REST_Response|WP
     $params = $request->get_json_params();
     $project_id = sanitize_text_field((string) ($params['projectId'] ?? ''));
     $line_id = sanitize_text_field((string) ($params['lineId'] ?? ''));
+    $parent_question_id = sanitize_text_field((string) ($params['parentQuestionId'] ?? ''));
     $body = sanitize_textarea_field((string) ($params['body'] ?? ''));
     if ('' === $body) {
         return new WP_Error('vcs_question_required', 'Question text is required.', ['status' => 400]);
@@ -901,6 +925,26 @@ function vcs_rest_create_question(WP_REST_Request $request): WP_REST_Response|WP
         : vcs_user_character_ids($project, get_current_user_id());
     if (!$can_manage && !$character_ids) {
         return new WP_Error('vcs_question_forbidden', 'This project is not assigned to the current user.', ['status' => 403]);
+    }
+    $parent_question = null;
+    if ('' !== $parent_question_id) {
+        foreach (($project['questions'] ?? []) as $candidate) {
+            if ((string) ($candidate['id'] ?? '') === $parent_question_id) {
+                $parent_question = $candidate;
+                break;
+            }
+        }
+        if (!is_array($parent_question)) {
+            return new WP_Error('vcs_parent_question_not_found', 'The previous question could not be found.', ['status' => 404]);
+        }
+        $share_member = $share_context['member'] ?? [];
+        if (!$can_manage && !vcs_question_is_owned_by_actor($parent_question, get_current_user_id(), $share_member)) {
+            return new WP_Error('vcs_follow_up_forbidden', 'Only the original questioner can add a follow-up.', ['status' => 403]);
+        }
+        if ('' === trim((string) ($parent_question['answer'] ?? ''))) {
+            return new WP_Error('vcs_follow_up_not_answered', 'A follow-up can be added after the previous question is answered.', ['status' => 409]);
+        }
+        $line_id = (string) ($parent_question['lineId'] ?? '');
     }
     $character_id = '';
     $line_found = '' === $line_id;
@@ -927,6 +971,7 @@ function vcs_rest_create_question(WP_REST_Request $request): WP_REST_Response|WP
         'authorName' => $share_context ? (string) ($share_member['actorName'] ?? '声優さん') : $user->display_name,
         'wpUserId' => (int) $user->ID,
         'castMemberId' => $share_context ? (string) ($share_member['id'] ?? '') : '',
+        'parentQuestionId' => $parent_question_id,
         'body' => $body,
         'answer' => '',
         'status' => '未回答',
@@ -972,19 +1017,10 @@ function vcs_rest_resolve_question(WP_REST_Request $request): WP_REST_Response|W
     }
 
     $question = $data['recordingProjects'][$project_index]['questions'][$question_index];
-    $question_user_id = (int) ($question['wpUserId'] ?? 0);
     $share_context = !is_user_logged_in() ? vcs_get_share_context($request, $data) : null;
     $share_member = $share_context['member'] ?? [];
-    $is_share_questioner = $share_context
-        && (string) ($share_context['project']['id'] ?? '') === $project_id
-        && (
-            (string) ($question['castMemberId'] ?? '') === (string) ($share_member['id'] ?? '')
-            || ($question_user_id > 0 && $question_user_id === (int) ($share_member['wpUserId'] ?? 0))
-        );
-    $is_logged_in_questioner = is_user_logged_in()
-        && $question_user_id > 0
-        && $question_user_id === get_current_user_id();
-    if (!$is_share_questioner && !$is_logged_in_questioner) {
+    $is_correct_project = !$share_context || (string) ($share_context['project']['id'] ?? '') === $project_id;
+    if (!$is_correct_project || !vcs_question_is_owned_by_actor($question, get_current_user_id(), $share_member)) {
         return new WP_Error('vcs_question_resolve_forbidden', 'Only the person who asked this question can resolve it.', ['status' => 403]);
     }
     if ('解決済み' === ($question['status'] ?? '')) {

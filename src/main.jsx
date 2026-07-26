@@ -526,8 +526,8 @@ function App() {
     return result;
   };
 
-  const addMemberQuestion = async (projectId, lineId, body) => {
-    const result = await createWordPressQuestion({ projectId, lineId, body });
+  const addMemberQuestion = async (projectId, lineId, body, parentQuestionId = "") => {
+    const result = await createWordPressQuestion({ projectId, lineId, body, parentQuestionId });
     setData((current) => ({
       ...current,
       recordingProjects: current.recordingProjects.map((project) => project.id === projectId

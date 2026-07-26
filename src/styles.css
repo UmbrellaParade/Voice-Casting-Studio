@@ -431,6 +431,17 @@ h1 {
   align-items: start;
 }
 
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
 /* 制作ワークスペース */
 .production-workspace,
 .production-page-stack {
@@ -1958,6 +1969,37 @@ h1 {
 .question-thread.status-解決済み {
   border-left-color: #40855f;
   background: #fbfdfb;
+}
+
+.question-thread.is-follow-up {
+  position: relative;
+  width: calc(100% - min(calc(var(--question-depth, 1) * 24px), 72px));
+  margin-left: min(calc(var(--question-depth, 1) * 24px), 72px);
+}
+
+.question-thread.is-follow-up::before {
+  position: absolute;
+  top: -11px;
+  left: -18px;
+  width: 14px;
+  height: 24px;
+  border-bottom: 2px solid #b8adaf;
+  border-left: 2px solid #b8adaf;
+  border-radius: 0 0 0 6px;
+  content: "";
+}
+
+.question-follow-up-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  padding: 4px 7px;
+  border-radius: 4px;
+  background: #f1edf4;
+  color: #675b70;
+  font-size: 10px;
+  font-weight: 900;
 }
 
 .question-thread > header,
@@ -7745,6 +7787,15 @@ textarea {
   letter-spacing: 0;
 }
 
+.concept-brand-logo {
+  display: block;
+  width: auto;
+  max-width: min(100%, 520px);
+  height: clamp(86px, 10vw, 122px);
+  object-fit: contain;
+  object-position: left center;
+}
+
 .concept-hero strong {
   display: block;
   max-width: 760px;
@@ -7795,10 +7846,7 @@ textarea {
 
 .concept-reader-panel {
   min-height: 180px;
-  max-height: 260px;
   padding: 20px clamp(16px, 2.5vw, 28px);
-  overflow-y: auto;
-  scrollbar-color: #a69aa8 #f2eee9;
 }
 
 .concept-content-layout header,
@@ -7948,6 +7996,11 @@ textarea {
 }
 
 @media (max-width: 760px) {
+  .question-thread.is-follow-up {
+    width: calc(100% - min(calc(var(--question-depth, 1) * 14px), 42px));
+    margin-left: min(calc(var(--question-depth, 1) * 14px), 42px);
+  }
+
   .concept-hero {
     min-height: 180px;
     padding: 24px 18px;
@@ -7959,6 +8012,11 @@ textarea {
 
   .concept-hero h2 {
     font-size: 34px;
+  }
+
+  .concept-brand-logo {
+    height: auto;
+    max-height: 112px;
   }
 
   .concept-editor-fields {
@@ -7977,7 +8035,6 @@ textarea {
 
   .concept-reader-panel {
     min-height: 160px;
-    max-height: 240px;
     padding: 18px;
   }
 

@@ -20,7 +20,7 @@ import {
   Users
 } from "lucide-react";
 import { getGoogleDriveFileId, isWebUrl, makeDirectAudioDownloadUrl, makeGoogleDrivePreviewUrl, makeImagePreviewUrl } from "../lib/core.js";
-import { canResolveProductionQuestion, getCharacterImageCropStyle, getCharacterName, getCharacterScriptName, getRecordingDisplayProject, getRecordingProgress, parseRubyText, partitionCharactersByScript, sortProductionScheduleItems } from "../lib/recording.js";
+import { buildProductionQuestionThreads, canResolveProductionQuestion, getCharacterImageCropStyle, getCharacterName, getCharacterScriptName, getRecordingDisplayProject, getRecordingProgress, parseRubyText, partitionCharactersByScript, sortProductionScheduleItems } from "../lib/recording.js";
 import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
 import { ConceptView } from "./ConceptView.jsx";
 import { ManualView } from "./ManualView.jsx";
@@ -130,6 +130,21 @@ function MemberKeyDates({ project }) {
   );
 }
 
+function MemberDeadlineList({ project, compact = false }) {
+  const deadlines = sortProductionScheduleItems((project.deadlineItems || [])
+    .filter((item) => !compact || item.status !== "完了"));
+  if (compact && !deadlines.length) return null;
+  return (
+    <section className="member-date-section member-deadline-section">
+      <header><CalendarDays size={18} /><div><h3>追加の期日</h3><p>期限として設定された日付</p></div></header>
+      <div className="member-schedule-list">
+        {deadlines.map((item) => <article key={item.id}><time>{formatScheduleDateTime(item)}</time><div><span>{item.type} / {item.status}</span><h3>{item.title}</h3>{item.notes && <p>{item.notes}</p>}</div></article>)}
+        {!deadlines.length && <p className="production-list-empty">追加の期日はありません。</p>}
+      </div>
+    </section>
+  );
+}
+
 function MemberHome({ project, assignedCharacterIds, setActive }) {
   const assignedLines = project.lines.filter((line) => line.kind !== "direction" && assignedCharacterIds.has(line.characterId));
   const progress = getRecordingProgress({ ...project, lines: assignedLines });
@@ -140,6 +155,7 @@ function MemberHome({ project, assignedCharacterIds, setActive }) {
   return (
     <div className="production-page-stack member-home">
       <MemberKeyDates project={project} />
+      <MemberDeadlineList project={project} compact />
       <div className="production-metrics-grid">
         <button type="button" className="production-metric" onClick={() => setActive("script")}><CheckCircle2 size={20} /><span>担当セリフ収録済み</span><strong>{progress.recorded}/{progress.total}</strong><small>{progress.recordedPercent}%</small></button>
         <button type="button" className={`production-metric ${unreviewed.length ? "attention" : ""}`} onClick={() => setActive("script")}><FileAudio size={20} /><span>確認待ち</span><strong>{unreviewed.length}</strong><small>提出済み録音</small></button>
@@ -331,11 +347,18 @@ function MemberMaterials({ project }) {
 
 function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQuestion, onResolveQuestion }) {
   const lines = project.lines.filter((line) => line.kind !== "direction" && assignedCharacterIds.has(line.characterId));
-  const questions = project.questions.filter((question) => Number(question.wpUserId) === Number(currentUser.id) || assignedCharacterIds.has(question.characterId));
+  const currentMemberId = String(currentUser.castMemberId || "");
+  const ownsQuestion = (question) => currentMemberId
+    ? String(question.castMemberId || "") === currentMemberId
+    : Number(currentUser.id) > 0 && Number(question.wpUserId) === Number(currentUser.id);
+  const questions = project.questions.filter((question) => ownsQuestion(question) || assignedCharacterIds.has(question.characterId));
+  const questionThreads = buildProductionQuestionThreads(questions);
   const [draft, setDraft] = useState({ lineId: "", body: "" });
   const [message, setMessage] = useState("");
   const [resolvingQuestionId, setResolvingQuestionId] = useState("");
   const [resolveMessages, setResolveMessages] = useState({});
+  const [followUpQuestionId, setFollowUpQuestionId] = useState("");
+  const [followUpDrafts, setFollowUpDrafts] = useState({});
   const submit = async () => {
     if (!draft.body.trim()) return;
     setMessage("送信中…");
@@ -359,6 +382,22 @@ function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQ
       setResolvingQuestionId("");
     }
   };
+  const submitFollowUp = async (question) => {
+    const body = String(followUpDrafts[question.id] || "").trim();
+    if (!body) return;
+    setResolvingQuestionId(question.id);
+    setResolveMessages((current) => ({ ...current, [question.id]: "追加の質問を送信中…" }));
+    try {
+      await onCreateQuestion(project.id, question.lineId, body, question.id);
+      setFollowUpDrafts((current) => ({ ...current, [question.id]: "" }));
+      setFollowUpQuestionId("");
+      setResolveMessages((current) => ({ ...current, [question.id]: "追加の質問を未回答へ送りました。" }));
+    } catch (error) {
+      setResolveMessages((current) => ({ ...current, [question.id]: error.message }));
+    } finally {
+      setResolvingQuestionId("");
+    }
+  };
   return (
     <div className="production-page-stack">
       <section className="question-composer">
@@ -370,16 +409,17 @@ function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQ
         <div className="member-question-submit"><span>{message}</span><button type="button" className="primary" disabled={!draft.body.trim()} onClick={submit}><MessageSquareText size={16} />登録</button></div>
       </section>
       <div className="question-thread-list">
-        {questions.map((question) => {
+        {questionThreads.map(({ question, depth }) => {
           const line = project.lines.find((item) => item.id === question.lineId);
-          const canResolve = canResolveProductionQuestion(question, currentUser.id);
-          const isQuestioner = Number(question.wpUserId) === Number(currentUser.id);
+          const canResolve = canResolveProductionQuestion(question, currentUser.id, currentMemberId);
+          const isQuestioner = ownsQuestion(question);
           return (
-            <article className={`question-thread status-${question.status}`} key={question.id}>
+            <article className={`question-thread status-${question.status}${depth ? " is-follow-up" : ""}`} style={{ "--question-depth": Math.min(depth, 3) }} key={question.id}>
               <header>
                 <div><b>{question.authorName}</b><time>{formatDate(question.createdAt)}</time></div>
                 <span className={`question-status-label status-${question.status}`}>{question.status}</span>
               </header>
+              {question.parentQuestionId && <div className="question-follow-up-label"><MessageSquareText size={15} />前の回答への追加質問</div>}
               {line && <div className="question-line-context"><span>{line.chapterTitle} / {line.sceneTitle} / {getCharacterName(project, line.characterId)}</span><p><RubyText text={line.text} /></p></div>}
               <p className="question-body">{question.body}</p>
               {question.answer && (
@@ -388,8 +428,19 @@ function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQ
                   <p>{question.answer}</p>
                   {isQuestioner && (
                     <div className={`member-question-resolution${question.status === "解決済み" ? " resolved" : ""}`}>
-                      <span>{resolveMessages[question.id] || (question.status === "解決済み" ? "回答を確認済みです。" : "回答を確認できたら解決済みにしてください。")}</span>
-                      {canResolve && <button type="button" className="secondary" disabled={resolvingQuestionId === question.id} onClick={() => resolveQuestion(question.id)}><CheckCircle2 size={16} />解決済みにする</button>}
+                      <span>{resolveMessages[question.id] || (question.status === "解決済み" ? "解決済みです。" : "回答を確認し、解決したか追加で確認したいかを選んでください。")}</span>
+                      {canResolve && (
+                        <div className="member-question-resolution-actions">
+                          <button type="button" className="secondary" disabled={resolvingQuestionId === question.id} onClick={() => resolveQuestion(question.id)}><CheckCircle2 size={16} />解決しました</button>
+                          <button type="button" className="secondary" disabled={resolvingQuestionId === question.id} onClick={() => setFollowUpQuestionId((current) => current === question.id ? "" : question.id)}><MessageSquareText size={16} />さらに質問</button>
+                        </div>
+                      )}
+                      {canResolve && followUpQuestionId === question.id && (
+                        <div className="member-follow-up-composer">
+                          <label><span>追加の質問</span><textarea value={followUpDrafts[question.id] || ""} onChange={(event) => setFollowUpDrafts((current) => ({ ...current, [question.id]: event.target.value }))} /></label>
+                          <button type="button" className="primary" disabled={!String(followUpDrafts[question.id] || "").trim() || resolvingQuestionId === question.id} onClick={() => submitFollowUp(question)}><MessageSquareText size={16} />未回答へ送る</button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -404,7 +455,20 @@ function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQ
 }
 
 function MemberSchedule({ project }) {
-  return <div className="production-page-stack"><MemberKeyDates project={project} /><div className="member-schedule-list">{sortProductionScheduleItems(project.scheduleItems).map((item) => <article key={item.id}><time>{formatScheduleDateTime(item)}</time><div><span>{item.type} / {item.status}</span><h3>{item.title}</h3>{item.notes && <p>{item.notes}</p>}</div></article>)}</div></div>;
+  const schedule = sortProductionScheduleItems(project.scheduleItems);
+  return (
+    <div className="production-page-stack">
+      <MemberKeyDates project={project} />
+      <MemberDeadlineList project={project} />
+      <section className="member-date-section member-upcoming-section">
+        <header><CalendarDays size={18} /><div><h3>直近の予定</h3><p>制作や打ち合わせなどの予定</p></div></header>
+        <div className="member-schedule-list">
+          {schedule.map((item) => <article key={item.id}><time>{formatScheduleDateTime(item)}</time><div><span>{item.type} / {item.status}</span><h3>{item.title}</h3>{item.notes && <p>{item.notes}</p>}</div></article>)}
+          {!schedule.length && <p className="production-list-empty">予定はまだありません。</p>}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voice Cast Studio", connectionState, onRefresh, onUpdateLine, onCreateQuestion, onResolveQuestion }) {

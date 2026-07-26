@@ -5,6 +5,7 @@ import { makeGoogleDrivePreviewUrl, makePlayableEmbedUrl, migrateData } from "..
 
 import {
   archiveScriptVersion,
+  buildProductionQuestionThreads,
   canResolveProductionQuestion,
   getCharacterDialogueCounts,
   getCharacterImageCropStyle,
@@ -37,6 +38,21 @@ test("only lets the questioner resolve an answered question", () => {
   assert.equal(canResolveProductionQuestion({ ...answered, answer: "" }, 11), false);
   assert.equal(canResolveProductionQuestion({ ...answered, status: "未回答" }, 11), false);
   assert.equal(canResolveProductionQuestion({ ...answered, status: "解決済み" }, 11), false);
+  assert.equal(canResolveProductionQuestion({ ...answered, wpUserId: 0, castMemberId: "cast_vel" }, 0, "cast_vel"), true);
+  assert.equal(canResolveProductionQuestion({ ...answered, wpUserId: 0, castMemberId: "cast_vel" }, 0, "cast_other"), false);
+});
+
+test("keeps follow-up questions directly below their parent", () => {
+  const parent = { id: "question_parent", parentQuestionId: "", body: "最初の質問" };
+  const child = { id: "question_child", parentQuestionId: "question_parent", body: "追加の質問" };
+  const other = { id: "question_other", parentQuestionId: "", body: "別の質問" };
+  const threads = buildProductionQuestionThreads([child, other, parent]);
+
+  assert.deepEqual(threads.map(({ question, depth }) => [question.id, depth]), [
+    ["question_other", 0],
+    ["question_parent", 0],
+    ["question_child", 1]
+  ]);
 });
 
 test("merges legacy character backgrounds and keeps actor social links", () => {
@@ -59,6 +75,9 @@ test("keeps detailed production deadlines in date and time order", () => {
     scheduleItems: [
       { id: "evening", title: "夕方確認", date: "2026-08-20", time: "18:30" },
       { id: "morning", title: "朝確認", date: "2026-08-20T09:15:00" }
+    ],
+    deadlineItems: [
+      { id: "retake", title: "リテイク提出期限", type: "リテイク締切", date: "2026-08-25", time: "20:00" }
     ]
   });
 
@@ -67,6 +86,9 @@ test("keeps detailed production deadlines in date and time order", () => {
   assert.deepEqual(sortProductionScheduleItems(project.scheduleItems).map((item) => [item.id, item.date, item.time]), [
     ["morning", "2026-08-20", "09:15"],
     ["evening", "2026-08-20", "18:30"]
+  ]);
+  assert.deepEqual(project.deadlineItems.map((item) => [item.id, item.title, item.date, item.time]), [
+    ["retake", "リテイク提出期限", "2026-08-25", "20:00"]
   ]);
 });
 
@@ -770,10 +792,12 @@ test("matches duplicate dialogue to the same chapter and scene first", () => {
 
 test("keeps the WordPress user id attached to private questions", () => {
   const project = normalizeRecordingProject({
-    questions: [{ id: "question_private", authorName: "声優A", wpUserId: 42, body: "確認です。" }]
+    questions: [{ id: "question_private", authorName: "声優A", wpUserId: 42, castMemberId: "cast_a", parentQuestionId: "question_parent", body: "確認です。" }]
   });
 
   assert.equal(project.questions[0].wpUserId, 42);
+  assert.equal(project.questions[0].castMemberId, "cast_a");
+  assert.equal(project.questions[0].parentQuestionId, "question_parent");
 });
 
 test("archives the imported source and recording progress before a destructive edit", () => {
