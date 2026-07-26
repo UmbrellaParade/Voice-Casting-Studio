@@ -4,6 +4,7 @@ import test from "node:test";
 import { makeGoogleDrivePreviewUrl, makePlayableEmbedUrl, migrateData } from "../src/lib/core.js";
 
 import {
+  addProductionCharacterFromScriptSpeaker,
   archiveScriptVersion,
   assignProductionActorName,
   buildProductionQuestionThreads,
@@ -17,6 +18,7 @@ import {
   getShareableRecordingProject,
   getScriptHierarchyRepairPlan,
   getScriptImportPlan,
+  getUnregisteredScriptSpeakers,
   normalizeRecordingProject,
   patchRecordingLineProgress,
   parseGoogleDocsScript,
@@ -31,6 +33,59 @@ import {
   restoreScriptSnapshot,
   sortProductionScheduleItems
 } from "../src/lib/recording.js";
+
+test("offers only unregistered dialogue speakers from manually pasted script bodies", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "candidate_a", name: "候補者A", color: "#168b9a" }],
+    lines: [{
+      id: "chapter_body",
+      chapterId: "chapter_4",
+      chapterTitle: "第4章",
+      sceneId: "scene_1",
+      sceneTitle: "SCENE 01 試験会場",
+      kind: "direction",
+      manualBody: true,
+      text: `候補者A
+「先に行くよ。」
+
+SE：拍手。
+
+候補者C
+「す、すごい……。」`
+    }]
+  });
+
+  assert.deepEqual(getUnregisteredScriptSpeakers(project), [{
+    name: "候補者C",
+    count: 1,
+    locations: [{ chapterTitle: "第4章", sceneTitle: "SCENE 01 試験会場" }]
+  }]);
+});
+
+test("adds a confirmed script speaker as a character and immediately links their dialogue", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "candidate_a", name: "候補者A", color: "#168b9a" }],
+    lines: [{
+      id: "chapter_body",
+      chapterTitle: "第4章",
+      sceneTitle: "SCENE 01 試験会場",
+      kind: "direction",
+      manualBody: true,
+      text: "候補者C\n「す、すごい……。」"
+    }]
+  });
+
+  const updated = addProductionCharacterFromScriptSpeaker(project, "候補者C");
+  const added = updated.characters.find((character) => character.name === "候補者C");
+  const displayLine = getRecordingDisplayProject(updated).lines.find((line) => line.text === "す、すごい……。");
+
+  assert.ok(added);
+  assert.notEqual(added.color, updated.characters[0].color);
+  assert.equal(displayLine.characterId, added.id);
+  assert.equal(displayLine.kind, "dialogue");
+  assert.equal(getCharacterDialogueCounts(updated)[added.id], 1);
+  assert.deepEqual(getUnregisteredScriptSpeakers(updated), []);
+});
 
 test("keeps actor SNS and share credentials when correcting a single-role actor name", () => {
   const project = {

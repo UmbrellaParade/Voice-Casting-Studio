@@ -43,6 +43,7 @@ import {
   PRODUCTION_SCHEDULE_STATUSES,
   PRODUCTION_SCHEDULE_TYPES,
   SHARED_LINK_COLORS,
+  addProductionCharacterFromScriptSpeaker,
   archiveScriptVersion,
   assignProductionActorName,
   buildProductionQuestionThreads,
@@ -52,6 +53,7 @@ import {
   getCharacterName,
   getCharacterScriptName,
   getRecordingProgress,
+  getUnregisteredScriptSpeakers,
   normalizeImagePosition,
   normalizeImageScale,
   parseRubyText,
@@ -502,6 +504,10 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
     () => partitionCharactersByScript(project),
     [project.characters, project.lines]
   );
+  const unregisteredSpeakers = useMemo(
+    () => getUnregisteredScriptSpeakers(project),
+    [project.characters, project.lines]
+  );
 
   const patchCharacter = (characterId, patch) => {
     if (!canEditScript) return;
@@ -631,6 +637,12 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
         openChatUrl: ""
       }]
     }));
+  };
+
+  const addScriptSpeakerCandidate = (candidate) => {
+    if (!canEditScript) return;
+    updateProject((current) => addProductionCharacterFromScriptSpeaker(current, candidate.name));
+    setMessage(`「${candidate.name}」をキャラクターに追加しました。台本内の${candidate.count}件のセリフと紐づきました。`);
   };
 
   const removeCharacter = (characterId) => {
@@ -826,6 +838,32 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
         {canEditScript && <button type="button" className="primary" onClick={addCharacter}><Plus size={16} />登場人物</button>}
       </div>
       {message && <p className="production-inline-message">{message}</p>}
+      {canEditScript && unregisteredSpeakers.length > 0 && (
+        <section className="script-speaker-suggestions" aria-labelledby="script-speaker-suggestions-title">
+          <header>
+            <div>
+              <AlertCircle size={20} />
+              <div>
+                <h3 id="script-speaker-suggestions-title">台本で見つかった未登録人物</h3>
+                <p>内容を確認し、登場人物として扱う名前だけ追加してください。</p>
+              </div>
+            </div>
+            <strong>{unregisteredSpeakers.length}名</strong>
+          </header>
+          <div className="script-speaker-suggestion-list">
+            {unregisteredSpeakers.map((candidate) => (
+              <div className="script-speaker-suggestion" key={candidate.name}>
+                <div>
+                  <strong>{candidate.name}</strong>
+                  <span>{candidate.count}セリフ</span>
+                  <p>{candidate.locations.map((location) => `${location.chapterTitle} / ${location.sceneTitle}`).join("、")}</p>
+                </div>
+                <button type="button" className="primary" onClick={() => addScriptSpeakerCandidate(candidate)}><UserPlus size={16} />キャラクターに追加</button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="character-editor-list">
         {linkedCharacters.map((character, characterIndex) => renderCharacterEditor(character, characterIndex, linkedCharacters))}
         {!linkedCharacters.length && <div className="production-empty-state"><Users size={30} /><b>現在の台本に登場するキャラクターはいません</b></div>}

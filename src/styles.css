@@ -961,6 +961,93 @@ h1 {
   font-weight: 900;
 }
 
+.script-speaker-suggestions {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #e4c996;
+  border-left: 4px solid #b57024;
+  border-radius: 8px;
+  background: #fffaf0;
+}
+
+.script-speaker-suggestions > header,
+.script-speaker-suggestions > header > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.script-speaker-suggestions > header {
+  justify-content: space-between;
+}
+
+.script-speaker-suggestions > header svg {
+  flex: 0 0 auto;
+  color: #9a5a1c;
+}
+
+.script-speaker-suggestions h3,
+.script-speaker-suggestions p {
+  margin: 0;
+}
+
+.script-speaker-suggestions h3 {
+  color: #3d342c;
+  font-size: 14px;
+}
+
+.script-speaker-suggestions header p,
+.script-speaker-suggestions > header > strong {
+  color: #766351;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.script-speaker-suggestion-list {
+  display: grid;
+}
+
+.script-speaker-suggestion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 0;
+  border-top: 1px solid #eadcc7;
+}
+
+.script-speaker-suggestion > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 9px;
+  min-width: 0;
+}
+
+.script-speaker-suggestion > div > strong {
+  color: #292331;
+  font-size: 14px;
+}
+
+.script-speaker-suggestion > div > span {
+  align-self: center;
+  color: #9a5a1c;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.script-speaker-suggestion > div > p {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+  color: #756b75;
+  font-size: 11px;
+}
+
+.script-speaker-suggestion > button {
+  white-space: nowrap;
+}
+
 .character-editor-list {
   display: grid;
   gap: 12px;
@@ -2297,6 +2384,24 @@ h1 {
 
   .production-home-key-date-actions {
     justify-content: space-between;
+    width: 100%;
+  }
+
+  .script-speaker-suggestions > header,
+  .script-speaker-suggestion {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .script-speaker-suggestions > header {
+    flex-direction: column;
+  }
+
+  .script-speaker-suggestions > header > strong {
+    align-self: flex-start;
+  }
+
+  .script-speaker-suggestion > button {
     width: 100%;
   }
 

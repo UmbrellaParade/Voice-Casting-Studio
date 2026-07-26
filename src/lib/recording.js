@@ -1986,6 +1986,91 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
   return rows;
 };
 
+const getSuggestedCharacterName = (speaker = "", knownNames = []) => {
+  const canonicalName = getCanonicalCharacterName(speaker, knownNames);
+  const normalizedName = cleanSpeakerLabel(canonicalName).normalize("NFKC").trim();
+  const matchingSuffix = [...CHARACTER_ALIAS_SUFFIXES]
+    .sort((left, right) => right.length - left.length)
+    .find((suffix) => normalizedName.endsWith(suffix) && normalizedName.length > suffix.length);
+  return matchingSuffix
+    ? normalizedName.slice(0, -matchingSuffix.length).trim()
+    : normalizedName;
+};
+
+export const getUnregisteredScriptSpeakers = (project = {}) => {
+  const characters = Array.isArray(project.characters) ? project.characters : [];
+  const knownNames = characters.flatMap(getCharacterKnownNames);
+  const knownKeys = new Set(knownNames.map((name) => normalizeCharacterNameKey(
+    getCanonicalCharacterName(name, knownNames)
+  )));
+  const candidates = new Map();
+
+  (Array.isArray(project.lines) ? project.lines : []).forEach((line, lineIndex) => {
+    if (!line.manualBody || !String(line.text || "").trim()) return;
+    parseGoogleDocsScript(line.text, knownNames).forEach((row, rowIndex) => {
+      if (row.sourceKind === "direction" || row.speaker === "ト書き") return;
+      const name = getSuggestedCharacterName(row.speakerLabel || row.speaker, knownNames);
+      const key = normalizeCharacterNameKey(name);
+      if (!key || knownKeys.has(key) || !isPlausibleSpeaker(name) || isScriptStructureLabel(name)) return;
+      const location = {
+        chapterTitle: String(line.chapterTitle || "第一章"),
+        sceneTitle: String(line.sceneTitle || "章の本文")
+      };
+      const existing = candidates.get(key) || {
+        name,
+        count: 0,
+        locations: [],
+        firstOrder: (lineIndex * 10000) + rowIndex
+      };
+      existing.count += 1;
+      if (!existing.locations.some((item) =>
+        item.chapterTitle === location.chapterTitle && item.sceneTitle === location.sceneTitle)) {
+        existing.locations.push(location);
+      }
+      candidates.set(key, existing);
+    });
+  });
+
+  return [...candidates.values()]
+    .sort((left, right) => left.firstOrder - right.firstOrder)
+    .map(({ firstOrder, ...candidate }) => candidate);
+};
+
+export const addProductionCharacterFromScriptSpeaker = (project = {}, speakerName = "") => {
+  const characters = Array.isArray(project.characters) ? project.characters : [];
+  const knownNames = characters.flatMap(getCharacterKnownNames);
+  const name = getSuggestedCharacterName(speakerName, knownNames);
+  const nameKey = normalizeCharacterNameKey(name);
+  const alreadyRegistered = characters.some((character) => getCharacterKnownNames(character)
+    .some((knownName) => normalizeCharacterNameKey(knownName) === nameKey));
+  if (!nameKey || alreadyRegistered || !isPlausibleSpeaker(name) || isScriptStructureLabel(name)) return project;
+
+  const characterId = createLocalId("character");
+  const character = {
+    id: characterId,
+    name,
+    scriptName: name,
+    scriptAliases: [],
+    color: "",
+    imageUrl: "",
+    imagePositionX: 50,
+    imagePositionY: 50,
+    imageScale: 1.12,
+    profile: "",
+    background: "",
+    recordingFolderUrl: "",
+    openChatUrl: ""
+  };
+  return {
+    ...project,
+    characters: ensureUniqueCharacterColors([...characters, character]),
+    recordingFolderOrder: [...new Set([
+      ...(Array.isArray(project.recordingFolderOrder) ? project.recordingFolderOrder : []),
+      characterId
+    ])]
+  };
+};
+
 export const getCharacterDialogueCounts = (project = {}) => {
   const characters = Array.isArray(project.characters) ? project.characters : [];
   const lines = Array.isArray(project.lines) ? project.lines : [];
