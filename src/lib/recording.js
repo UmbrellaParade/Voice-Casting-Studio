@@ -66,6 +66,11 @@ const RUBY_SOURCE = "(?:[|｜]([^《\\n]+)《([^》\\n]+)》|\\{([^|{}\\n]+)\\|(
 const CHARACTER_COLORS = ["#168b9a", "#d65285", "#7a63ad", "#b57024", "#2f7d4a", "#5f6d7a"];
 export const MAX_SCRIPT_SNAPSHOTS = 30;
 
+export const normalizeImagePosition = (value, fallback = 50) => {
+  const position = Number(value);
+  return Number.isFinite(position) ? Math.min(100, Math.max(0, position)) : fallback;
+};
+
 const createLocalId = (prefix) => {
   if (globalThis.crypto?.randomUUID) return `${prefix}_${globalThis.crypto.randomUUID().slice(0, 8)}`;
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
@@ -78,6 +83,8 @@ const cloneScriptCharacters = (characters = []) => (Array.isArray(characters) ? 
     name: String(character.name || `登場人物${index + 1}`).trim(),
     color: String(character.color || CHARACTER_COLORS[index % CHARACTER_COLORS.length]),
     imageUrl: String(character.imageUrl || ""),
+    imagePositionX: normalizeImagePosition(character.imagePositionX),
+    imagePositionY: normalizeImagePosition(character.imagePositionY),
     profile: String(character.profile || character.setting || ""),
     background: String(character.background || character.backstory || ""),
     recordingFolderUrl: String(character.recordingFolderUrl || character.driveFolderUrl || ""),
@@ -494,6 +501,8 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       name: String(character.name || `登場人物${characterIndex + 1}`).trim(),
       color: character.color || CHARACTER_COLORS[characterIndex % CHARACTER_COLORS.length],
       imageUrl: String(character.imageUrl || ""),
+      imagePositionX: normalizeImagePosition(character.imagePositionX),
+      imagePositionY: normalizeImagePosition(character.imagePositionY),
       profile: String(character.profile || character.setting || ""),
       background: String(character.background || character.backstory || ""),
       recordingFolderUrl: String(character.recordingFolderUrl || character.driveFolderUrl || ""),
@@ -518,6 +527,8 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
         name: speakerName,
         color: CHARACTER_COLORS[characters.length % CHARACTER_COLORS.length],
         imageUrl: "",
+        imagePositionX: 50,
+        imagePositionY: 50,
         profile: "",
         background: "",
         recordingFolderUrl: "",

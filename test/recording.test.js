@@ -48,6 +48,21 @@ test("reorders characters without changing ids used by the script", () => {
   assert.deepEqual(characters.map((character) => character.id), ["vel", "amamori", "narration"]);
 });
 
+test("normalizes and preserves character image positions", () => {
+  const project = normalizeRecordingProject({
+    characters: [
+      { id: "vel", name: "ヴェル", imagePositionX: -12, imagePositionY: 132 },
+      { id: "amamori", name: "アマモリ" }
+    ]
+  });
+
+  assert.equal(project.characters[0].imagePositionX, 0);
+  assert.equal(project.characters[0].imagePositionY, 100);
+  assert.equal(project.characters[1].imagePositionX, 50);
+  assert.equal(project.characters[1].imagePositionY, 50);
+  assert.equal(archiveScriptVersion(project).scriptSnapshots[0].characters[0].imagePositionY, 100);
+});
+
 test("splits a manually pasted chapter only at heading 2 markers", () => {
   const rows = parseManualChapterBody(`章の導入文です。\n\n## 雨上がり\nヴェル「行こう。」\nアマモリ「待って。」\n\n## 出発\n駅へ向かう。`, "第一章");
 

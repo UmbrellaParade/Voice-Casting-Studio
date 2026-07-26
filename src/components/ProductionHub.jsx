@@ -16,8 +16,10 @@ import {
   Link,
   Megaphone,
   MessageSquareText,
+  Move,
   Music2,
   Plus,
+  RotateCcw,
   Trash2,
   Upload,
   UserPlus,
@@ -40,6 +42,7 @@ import {
   archiveScriptVersion,
   getCharacterName,
   getRecordingProgress,
+  normalizeImagePosition,
   parseRubyText,
   reorderProductionCharacters,
   reorderProductionMaterials
@@ -259,7 +262,45 @@ function ProductionHome({ project, setActive }) {
 
 function CharacterImage({ character, patchCharacter }) {
   const [message, setMessage] = useState("");
+  const positionDragRef = useRef(null);
   const imageUrl = getImageUrl(character.imageUrl);
+  const imagePositionX = normalizeImagePosition(character.imagePositionX);
+  const imagePositionY = normalizeImagePosition(character.imagePositionY);
+
+  const patchImagePosition = (x, y) => patchCharacter({
+    imagePositionX: Math.round(normalizeImagePosition(x)),
+    imagePositionY: Math.round(normalizeImagePosition(y))
+  });
+
+  const beginPositionDrag = (event) => {
+    if (!imageUrl || event.button !== 0) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    positionDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      positionX: imagePositionX,
+      positionY: imagePositionY,
+      width: Math.max(1, bounds.width),
+      height: Math.max(1, bounds.height)
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const moveImagePosition = (event) => {
+    const drag = positionDragRef.current;
+    if (!drag) return;
+    event.preventDefault();
+    patchImagePosition(
+      drag.positionX - ((event.clientX - drag.startX) / drag.width) * 100,
+      drag.positionY - ((event.clientY - drag.startY) / drag.height) * 100
+    );
+  };
+
+  const finishPositionDrag = (event) => {
+    if (!positionDragRef.current) return;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    positionDragRef.current = null;
+  };
 
   const uploadImage = async (file) => {
     try {
@@ -276,8 +317,16 @@ function CharacterImage({ character, patchCharacter }) {
 
   return (
     <div className="character-image-editor">
-      <div className="character-image-preview" style={{ "--character-color": character.color }}>
-        {imageUrl ? <img src={imageUrl} alt={`${character.name}のキャラクター画像`} /> : <Users size={34} />}
+      <div
+        className={`character-image-preview${imageUrl ? " can-position" : ""}`}
+        style={{ "--character-color": character.color }}
+        onPointerDown={beginPositionDrag}
+        onPointerMove={moveImagePosition}
+        onPointerUp={finishPositionDrag}
+        onPointerCancel={finishPositionDrag}
+      >
+        {imageUrl ? <img src={imageUrl} alt={`${character.name}のキャラクター画像`} draggable="false" style={{ objectPosition: `${imagePositionX}% ${imagePositionY}%` }} /> : <Users size={34} />}
+        {imageUrl && <span className="character-image-move-icon" title="画像位置をドラッグで調整"><Move size={15} /></span>}
       </div>
       <label className="secondary character-image-upload">
         <ImagePlus size={16} /><span>画像を選択</span>
@@ -287,6 +336,19 @@ function CharacterImage({ character, patchCharacter }) {
           event.target.value = "";
         }} />
       </label>
+      {imageUrl && (
+        <div className="character-image-position-controls">
+          <label>
+            <span>横位置</span>
+            <input type="range" min="0" max="100" value={imagePositionX} aria-label={`${character.name}の画像の横位置`} onChange={(event) => patchImagePosition(event.target.value, imagePositionY)} />
+          </label>
+          <label>
+            <span>縦位置</span>
+            <input type="range" min="0" max="100" value={imagePositionY} aria-label={`${character.name}の画像の縦位置`} onChange={(event) => patchImagePosition(imagePositionX, event.target.value)} />
+          </label>
+          <button type="button" className="icon-button" title="画像位置を中央に戻す" aria-label={`${character.name}の画像位置を中央に戻す`} onClick={() => patchImagePosition(50, 50)}><RotateCcw size={15} /></button>
+        </div>
+      )}
       {message && <small className="production-field-error">{message}</small>}
     </div>
   );
@@ -393,6 +455,8 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
         name: `登場人物${current.characters.length + 1}`,
         color: "#168b9a",
         imageUrl: "",
+        imagePositionX: 50,
+        imagePositionY: 50,
         profile: "",
         background: "",
         recordingFolderUrl: "",

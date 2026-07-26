@@ -230,7 +230,7 @@ function MemberCharacters({ project, assignedCharacterIds }) {
     <div className="member-character-grid">
       {project.characters.map((character) => (
         <article key={character.id} style={{ "--character-color": character.color }}>
-          <div className="member-character-image">{character.imageUrl ? <img src={makeImagePreviewUrl(character.imageUrl) || character.imageUrl} alt={character.name} /> : <Users size={32} />}</div>
+          <div className="member-character-image">{character.imageUrl ? <img src={makeImagePreviewUrl(character.imageUrl) || character.imageUrl} alt={character.name} style={{ objectPosition: `${character.imagePositionX ?? 50}% ${character.imagePositionY ?? 50}%` }} /> : <Users size={32} />}</div>
           <div>
             <header><h3>{character.name}</h3>{assignedCharacterIds.has(character.id) && <span>担当</span>}</header>
             {character.profile && <p>{character.profile}</p>}
