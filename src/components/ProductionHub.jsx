@@ -49,9 +49,7 @@ import { SectionTitle } from "./ui.jsx";
 
 const EDITING_STATUS_OPTIONS = ["未着手", "脚本・配役調整中", "収録中", "音声編集中", "確認中", "公開準備中", "完了"];
 const MATERIAL_ASPECT_RATIOS = ["", "16:9", "9:16", "1:1"];
-const MAX_LOCAL_THUMBNAIL_BYTES = 6 * 1024 * 1024;
 const WORDPRESS_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp";
-const MAX_LOCAL_CHARACTER_IMAGE_BYTES = 3 * 1024 * 1024;
 
 const formatDate = (value, withTime = false) => {
   if (!value) return "未設定";
@@ -264,10 +262,6 @@ function CharacterImage({ character, patchCharacter }) {
   const imageUrl = getImageUrl(character.imageUrl);
 
   const uploadImage = async (file) => {
-    if (file.size > MAX_LOCAL_CHARACTER_IMAGE_BYTES) {
-      setMessage("3MB以下の画像を選ぶか、画像URLを登録してください。");
-      return;
-    }
     try {
       const runtime = getWordPressRuntime();
       const imageUrl = runtime
@@ -689,10 +683,6 @@ function MaterialsView({ project, updateProject }) {
 
   const uploadMaterial = async (material, file) => {
     if (material.category !== "サムネイル") return;
-    if (file.size > MAX_LOCAL_THUMBNAIL_BYTES) {
-      setMessage("6MB以下のサムネイル画像を選んでください。");
-      return;
-    }
     try {
       const runtime = getWordPressRuntime();
       const imageUrl = runtime
