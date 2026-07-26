@@ -40,6 +40,7 @@ import {
   PRODUCTION_QUESTION_STATUSES,
   PRODUCTION_SCHEDULE_STATUSES,
   PRODUCTION_SCHEDULE_TYPES,
+  SHARED_LINK_COLORS,
   archiveScriptVersion,
   getCharacterImageCropStyle,
   getCharacterName,
@@ -763,7 +764,7 @@ function LinksView({ project, updateProject, canEditScript = true }) {
   const [dragOverLinkId, setDragOverLinkId] = useState("");
   const [message, setMessage] = useState("");
   const folderDragRef = useRef("");
-  const linkDragRef = useRef(null);
+  const linkDragRef = useRef("");
   const { linkedCharacters } = useMemo(
     () => partitionCharactersByScript(project),
     [project.characters, project.lines]
@@ -781,15 +782,22 @@ function LinksView({ project, updateProject, canEditScript = true }) {
       : character)
   }));
 
-  const addSharedLink = () => updateProject((current) => ({
-    ...current,
-    sharedLinks: [...(current.sharedLinks || []), {
-      id: newId("shared_link"),
-      title: "新しい共有URL",
-      url: "",
-      notes: ""
-    }]
-  }));
+  const addSharedLink = () => updateProject((current) => {
+    const sharedLinks = current.sharedLinks || [];
+    const usedColors = new Set(sharedLinks.map((link) => link.color));
+    const color = SHARED_LINK_COLORS.find((candidate) => !usedColors.has(candidate))
+      || SHARED_LINK_COLORS[sharedLinks.length % SHARED_LINK_COLORS.length];
+    return {
+      ...current,
+      sharedLinks: [...sharedLinks, {
+        id: newId("shared_link"),
+        title: "新しい共有URL",
+        url: "",
+        notes: "",
+        color
+      }]
+    };
+  });
 
   const patchSharedLink = (linkId, patch) => updateProject((current) => ({
     ...current,
@@ -802,7 +810,7 @@ function LinksView({ project, updateProject, canEditScript = true }) {
   }));
 
   const moveSharedLink = (sourceId, targetId) => {
-    if (!sourceId || !targetId || sourceId === targetId) return;
+    if (!canEditScript || !sourceId || !targetId || sourceId === targetId) return;
     const movedLink = (project.sharedLinks || []).find((link) => link.id === sourceId);
     updateProject((current) => ({
       ...current,
@@ -851,49 +859,79 @@ function LinksView({ project, updateProject, canEditScript = true }) {
     setDragOverFolderId("");
   };
 
-  const resetLinkDrag = () => {
-    linkDragRef.current = null;
+  const beginLinkDrag = (event, linkId) => {
+    if (!canEditScript) return;
+    linkDragRef.current = linkId;
+    setDraggingLinkId(linkId);
+    setDragOverLinkId("");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", linkId);
+  };
+
+  const hoverLink = (event, linkId) => {
+    if (!linkDragRef.current || linkDragRef.current === linkId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverLinkId(linkId);
+  };
+
+  const finishLinkDrag = (event, targetId = "") => {
+    event.preventDefault();
+    const sourceId = linkDragRef.current;
+    if (sourceId && targetId && sourceId !== targetId) moveSharedLink(sourceId, targetId);
+    linkDragRef.current = "";
     setDraggingLinkId("");
     setDragOverLinkId("");
-  };
-
-  const beginLinkDrag = (event, linkId) => {
-    if (event.button !== 0) return;
-    linkDragRef.current = {
-      sourceId: linkId,
-      startX: event.clientX,
-      startY: event.clientY,
-      targetId: "",
-      moved: false
-    };
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-  };
-
-  const trackLinkDrag = (event) => {
-    const drag = linkDragRef.current;
-    if (!drag) return;
-    if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return;
-    event.preventDefault();
-    drag.moved = true;
-    setDraggingLinkId(drag.sourceId);
-    if (event.clientY < 72) window.scrollBy({ top: -18 });
-    if (event.clientY > window.innerHeight - 72) window.scrollBy({ top: 18 });
-    const targetId = document.elementFromPoint(event.clientX, event.clientY)?.closest?.("[data-shared-link-id]")?.dataset.sharedLinkId || "";
-    drag.targetId = targetId && targetId !== drag.sourceId ? targetId : "";
-    setDragOverLinkId(drag.targetId);
-  };
-
-  const finishLinkDrag = (event) => {
-    const drag = linkDragRef.current;
-    if (!drag) return;
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    if (drag.moved && drag.targetId) moveSharedLink(drag.sourceId, drag.targetId);
-    resetLinkDrag();
   };
 
   return (
     <div className="production-page-stack">
       {message && <p className="production-inline-message">{message}</p>}
+      <section className="production-link-section">
+        <header>
+          <div><Link size={20} /><div><h3>共有URL</h3><p>作品全体で共有する連絡先や資料へのリンクです。</p></div></div>
+          {canEditScript && <button type="button" className="primary" onClick={addSharedLink}><Plus size={16} />共有URL</button>}
+        </header>
+        <div className="production-shared-url-list">
+          {(project.sharedLinks || []).map((link, linkIndex) => {
+            const canOpen = isWebUrl(link.url);
+            return (
+              <article
+                className={`production-shared-url-row${draggingLinkId === link.id ? " dragging" : ""}${dragOverLinkId === link.id ? " drag-over" : ""}`}
+                data-shared-link-id={link.id}
+                key={link.id}
+                style={{ "--shared-link-color": link.color || SHARED_LINK_COLORS[linkIndex % SHARED_LINK_COLORS.length] }}
+                onDragOver={(event) => hoverLink(event, link.id)}
+                onDrop={(event) => finishLinkDrag(event, link.id)}
+              >
+                <div className="production-shared-url-fields">
+                  <label><span>リンク名</span><input value={link.title} readOnly={!canEditScript} onChange={(event) => patchSharedLink(link.id, { title: event.target.value })} /></label>
+                  <label className="shared-link-color-field"><span>表示色</span><input type="color" aria-label={`${link.title || "共有URL"}の表示色`} value={link.color || SHARED_LINK_COLORS[linkIndex % SHARED_LINK_COLORS.length]} disabled={!canEditScript} onChange={(event) => patchSharedLink(link.id, { color: event.target.value })} /></label>
+                  <label className="wide"><span>URL</span><input type="url" value={link.url} placeholder="https://..." readOnly={!canEditScript} onChange={(event) => patchSharedLink(link.id, { url: event.target.value })} /></label>
+                  <label className="wide"><span>補足</span><input value={link.notes} placeholder="用途や共有先" readOnly={!canEditScript} onChange={(event) => patchSharedLink(link.id, { notes: event.target.value })} /></label>
+                </div>
+                <div className="production-shared-url-actions">
+                  {canEditScript && <button
+                    type="button"
+                    className="icon-button shared-link-drag-handle"
+                    draggable
+                    title="ドラッグして並べ替え"
+                    aria-label={`${link.title || "共有URL"}をドラッグして並べ替え`}
+                    onDragStart={(event) => beginLinkDrag(event, link.id)}
+                    onDragEnd={(event) => finishLinkDrag(event)}
+                  ><GripVertical size={17} /></button>}
+                  {canEditScript && <button type="button" className="icon-button" title="一つ上へ" aria-label={`${link.title || "共有URL"}を一つ上へ`} disabled={linkIndex === 0} onClick={() => moveSharedLink(link.id, project.sharedLinks[linkIndex - 1]?.id)}><ArrowUp size={16} /></button>}
+                  {canEditScript && <button type="button" className="icon-button" title="一つ下へ" aria-label={`${link.title || "共有URL"}を一つ下へ`} disabled={linkIndex === project.sharedLinks.length - 1} onClick={() => moveSharedLink(link.id, project.sharedLinks[linkIndex + 1]?.id)}><ArrowDown size={16} /></button>}
+                  <a className={`icon-button${canOpen ? "" : " disabled"}`} href={canOpen ? link.url : undefined} target="_blank" rel="noreferrer" title={canOpen ? "共有URLを開く" : "URLが未登録です"} aria-label={`${link.title || "共有URL"}を開く`} aria-disabled={!canOpen}><ExternalLink size={16} /></a>
+                  {canEditScript && <button type="button" className="icon-button danger-icon" title="共有URLを削除" aria-label={`${link.title || "共有URL"}を削除`} onClick={() => removeSharedLink(link.id)}><Trash2 size={16} /></button>}
+                </div>
+              </article>
+            );
+          })}
+          {!project.sharedLinks?.length && <div className="production-empty-state"><Link size={30} /><b>共有URLはまだありません</b></div>}
+        </div>
+      </section>
+
       <details className="production-link-section production-folder-section">
         <summary>
           <div><FolderOpen size={20} /><div><h3>収録フォルダー一覧</h3><p>キャラクターごとのGoogle Drive録音先です。</p></div></div>
@@ -947,54 +985,6 @@ function LinksView({ project, updateProject, canEditScript = true }) {
           {!linkedCharacters.length && <div className="production-empty-state"><FolderOpen size={30} /><b>現在の台本に登場するキャラクターがいません</b></div>}
         </div>
       </details>
-
-      <section className="production-link-section">
-        <header>
-          <div><Link size={20} /><div><h3>共有URL</h3><p>作品全体で共有する連絡先や資料へのリンクです。</p></div></div>
-          {canEditScript && <button type="button" className="primary" onClick={addSharedLink}><Plus size={16} />共有URL</button>}
-        </header>
-        <div className="production-shared-url-list">
-          {(project.sharedLinks || []).map((link) => {
-            const canOpen = isWebUrl(link.url);
-            return (
-              <article
-                className={`production-shared-url-row${draggingLinkId === link.id ? " dragging" : ""}${dragOverLinkId === link.id ? " drag-over" : ""}`}
-                data-shared-link-id={link.id}
-                key={link.id}
-              >
-                <div className="production-shared-url-fields">
-                  <label><span>リンク名</span><input value={link.title} readOnly={!canEditScript} onChange={(event) => patchSharedLink(link.id, { title: event.target.value })} /></label>
-                  <label className="wide"><span>URL</span><input type="url" value={link.url} placeholder="https://..." readOnly={!canEditScript} onChange={(event) => patchSharedLink(link.id, { url: event.target.value })} /></label>
-                  <label className="wide"><span>補足</span><input value={link.notes} placeholder="用途や共有先" readOnly={!canEditScript} onChange={(event) => patchSharedLink(link.id, { notes: event.target.value })} /></label>
-                </div>
-                <div className="production-shared-url-actions">
-                  {canEditScript && <button
-                    type="button"
-                    className="icon-button shared-link-drag-handle"
-                    title="ドラッグして並べ替え"
-                    aria-label={`${link.title || "共有URL"}をドラッグして並べ替え`}
-                    onPointerDown={(event) => beginLinkDrag(event, link.id)}
-                    onPointerMove={trackLinkDrag}
-                    onPointerUp={finishLinkDrag}
-                    onPointerCancel={resetLinkDrag}
-                    onKeyDown={(event) => {
-                      if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
-                      event.preventDefault();
-                      const links = project.sharedLinks || [];
-                      const linkIndex = links.findIndex((item) => item.id === link.id);
-                      const target = links[linkIndex + (event.key === "ArrowUp" ? -1 : 1)];
-                      if (target) moveSharedLink(link.id, target.id);
-                    }}
-                  ><GripVertical size={17} /></button>}
-                  <a className={`icon-button${canOpen ? "" : " disabled"}`} href={canOpen ? link.url : undefined} target="_blank" rel="noreferrer" title={canOpen ? "共有URLを開く" : "URLが未登録です"} aria-label={`${link.title || "共有URL"}を開く`} aria-disabled={!canOpen}><ExternalLink size={16} /></a>
-                  {canEditScript && <button type="button" className="icon-button danger-icon" title="共有URLを削除" aria-label={`${link.title || "共有URL"}を削除`} onClick={() => removeSharedLink(link.id)}><Trash2 size={16} /></button>}
-                </div>
-              </article>
-            );
-          })}
-          {!project.sharedLinks?.length && <div className="production-empty-state"><Link size={30} /><b>共有URLはまだありません</b></div>}
-        </div>
-      </section>
     </div>
   );
 }

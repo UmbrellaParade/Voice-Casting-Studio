@@ -6,6 +6,15 @@ export const PRODUCTION_MATERIAL_STATUSES = ["準備中", "制作中", "確認�
 export const PRODUCTION_QUESTION_STATUSES = ["未回答", "回答済み", "解決済み"];
 export const PRODUCTION_SCHEDULE_TYPES = ["収録締切", "公開予定", "編集", "収録", "その他"];
 export const PRODUCTION_SCHEDULE_STATUSES = ["予定", "進行中", "完了", "延期"];
+export const SHARED_LINK_COLORS = [
+  "#168b9a", "#b04f74", "#6f5aa7", "#b36b1f",
+  "#397c50", "#4b6fa9", "#9b4b45", "#7c5c3d"
+];
+
+const normalizeSharedLinkColor = (value = "") => {
+  const color = String(value || "").trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(color) ? color : "";
+};
 
 const reorderProductionItems = (items = [], sourceId = "", targetId = "") => {
   const sourceIndex = items.findIndex((item) => item.id === sourceId);
@@ -1040,7 +1049,8 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       id: link.id || createLocalId("shared_link"),
       title: String(link.title || link.label || `共有URL ${linkIndex + 1}`),
       url: String(link.url || ""),
-      notes: String(link.notes || link.description || "")
+      notes: String(link.notes || link.description || ""),
+      color: normalizeSharedLinkColor(link.color) || SHARED_LINK_COLORS[linkIndex % SHARED_LINK_COLORS.length]
     })),
     sharedAt: project.sharedAt || "",
     updatedAt: project.updatedAt || ""

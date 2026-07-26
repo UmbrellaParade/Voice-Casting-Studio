@@ -268,15 +268,15 @@ function MemberCharacters({ project, assignedCharacterIds }) {
   );
 }
 
-function MemberSharedLink({ icon: Icon, label, detail, url }) {
+function MemberSharedLink({ icon: Icon, label, detail, url, color = "#168b9a" }) {
   const canOpen = isWebUrl(url);
   const body = <><Icon size={19} /><span><b>{label}</b><small>{detail}</small></span></>;
   return canOpen ? (
-    <a className="member-shared-link" href={url} target="_blank" rel="noreferrer">
+    <a className="member-shared-link" style={{ "--shared-link-color": color }} href={url} target="_blank" rel="noreferrer">
       {body}<ExternalLink size={16} />
     </a>
   ) : (
-    <div className="member-shared-link unavailable">
+    <div className="member-shared-link unavailable" style={{ "--shared-link-color": color }}>
       {body}<em>未登録</em>
     </div>
   );
@@ -284,10 +284,21 @@ function MemberSharedLink({ icon: Icon, label, detail, url }) {
 
 function MemberLinks({ project, assignedCharacterIds }) {
   const { linkedCharacters } = partitionCharactersByScript(project);
-  const characters = linkedCharacters.filter((character) => assignedCharacterIds.has(character.id));
+  const folderOrder = new Map((project.recordingFolderOrder || []).map((characterId, index) => [characterId, index]));
+  const characters = linkedCharacters
+    .filter((character) => assignedCharacterIds.has(character.id))
+    .sort((left, right) => (folderOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (folderOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER));
   const sharedLinks = (project.sharedLinks || []).filter((link) => link.title || link.url);
   return (
     <div className="production-page-stack member-links-page">
+      <section className="member-link-section">
+        <header><Link size={20} /><div><h3>共有URL</h3><p>作品全体の連絡先と共有資料</p></div></header>
+        <div className="member-global-link-list">
+          {sharedLinks.map((link) => <MemberSharedLink key={link.id} icon={Link} label={link.title || "共有URL"} detail={link.notes || "共有URL"} url={link.url} color={link.color} />)}
+          {!sharedLinks.length && <div className="production-empty-state"><Link size={30} /><b>共有URLはまだありません</b></div>}
+        </div>
+      </section>
+
       <section className="member-link-section">
         <header><FolderOpen size={20} /><div><h3>収録フォルダー</h3><p>担当キャラクターの録音アップロード先</p></div></header>
         <div className="production-link-list member-link-list">
@@ -298,19 +309,11 @@ function MemberLinks({ project, assignedCharacterIds }) {
                 <div><h3>{character.name}</h3><span>担当キャラクター</span></div>
               </header>
               <div className="member-shared-link-list">
-                <MemberSharedLink icon={FolderOpen} label="収録フォルダー" detail="Google Drive" url={character.recordingFolderUrl} />
+                <MemberSharedLink icon={FolderOpen} label="収録フォルダー" detail="Google Drive" url={character.recordingFolderUrl} color={character.color} />
               </div>
             </article>
           ))}
           {!characters.length && <div className="production-empty-state"><FolderOpen size={30} /><b>担当キャラクターの収録フォルダーはまだありません</b></div>}
-        </div>
-      </section>
-
-      <section className="member-link-section">
-        <header><Link size={20} /><div><h3>共有URL</h3><p>作品全体の連絡先と共有資料</p></div></header>
-        <div className="member-global-link-list">
-          {sharedLinks.map((link) => <MemberSharedLink key={link.id} icon={Link} label={link.title || "共有URL"} detail={link.notes || "共有URL"} url={link.url} />)}
-          {!sharedLinks.length && <div className="production-empty-state"><Link size={30} /><b>共有URLはまだありません</b></div>}
         </div>
       </section>
     </div>

@@ -590,10 +590,11 @@
   align-items: center;
   min-height: 52px;
   padding: 8px 10px;
-  border: 1px solid #c9d8d6;
+  border: 1px solid color-mix(in srgb, var(--shared-link-color) 42%, #d8cec1);
+  border-left: 4px solid var(--shared-link-color);
   border-radius: 6px;
-  background: #f3f9f8;
-  color: #167680;
+  background: color-mix(in srgb, var(--shared-link-color) 7%, #fff);
+  color: var(--shared-link-color);
   text-decoration: none;
 }
 
@@ -617,6 +618,7 @@
 
 .member-shared-link.unavailable {
   border-color: #ddd5cb;
+  border-left-color: var(--shared-link-color);
   background: #faf8f5;
   color: #8c838e;
 }

@@ -136,15 +136,28 @@ test("normalizes and preserves character image positions", () => {
 
 test("normalizes freely configurable shared URLs", () => {
   const project = normalizeRecordingProject({
-    sharedLinks: [{ id: "line", label: "LINEオープンチャット", url: "https://line.me/example", description: "全体連絡" }]
+    sharedLinks: [
+      { id: "line", label: "LINEオープンチャット", url: "https://line.me/example", description: "全体連絡" },
+      { id: "drive", title: "共有資料", url: "https://drive.google.com/example" }
+    ]
   });
 
-  assert.deepEqual(project.sharedLinks, [{
-    id: "line",
-    title: "LINEオープンチャット",
-    url: "https://line.me/example",
-    notes: "全体連絡"
-  }]);
+  assert.deepEqual(project.sharedLinks, [
+    {
+      id: "line",
+      title: "LINEオープンチャット",
+      url: "https://line.me/example",
+      notes: "全体連絡",
+      color: "#168b9a"
+    },
+    {
+      id: "drive",
+      title: "共有資料",
+      url: "https://drive.google.com/example",
+      notes: "",
+      color: "#b04f74"
+    }
+  ]);
 });
 
 test("assigns a different color whenever character colors overlap", () => {
