@@ -48,6 +48,7 @@ import {
   normalizeImageScale,
   parseRubyText,
   partitionCharactersByScript,
+  renameProductionCharacter,
   reorderProductionCharacters,
   reorderProductionMaterials,
   reorderProductionRecordingFolders,
@@ -372,6 +373,7 @@ function CharacterImage({ character, patchCharacter }) {
 }
 
 function CharactersView({ project, updateProject, siteUsers = [], canEditScript = true }) {
+  const [characterNameDrafts, setCharacterNameDrafts] = useState({});
   const [actorNameDrafts, setActorNameDrafts] = useState({});
   const [draggingCharacterId, setDraggingCharacterId] = useState("");
   const [dragOverCharacterId, setDragOverCharacterId] = useState("");
@@ -389,6 +391,28 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
       ...Object.fromEntries(Object.entries(patch).filter(([key]) => canEditScript || (key !== "id" && key !== "name")))
     } : character)
   }));
+
+  const clearCharacterNameDraft = (characterId) => {
+    setCharacterNameDrafts((current) => {
+      const next = { ...current };
+      delete next[characterId];
+      return next;
+    });
+  };
+
+  const commitCharacterName = (characterId, value) => {
+    if (!canEditScript) return;
+    const character = project.characters.find((item) => item.id === characterId);
+    const name = String(value || "").normalize("NFKC").trim();
+    clearCharacterNameDraft(characterId);
+    if (!name) {
+      setMessage("キャラクター名は空にできません。元の名前に戻しました。");
+      return;
+    }
+    if (name === character?.name) return;
+    updateProject((current) => renameProductionCharacter(current, characterId, name));
+    setMessage(`「${character?.name || "登場人物"}」の表示名を「${name}」に変更しました。台本内の元の話者名との紐づけは維持されます。`);
+  };
 
   const assignActorName = (characterId, actorName) => {
     const name = String(actorName || "").trim();
@@ -474,6 +498,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
       characters: [...current.characters, {
         id: newId("character"),
         name: `登場人物${current.characters.length + 1}`,
+        scriptAliases: [],
         color: "#168b9a",
         imageUrl: "",
         imagePositionX: 50,
@@ -538,7 +563,19 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
         <div className="character-editor-fields">
           <header>
             <div className="character-name-fields">
-              <label><span>名前</span><input value={character.name} readOnly={!canEditScript} onChange={(event) => patchCharacter(character.id, { name: event.target.value })} /></label>
+              <label>
+                <span>名前</span>
+                <input
+                  value={characterNameDrafts[character.id] ?? character.name}
+                  readOnly={!canEditScript}
+                  onChange={(event) => setCharacterNameDrafts((current) => ({ ...current, [character.id]: event.target.value }))}
+                  onBlur={(event) => commitCharacterName(character.id, event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing) return;
+                    if (event.key === "Enter") event.currentTarget.blur();
+                  }}
+                />
+              </label>
               <label className="character-color-field"><span>セリフ色</span><input type="color" value={character.color} onChange={(event) => patchCharacter(character.id, { color: event.target.value })} /></label>
             </div>
             <div className="character-header-actions">

@@ -17,6 +17,7 @@ import {
   RefreshCw,
   Settings,
   ShieldCheck,
+  Sparkles,
   Users
 } from "lucide-react";
 import { SectionTitle } from "./ui.jsx";
@@ -47,6 +48,18 @@ const OWNER_SECTIONS = [
       "画面上部の作品選択で、管理する収録プロジェクトを選びます。",
       "全セリフ、収録済み、確認OK、リテイクの件数を確認します。",
       "未確認録音、未回答の質問、直近の予定から優先する作業を開きます。"
+    ]
+  },
+  {
+    id: "owner-concept",
+    title: "コンセプトを全員へ共有する",
+    summary: "Umbrella Paradeの活動方針や大切にしている考えを、全メンバーへ伝えます。",
+    icon: Sparkles,
+    target: "concept",
+    steps: [
+      "「コンセプト」を開き、団体名、一言で表すコンセプト、本文、大切にしていることを入力します。",
+      "入力中はWordPressへ送信されません。内容を確認してから「保存」を押します。",
+      "保存した内容は作品を問わず共通で、制作管理者と声優さんにも同じ内容が表示されます。"
     ]
   },
   {
@@ -171,6 +184,18 @@ const ACTOR_SECTIONS = [
     ]
   },
   {
+    id: "actor-concept",
+    title: "Umbrella Paradeのコンセプトを読む",
+    summary: "作品づくりで共有している考えや、活動の方向性を確認します。",
+    icon: Sparkles,
+    target: "concept",
+    steps: [
+      "ホーム右隣の「コンセプト」を開きます。",
+      "団体のコンセプトと大切にしていることを確認します。",
+      "コンセプトは制作オーナーが更新し、声優アカウントでは書き換えられません。"
+    ]
+  },
+  {
     id: "actor-script",
     title: "担当セリフを探す",
     summary: "全文から章、シーンへ順に絞り、必要な人物だけを表示します。",
@@ -261,6 +286,7 @@ const ACTOR_SECTIONS = [
 
 const PERMISSION_ROWS = [
   ["共有情報・担当台本を見る", "可", "可", "可"],
+  ["コンセプトを編集する", "可", "不可", "不可"],
   ["録音を提出する", "可", "可", "担当分のみ"],
   ["録音のOK・リテイクを付ける", "可", "可", "不可"],
   ["台本の追加・編集・削除・入れ替え", "可", "不可", "不可"],

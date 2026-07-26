@@ -7443,3 +7443,234 @@ textarea {
     margin-top: 0;
   }
 }
+
+.concept-page {
+  gap: 18px;
+}
+
+.concept-hero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 210px;
+  padding: 32px clamp(22px, 5vw, 58px);
+  overflow: hidden;
+  border: 1px solid #241f2f;
+  border-left: 7px solid #25a8a8;
+  border-radius: 8px;
+  background: #241f2f;
+  color: #fffdf8;
+}
+
+.concept-hero-mark {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  flex: 0 0 54px;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .3);
+  border-radius: 50%;
+  background: #168b9a;
+}
+
+.concept-hero > div:last-child {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.concept-hero p {
+  margin: 0 0 6px;
+  color: #84dad7;
+  font-family: "Outfit", sans-serif;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.concept-hero h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: "Outfit", "Noto Sans JP", sans-serif;
+  font-size: 52px;
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.concept-hero strong {
+  display: block;
+  max-width: 760px;
+  margin-top: 14px;
+  color: #fff3d9;
+  font-size: 16px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.concept-content-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr);
+  gap: 0;
+  border-top: 1px solid #d8cdbf;
+  border-bottom: 1px solid #d8cdbf;
+}
+
+.concept-content-layout > section {
+  min-height: 220px;
+  padding: 26px clamp(18px, 3vw, 34px);
+}
+
+.concept-content-layout > section + section {
+  border-left: 1px solid #d8cdbf;
+}
+
+.concept-content-layout header,
+.concept-editor > header > div,
+.concept-editor > header > div > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.concept-content-layout header svg {
+  color: #168b9a;
+}
+
+.concept-principles header svg {
+  color: #d44069;
+}
+
+.concept-content-layout h3,
+.concept-editor h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.concept-content-layout section > p {
+  margin: 20px 0 0;
+  color: #403747;
+  font-size: 15px;
+  line-height: 2;
+  white-space: pre-wrap;
+}
+
+.concept-content-layout .concept-empty {
+  color: #817685;
+}
+
+.concept-editor {
+  display: grid;
+  gap: 18px;
+}
+
+.concept-editor > header {
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e2d8cc;
+}
+
+.concept-editor > header > div {
+  align-items: flex-start;
+}
+
+.concept-editor > header > div > div {
+  display: grid;
+  gap: 3px;
+}
+
+.concept-editor > header svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: #168b9a;
+}
+
+.concept-editor > header p {
+  margin: 0;
+  color: #706674;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.concept-editor-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.concept-editor-fields label {
+  display: grid;
+  gap: 7px;
+}
+
+.concept-editor-fields label.wide {
+  grid-column: 1 / -1;
+}
+
+.concept-editor-fields label > span {
+  color: #51495a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.concept-editor-fields textarea {
+  resize: vertical;
+  line-height: 1.8;
+}
+
+.concept-editor > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid #e2d8cc;
+}
+
+.concept-editor > footer span {
+  color: #786e7b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.concept-editor > footer span.saved {
+  color: #15736e;
+}
+
+@media (max-width: 760px) {
+  .concept-hero {
+    min-height: 180px;
+    padding: 24px 18px;
+  }
+
+  .concept-hero-mark {
+    display: none;
+  }
+
+  .concept-hero h2 {
+    font-size: 34px;
+  }
+
+  .concept-content-layout,
+  .concept-editor-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .concept-content-layout > section {
+    min-height: 0;
+    padding: 22px 4px;
+  }
+
+  .concept-content-layout > section + section {
+    border-top: 1px solid #d8cdbf;
+    border-left: 0;
+  }
+
+  .concept-editor-fields label.wide {
+    grid-column: auto;
+  }
+
+  .concept-editor > footer {
+    display: grid;
+  }
+}

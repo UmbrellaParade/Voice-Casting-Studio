@@ -276,6 +276,17 @@ function vcs_canonicalize_value(mixed $value): mixed
     return $value;
 }
 
+function vcs_normalize_studio_concept(array $data): array
+{
+    $concept = is_array($data['studioConcept'] ?? null) ? $data['studioConcept'] : [];
+    return [
+        'title' => (string) ($concept['title'] ?? 'Umbrella Parade'),
+        'tagline' => (string) ($concept['tagline'] ?? ''),
+        'body' => (string) ($concept['body'] ?? ''),
+        'principles' => (string) ($concept['principles'] ?? ''),
+    ];
+}
+
 function vcs_extract_script_structure(array $data): array
 {
     $projects = [];
@@ -285,10 +296,16 @@ function vcs_extract_script_structure(array $data): array
         }
         $character_ids = [];
         $project_characters = is_array($project['characters'] ?? null) ? $project['characters'] : [];
+        $normalized_project_characters = [];
         foreach ($project_characters as $character) {
             if (!is_array($character)) {
                 continue;
             }
+            $character['scriptAliases'] = array_values(array_map(
+                'strval',
+                is_array($character['scriptAliases'] ?? null) ? $character['scriptAliases'] : []
+            ));
+            $normalized_project_characters[] = $character;
             $character_id = (string) ($character['id'] ?? '');
             if ('' !== $character_id && !in_array($character_id, $character_ids, true)) {
                 $character_ids[] = $character_id;
@@ -336,7 +353,7 @@ function vcs_extract_script_structure(array $data): array
             'recordingDeadline' => (string) ($project['recordingDeadline'] ?? ''),
             'releaseDate' => (string) ($project['releaseDate'] ?? ''),
             'editingStatus' => (string) ($project['editingStatus'] ?? ''),
-            'characters' => vcs_canonicalize_value($project['characters'] ?? []),
+            'characters' => vcs_canonicalize_value($normalized_project_characters),
             'recordingFolderOrder' => $recording_folder_order,
             'castMembers' => vcs_canonicalize_value($project['castMembers'] ?? []),
             'materials' => vcs_canonicalize_value($project['materials'] ?? []),
@@ -346,7 +363,10 @@ function vcs_extract_script_structure(array $data): array
             'lines' => $lines,
         ];
     }
-    return $projects;
+    return [
+        'studioConcept' => vcs_normalize_studio_concept($data),
+        'recordingProjects' => $projects,
+    ];
 }
 
 function vcs_filter_project_for_actor(array $project, int $user_id, array $character_ids): array
@@ -421,7 +441,10 @@ function vcs_rest_get_workspace(): WP_REST_Response
             }
             $assigned_projects[] = vcs_filter_project_for_actor($project, (int) $user->ID, $character_ids);
         }
-        $workspace = ['recordingProjects' => $assigned_projects];
+        $workspace = [
+            'studioConcept' => vcs_normalize_studio_concept($workspace),
+            'recordingProjects' => $assigned_projects,
+        ];
     }
     $users = [];
     if ($can_manage) {
@@ -452,7 +475,7 @@ function vcs_rest_save_workspace(WP_REST_Request $request): WP_REST_Response|WP_
         if ($incoming_structure !== $current_structure) {
             return new WP_Error(
                 'vcs_script_edit_forbidden',
-                'Only the production owner can add, edit, delete, replace, or restore scripts.',
+                'Only the production owner can edit scripts and shared production information.',
                 ['status' => 403]
             );
         }

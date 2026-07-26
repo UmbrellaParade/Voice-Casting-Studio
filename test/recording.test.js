@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { makeGoogleDrivePreviewUrl, makePlayableEmbedUrl } from "../src/lib/core.js";
+import { makeGoogleDrivePreviewUrl, makePlayableEmbedUrl, migrateData } from "../src/lib/core.js";
 
 import {
   archiveScriptVersion,
@@ -22,6 +22,7 @@ import {
   reorderProductionMaterials,
   reorderProductionRecordingFolders,
   reorderProductionSharedLinks,
+  renameProductionCharacter,
   repairScriptHierarchy,
   restoreScriptSnapshot
 } from "../src/lib/recording.js";
@@ -31,6 +32,16 @@ test("builds an embeddable Google Drive audio preview URL", () => {
   const previewUrl = "https://drive.google.com/file/d/abc_DEF-123/preview";
   assert.equal(makeGoogleDrivePreviewUrl(sharedUrl), previewUrl);
   assert.equal(makePlayableEmbedUrl(sharedUrl), previewUrl);
+});
+
+test("adds a global Umbrella Parade concept to older workspace data", () => {
+  const migrated = migrateData({ recordingProjects: [] });
+  assert.deepEqual(migrated.studioConcept, {
+    title: "Umbrella Parade",
+    tagline: "",
+    body: "",
+    principles: ""
+  });
 });
 
 test("reorders production materials without changing their contents", () => {
@@ -222,6 +233,31 @@ test("counts dialogue inside manually pasted chapter bodies without replacing th
   assert.deepEqual(getCharacterDialogueCounts(project), { vel: 1, amamori: 3 });
   assert.equal(project.lines[1].manualBody, true);
   assert.match(project.lines[1].text, /アマモリのナレーター/);
+});
+
+test("keeps pasted script dialogue linked when a character display name changes", () => {
+  const original = normalizeRecordingProject({
+    characters: [{ id: "vel", name: "ヴェル" }],
+    lines: [{
+      id: "chapter_body",
+      chapterId: "chapter_1",
+      chapterTitle: "第一章",
+      sceneId: "scene_1",
+      sceneTitle: "章の本文",
+      kind: "direction",
+      manualBody: true,
+      text: "ヴェル「行こう。」"
+    }]
+  });
+
+  const renamed = normalizeRecordingProject(renameProductionCharacter(original, "vel", "ベル"));
+  const display = getRecordingDisplayProject(renamed);
+
+  assert.equal(renamed.characters[0].name, "ベル");
+  assert.deepEqual(renamed.characters[0].scriptAliases, ["ヴェル"]);
+  assert.equal(getCharacterDialogueCounts(renamed).vel, 1);
+  assert.equal(display.lines.find((line) => line.kind === "dialogue")?.characterId, "vel");
+  assert.deepEqual(partitionCharactersByScript(renamed).linkedCharacters.map((character) => character.id), ["vel"]);
 });
 
 test("separates characters removed from the current script without deleting their settings", () => {

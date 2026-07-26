@@ -2222,7 +2222,22 @@ export const formatDateRange = (startDate = "", endDate = "") => {
   return startDate || endDate || "期間未設定";
 };
 
+export const DEFAULT_STUDIO_CONCEPT = {
+  title: "Umbrella Parade",
+  tagline: "",
+  body: "",
+  principles: ""
+};
+
+export const normalizeStudioConcept = (concept = {}) => ({
+  title: String(concept?.title || DEFAULT_STUDIO_CONCEPT.title).trim() || DEFAULT_STUDIO_CONCEPT.title,
+  tagline: String(concept?.tagline || ""),
+  body: String(concept?.body || ""),
+  principles: String(concept?.principles || "")
+});
+
 export const sampleData = {
+  studioConcept: { ...DEFAULT_STUDIO_CONCEPT },
   settings: {
     obsidianPath: DEFAULT_OBSIDIAN_PATH,
     obsidianFolderName: "Voice-Casting-Studio",
@@ -2613,6 +2628,7 @@ export function migrateData(input) {
   return {
     ...sampleData,
     ...input,
+    studioConcept: normalizeStudioConcept(input.studioConcept),
     settings,
     imports: { ...defaultImports, ...(input.imports ?? {}) },
     socialPromos: Object.fromEntries(

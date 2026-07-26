@@ -16,17 +16,20 @@ import {
   MessageSquareText,
   Music2,
   RefreshCw,
+  Sparkles,
   Users
 } from "lucide-react";
 import { getGoogleDriveFileId, isWebUrl, makeDirectAudioDownloadUrl, makeGoogleDrivePreviewUrl, makeImagePreviewUrl } from "../lib/core.js";
 import { getCharacterImageCropStyle, getCharacterName, getRecordingDisplayProject, getRecordingProgress, parseRubyText, partitionCharactersByScript } from "../lib/recording.js";
 import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
+import { ConceptView } from "./ConceptView.jsx";
 import { ManualView } from "./ManualView.jsx";
 import { Header, SectionTitle } from "./ui.jsx";
 import { getScriptSceneAnchorId, ScriptSceneToc } from "./ScriptSceneToc.jsx";
 
 const MEMBER_NAV = [
   ["home", "ホーム", Home],
+  ["concept", "コンセプト", Sparkles],
   ["script", "台本", FileText],
   ["characters", "キャラクター", Users],
   ["links", "共有リンク", Link],
@@ -341,14 +344,18 @@ export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voic
   const member = project.castMembers.find((item) => Number(item.wpUserId) === Number(runtime.currentUser?.id)) || project.castMembers[0];
   const assignedCharacterIds = new Set(member?.characterIds || []);
   const pageTitle = MEMBER_NAV.find(([key]) => key === active)?.[1] || "ホーム";
+  const pageSubtitle = active === "concept"
+    ? "Umbrella Paradeが大切にしている考えを共有します。"
+    : `${withHonorific(runtime.currentUser?.name || member?.actorName)} / ${project.title}`;
   return (
     <main className="app-shell member-portal-shell">
       <Header logoSrc={logoSrc} title={appTitle} />
       <nav className="app-nav" aria-label="Main navigation">{MEMBER_NAV.map(([key, label, Icon]) => <button type="button" className={active === key ? "active" : ""} key={key} onClick={() => setActive(key)}><Icon size={17} /><span>{label}</span></button>)}</nav>
       <section className="content-panel view-stack">
-        <SectionTitle title={pageTitle} subtitle={`${withHonorific(runtime.currentUser?.name || member?.actorName)} / ${project.title}`} />
-        <MemberProjectBar projects={projects} project={project} setProjectId={setProjectId} runtime={runtime} connectionState={connectionState} onRefresh={onRefresh} />
+        <SectionTitle title={pageTitle} subtitle={pageSubtitle} />
+        {active !== "concept" && <MemberProjectBar projects={projects} project={project} setProjectId={setProjectId} runtime={runtime} connectionState={connectionState} onRefresh={onRefresh} />}
         {active === "home" && <MemberHome project={project} assignedCharacterIds={assignedCharacterIds} setActive={setActive} />}
+        {active === "concept" && <ConceptView concept={data.studioConcept} showTitle={false} />}
         {active === "script" && <MemberScript project={project} assignedCharacterIds={assignedCharacterIds} onUpdateLine={onUpdateLine} />}
         {active === "characters" && <MemberCharacters project={project} assignedCharacterIds={assignedCharacterIds} />}
         {active === "links" && <MemberLinks project={project} assignedCharacterIds={assignedCharacterIds} />}

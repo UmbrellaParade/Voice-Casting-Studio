@@ -113,6 +113,43 @@ const normalizeCharacterAliasToken = (value = "") => String(value || "")
   .replace(/[()[\]【】〈〉《》「」『』・･／/\\:：_\-―—–]/g, "")
   .toLocaleLowerCase("ja");
 
+const normalizeCharacterAliases = (aliases = [], currentName = "") => {
+  const currentToken = normalizeCharacterAliasToken(currentName);
+  const seen = new Set();
+  return (Array.isArray(aliases) ? aliases : [])
+    .map((alias) => String(alias || "").normalize("NFKC").trim())
+    .filter((alias) => {
+      const token = normalizeCharacterAliasToken(alias);
+      if (!token || token === currentToken || seen.has(token)) return false;
+      seen.add(token);
+      return true;
+    });
+};
+
+const getCharacterKnownNames = (character = {}) => [
+  String(character.name || "").normalize("NFKC").trim(),
+  ...normalizeCharacterAliases(character.scriptAliases, character.name)
+].filter(Boolean);
+
+export const renameProductionCharacter = (project = {}, characterId = "", nextName = "") => {
+  const name = String(nextName || "").normalize("NFKC").trim();
+  if (!name || !characterId) return project;
+  return {
+    ...project,
+    characters: (Array.isArray(project.characters) ? project.characters : []).map((character) => {
+      if (character.id !== characterId || character.name === name) return character;
+      return {
+        ...character,
+        name,
+        scriptAliases: normalizeCharacterAliases([
+          ...(Array.isArray(character.scriptAliases) ? character.scriptAliases : []),
+          character.name
+        ], name)
+      };
+    })
+  };
+};
+
 export const normalizeLinePerformanceType = (value = "", speaker = "") => {
   const explicit = String(value || "").normalize("NFKC").trim();
   if (LINE_PERFORMANCE_TYPES.includes(explicit)) return explicit;
@@ -228,6 +265,7 @@ const cloneScriptCharacters = (characters = []) => (Array.isArray(characters) ? 
   .map((character, index) => ({
     id: String(character.id || createLocalId("character")),
     name: String(character.name || `登場人物${index + 1}`).trim(),
+    scriptAliases: normalizeCharacterAliases(character.scriptAliases, character.name),
     color: String(character.color || CHARACTER_COLORS[index % CHARACTER_COLORS.length]),
     imageUrl: String(character.imageUrl || ""),
     imagePositionX: normalizeImagePosition(character.imagePositionX),
@@ -662,6 +700,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
     const normalized = {
       id: character.id || createLocalId("character"),
       name: String(character.name || `登場人物${characterIndex + 1}`).trim(),
+      scriptAliases: normalizeCharacterAliases(character.scriptAliases, character.name),
       color: character.color || CHARACTER_COLORS[characterIndex % CHARACTER_COLORS.length],
       imageUrl: String(character.imageUrl || ""),
       imagePositionX: normalizeImagePosition(character.imagePositionX),
@@ -682,7 +721,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
   );
   const characterCandidates = normalizedCharacters.filter((character) => !structuralCharacterIds.has(character.id));
   const availableCharacterNames = [
-    ...characterCandidates.map((character) => character.name),
+    ...characterCandidates.flatMap(getCharacterKnownNames),
     ...rawLines.map((line) => String(line.character || line.speaker || "").trim()).filter(Boolean)
   ];
   const characterGroups = new Map();
@@ -699,9 +738,14 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
     const target = group.members.find((character) => normalizeCharacterNameKey(character.name) === group.canonicalKey) || group.members[0];
     const firstValue = (key) => group.members.find((character) => String(character[key] || "").trim())?.[key] || "";
     const imageSource = target.imageUrl ? target : group.members.find((character) => character.imageUrl) || target;
+    const scriptAliases = normalizeCharacterAliases(
+      group.members.flatMap((character) => [character.name, ...(character.scriptAliases || [])]),
+      group.canonicalName
+    );
     const merged = {
       ...target,
       name: group.canonicalName,
+      scriptAliases,
       imageUrl: imageSource.imageUrl,
       imagePositionX: imageSource.imagePositionX,
       imagePositionY: imageSource.imagePositionY,
@@ -715,7 +759,12 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
     characterTargetIdByName.set(group.canonicalKey, merged.id);
     group.members.forEach((character) => {
       characterIdAliases.set(character.id, merged.id);
-      characterTargetIdByName.set(normalizeCharacterNameKey(character.name), merged.id);
+      getCharacterKnownNames(character).forEach((knownName) => {
+        characterTargetIdByName.set(normalizeCharacterNameKey(knownName), merged.id);
+      });
+    });
+    getCharacterKnownNames(merged).forEach((knownName) => {
+      characterTargetIdByName.set(normalizeCharacterNameKey(knownName), merged.id);
     });
     return merged;
   });
@@ -728,6 +777,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       const character = {
         id: createLocalId("character"),
         name: canonicalSpeakerName,
+        scriptAliases: [],
         color: CHARACTER_COLORS[characters.length % CHARACTER_COLORS.length],
         imageUrl: "",
         imagePositionX: 50,
@@ -1693,11 +1743,13 @@ export const getCharacterDialogueCounts = (project = {}) => {
   const characters = Array.isArray(project.characters) ? project.characters : [];
   const lines = Array.isArray(project.lines) ? project.lines : [];
   const counts = Object.fromEntries(characters.map((character) => [character.id, 0]));
-  const knownNames = characters.map((character) => character.name);
-  const characterIdByName = new Map(characters.map((character) => [
-    normalizeCharacterNameKey(getCanonicalCharacterName(character.name, knownNames)),
-    character.id
-  ]));
+  const knownNames = characters.flatMap(getCharacterKnownNames);
+  const characterIdByName = new Map(characters.flatMap((character) =>
+    getCharacterKnownNames(character).flatMap((knownName) => [
+      [normalizeCharacterNameKey(knownName), character.id],
+      [normalizeCharacterNameKey(getCanonicalCharacterName(knownName, knownNames)), character.id]
+    ])
+  ));
 
   lines.forEach((line) => {
     if (line.kind !== "direction" && Object.hasOwn(counts, line.characterId)) {
@@ -1733,15 +1785,17 @@ export const partitionCharactersByScript = (project = {}) => {
 
 export const getRecordingDisplayProject = (project = {}) => {
   const characters = Array.isArray(project.characters) ? project.characters : [];
-  const knownNames = characters.map((character) => character.name);
+  const knownNames = characters.flatMap(getCharacterKnownNames);
   const derivedLineProgress = project.derivedLineProgress && typeof project.derivedLineProgress === "object"
     ? project.derivedLineProgress
     : {};
   const derivedIdentityCounts = new Map();
-  const characterIdByName = new Map(characters.map((character) => [
-    normalizeCharacterNameKey(getCanonicalCharacterName(character.name, knownNames)),
-    character.id
-  ]));
+  const characterIdByName = new Map(characters.flatMap((character) =>
+    getCharacterKnownNames(character).flatMap((knownName) => [
+      [normalizeCharacterNameKey(knownName), character.id],
+      [normalizeCharacterNameKey(getCanonicalCharacterName(knownName, knownNames)), character.id]
+    ])
+  ));
   const lines = (Array.isArray(project.lines) ? project.lines : []).flatMap((line) => {
     if (!line.manualBody || !String(line.text || "").trim()) return [line];
     const parsedRows = parseGoogleDocsScript(line.text, knownNames);

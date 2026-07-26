@@ -26,6 +26,7 @@ import {
   Send,
   Settings,
   Share2,
+  Sparkles,
   Trash2,
   Upload,
   Users,
@@ -267,6 +268,7 @@ import {
 } from "./components/thumbnail.jsx";
 import { RecordingStudio, SharedRecordingBoard } from "./components/RecordingStudio.jsx";
 import { ProductionWorkspace } from "./components/ProductionHub.jsx";
+import { ConceptView } from "./components/ConceptView.jsx";
 import { WordPressMemberPortal } from "./components/WordPressMemberPortal.jsx";
 import { ManualView } from "./components/ManualView.jsx";
 import {
@@ -297,6 +299,7 @@ const AUDITION_NAV_ITEMS = [
 ];
 const MAIN_NAV_ITEMS = [
   ["home", "ホーム", LayoutDashboard],
+  ["concept", "コンセプト", Sparkles],
   ["recording", "台本", FileText],
   ["characters", "キャラクター", Users],
   ["links", "共有リンク", Link],
@@ -1903,6 +1906,13 @@ ${socialRows || "-"}
         )}
 
         <section className="content-panel">
+          {active === "concept" && (
+            <ConceptView
+              concept={data.studioConcept}
+              canEdit={canEditScript}
+              onSave={(concept) => updateData("studioConcept", concept)}
+            />
+          )}
           {active === "recording" && (
             <RecordingStudio
               projects={data.recordingProjects ?? []}
