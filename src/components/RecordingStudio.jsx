@@ -43,7 +43,6 @@ import {
   parseCsv
 } from "../lib/core.js";
 import {
-  ACTOR_RECORDING_STATUSES,
   DIRECTOR_REVIEW_STATUSES,
   LINE_PERFORMANCE_TYPES,
   archiveScriptVersion,
@@ -551,11 +550,17 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript }) 
           <div className={`line-operation-row${line.recordingUrl ? " has-recording" : ""}`}>
             <RecordingPlayer url={line.recordingUrl} fileName={line.recordingFileName} />
             <div className="line-status-selects">
-              <label>
-                <span>収録</span>
-                <select value={line.actorStatus} onChange={(event) => patchLine(line.id, { actorStatus: event.target.value })}>
-                  {ACTOR_RECORDING_STATUSES.map((status) => <option key={status}>{status}</option>)}
-                </select>
+              <label className={`line-recorded-check${line.actorStatus !== "未収録" ? " checked" : ""}`}>
+                <input
+                  type="checkbox"
+                  checked={line.actorStatus !== "未収録"}
+                  onChange={(event) => patchLine(line.id, {
+                    actorStatus: event.target.checked
+                      ? (line.reviewStatus === "リテイク" ? "再提出済み" : "収録済み")
+                      : "未収録"
+                  })}
+                />
+                <span>収録済み</span>
               </label>
               <label>
                 <span>確認</span>

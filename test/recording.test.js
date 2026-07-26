@@ -20,6 +20,7 @@ import {
   partitionCharactersByScript,
   reorderProductionCharacters,
   reorderProductionMaterials,
+  reorderProductionRecordingFolders,
   reorderProductionSharedLinks,
   repairScriptHierarchy,
   restoreScriptSnapshot
@@ -42,6 +43,22 @@ test("reorders production materials without changing their contents", () => {
   assert.deepEqual(reordered.map((material) => material.id), ["complete", "theme", "se"]);
   assert.equal(reordered[0], materials[2]);
   assert.deepEqual(materials.map((material) => material.id), ["theme", "se", "complete"]);
+});
+
+test("reorders recording folders independently from character order", () => {
+  const project = normalizeRecordingProject({
+    characters: [
+      { id: "vel", name: "ヴェル" },
+      { id: "amamori", name: "アマモリ" },
+      { id: "kara", name: "カーラ" }
+    ],
+    recordingFolderOrder: ["amamori", "vel"]
+  });
+
+  assert.deepEqual(project.recordingFolderOrder, ["amamori", "vel", "kara"]);
+  const reordered = reorderProductionRecordingFolders(project.recordingFolderOrder, "kara", "amamori");
+  assert.deepEqual(reordered, ["kara", "amamori", "vel"]);
+  assert.deepEqual(project.characters.map((character) => character.id), ["vel", "amamori", "kara"]);
 });
 
 test("reorders characters without changing ids used by the script", () => {

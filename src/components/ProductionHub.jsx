@@ -50,6 +50,7 @@ import {
   partitionCharactersByScript,
   reorderProductionCharacters,
   reorderProductionMaterials,
+  reorderProductionRecordingFolders,
   reorderProductionSharedLinks
 } from "../lib/recording.js";
 import { getWordPressRuntime, uploadWordPressImage } from "../lib/wordpress.js";
@@ -655,14 +656,22 @@ function CharacterLinkField({ icon: Icon, label, service, value = "", placeholde
 }
 
 function LinksView({ project, updateProject, canEditScript = true }) {
+  const [draggingFolderId, setDraggingFolderId] = useState("");
+  const [dragOverFolderId, setDragOverFolderId] = useState("");
   const [draggingLinkId, setDraggingLinkId] = useState("");
   const [dragOverLinkId, setDragOverLinkId] = useState("");
   const [message, setMessage] = useState("");
+  const folderDragRef = useRef("");
   const linkDragRef = useRef(null);
   const { linkedCharacters } = useMemo(
     () => partitionCharactersByScript(project),
     [project.characters, project.lines]
   );
+  const orderedLinkedCharacters = useMemo(() => {
+    const order = new Map((project.recordingFolderOrder || []).map((characterId, index) => [characterId, index]));
+    return [...linkedCharacters].sort((left, right) =>
+      (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(right.id) ?? Number.MAX_SAFE_INTEGER));
+  }, [linkedCharacters, project.recordingFolderOrder]);
 
   const patchCharacterLink = (characterId, key, value) => updateProject((current) => ({
     ...current,
@@ -699,6 +708,46 @@ function LinksView({ project, updateProject, canEditScript = true }) {
       sharedLinks: reorderProductionSharedLinks(current.sharedLinks || [], sourceId, targetId)
     }));
     setMessage(`「${movedLink?.title || "共有URL"}」の並び順を保存しました。`);
+  };
+
+  const moveRecordingFolder = (sourceId, targetId) => {
+    if (!canEditScript || !sourceId || !targetId || sourceId === targetId) return;
+    const movedCharacter = project.characters.find((character) => character.id === sourceId);
+    updateProject((current) => {
+      const characterIds = current.characters.map((character) => character.id);
+      const configured = (current.recordingFolderOrder || []).filter((id) => characterIds.includes(id));
+      const order = [...configured, ...characterIds.filter((id) => !configured.includes(id))];
+      return {
+        ...current,
+        recordingFolderOrder: reorderProductionRecordingFolders(order, sourceId, targetId)
+      };
+    });
+    setMessage(`「${movedCharacter?.name || "収録フォルダー"}」の並び順を保存しました。`);
+  };
+
+  const beginFolderDrag = (event, characterId) => {
+    if (!canEditScript) return;
+    folderDragRef.current = characterId;
+    setDraggingFolderId(characterId);
+    setDragOverFolderId("");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", characterId);
+  };
+
+  const hoverFolder = (event, characterId) => {
+    if (!folderDragRef.current || folderDragRef.current === characterId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverFolderId(characterId);
+  };
+
+  const finishFolderDrag = (event, targetId = "") => {
+    event.preventDefault();
+    const sourceId = folderDragRef.current;
+    if (sourceId && targetId && sourceId !== targetId) moveRecordingFolder(sourceId, targetId);
+    folderDragRef.current = "";
+    setDraggingFolderId("");
+    setDragOverFolderId("");
   };
 
   const resetLinkDrag = () => {
@@ -743,16 +792,24 @@ function LinksView({ project, updateProject, canEditScript = true }) {
 
   return (
     <div className="production-page-stack">
+      {message && <p className="production-inline-message">{message}</p>}
       <details className="production-link-section production-folder-section">
         <summary>
           <div><FolderOpen size={20} /><div><h3>収録フォルダー一覧</h3><p>キャラクターごとのGoogle Drive録音先です。</p></div></div>
-          <span>{linkedCharacters.length}フォルダー<ChevronDown size={18} /></span>
+          <span>{orderedLinkedCharacters.length}フォルダー<ChevronDown size={18} /></span>
         </summary>
         <div className="production-link-list">
-          {linkedCharacters.map((character) => {
+          {orderedLinkedCharacters.map((character, characterIndex) => {
             const assignedMember = project.castMembers.find((member) => member.characterIds.includes(character.id));
             return (
-              <article className="production-link-row" key={character.id} style={{ "--character-color": character.color }}>
+              <article
+                className={`production-link-row${draggingFolderId === character.id ? " dragging" : ""}${dragOverFolderId === character.id ? " drag-over" : ""}`}
+                data-recording-folder-id={character.id}
+                key={character.id}
+                style={{ "--character-color": character.color }}
+                onDragOver={(event) => hoverFolder(event, character.id)}
+                onDrop={(event) => finishFolderDrag(event, character.id)}
+              >
                 <header className="production-link-character">
                   <i />
                   <div><h3>{character.name}</h3><span>{assignedMember?.actorName || "担当声優未設定"}</span></div>
@@ -768,6 +825,21 @@ function LinksView({ project, updateProject, canEditScript = true }) {
                     onChange={(value) => patchCharacterLink(character.id, "recordingFolderUrl", value)}
                   />
                 </div>
+                {canEditScript && (
+                  <div className="recording-folder-reorder-actions" aria-label={`${character.name}の並び替え`}>
+                    <button
+                      type="button"
+                      className="icon-button recording-folder-drag-handle"
+                      draggable
+                      title="ドラッグして並べ替え"
+                      aria-label={`${character.name}をドラッグして並べ替え`}
+                      onDragStart={(event) => beginFolderDrag(event, character.id)}
+                      onDragEnd={(event) => finishFolderDrag(event)}
+                    ><GripVertical size={17} /></button>
+                    <button type="button" className="icon-button" title="一つ上へ" aria-label={`${character.name}を一つ上へ`} disabled={characterIndex === 0} onClick={() => moveRecordingFolder(character.id, orderedLinkedCharacters[characterIndex - 1]?.id)}><ArrowUp size={16} /></button>
+                    <button type="button" className="icon-button" title="一つ下へ" aria-label={`${character.name}を一つ下へ`} disabled={characterIndex === orderedLinkedCharacters.length - 1} onClick={() => moveRecordingFolder(character.id, orderedLinkedCharacters[characterIndex + 1]?.id)}><ArrowDown size={16} /></button>
+                  </div>
+                )}
               </article>
             );
           })}
@@ -780,7 +852,6 @@ function LinksView({ project, updateProject, canEditScript = true }) {
           <div><Link size={20} /><div><h3>共有URL</h3><p>作品全体で共有する連絡先や資料へのリンクです。</p></div></div>
           {canEditScript && <button type="button" className="primary" onClick={addSharedLink}><Plus size={16} />共有URL</button>}
         </header>
-        {message && <p className="production-inline-message">{message}</p>}
         <div className="production-shared-url-list">
           {(project.sharedLinks || []).map((link) => {
             const canOpen = isWebUrl(link.url);

@@ -283,6 +283,30 @@ function vcs_extract_script_structure(array $data): array
         if (!is_array($project)) {
             continue;
         }
+        $character_ids = [];
+        $project_characters = is_array($project['characters'] ?? null) ? $project['characters'] : [];
+        foreach ($project_characters as $character) {
+            if (!is_array($character)) {
+                continue;
+            }
+            $character_id = (string) ($character['id'] ?? '');
+            if ('' !== $character_id && !in_array($character_id, $character_ids, true)) {
+                $character_ids[] = $character_id;
+            }
+        }
+        $recording_folder_order = [];
+        $configured_folder_order = is_array($project['recordingFolderOrder'] ?? null) ? $project['recordingFolderOrder'] : [];
+        foreach ($configured_folder_order as $character_id) {
+            $character_id = (string) $character_id;
+            if (in_array($character_id, $character_ids, true) && !in_array($character_id, $recording_folder_order, true)) {
+                $recording_folder_order[] = $character_id;
+            }
+        }
+        foreach ($character_ids as $character_id) {
+            if (!in_array($character_id, $recording_folder_order, true)) {
+                $recording_folder_order[] = $character_id;
+            }
+        }
         $lines = [];
         foreach (($project['lines'] ?? []) as $line) {
             if (!is_array($line)) {
@@ -313,6 +337,7 @@ function vcs_extract_script_structure(array $data): array
             'releaseDate' => (string) ($project['releaseDate'] ?? ''),
             'editingStatus' => (string) ($project['editingStatus'] ?? ''),
             'characters' => vcs_canonicalize_value($project['characters'] ?? []),
+            'recordingFolderOrder' => $recording_folder_order,
             'castMembers' => vcs_canonicalize_value($project['castMembers'] ?? []),
             'materials' => vcs_canonicalize_value($project['materials'] ?? []),
             'scheduleItems' => vcs_canonicalize_value($project['scheduleItems'] ?? []),

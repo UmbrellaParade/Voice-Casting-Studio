@@ -1335,12 +1335,22 @@ h1 {
 
 .production-link-row {
   display: grid;
-  grid-template-columns: minmax(150px, .38fr) minmax(0, 1fr);
+  grid-template-columns: minmax(150px, .38fr) minmax(0, 1fr) auto;
   overflow: hidden;
   border: 1px solid #d8cec1;
   border-left: 5px solid var(--character-color);
   border-radius: 8px;
   background: #fff;
+  transition: border-color .15s ease, box-shadow .15s ease, opacity .15s ease;
+}
+
+.production-link-row.dragging {
+  opacity: .55;
+}
+
+.production-link-row.drag-over {
+  border-color: #168b9a;
+  box-shadow: 0 0 0 2px rgba(22, 139, 154, .16);
 }
 
 .production-link-character {
@@ -1385,6 +1395,23 @@ h1 {
   display: grid;
   min-width: 0;
   padding: 4px 14px;
+}
+
+.recording-folder-reorder-actions {
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  padding: 10px 8px;
+  border-left: 1px solid #e6ddd2;
+  background: #faf8f5;
+}
+
+.recording-folder-drag-handle {
+  cursor: grab;
+}
+
+.recording-folder-drag-handle:active {
+  cursor: grabbing;
 }
 
 .production-link-field {
@@ -1967,7 +1994,7 @@ h1 {
   }
 
   .production-link-row {
-    grid-template-columns: minmax(135px, .32fr) minmax(0, 1fr);
+    grid-template-columns: minmax(135px, .32fr) minmax(0, 1fr) auto;
   }
 
   .cast-roster-list > div {
@@ -2068,6 +2095,13 @@ h1 {
   .production-link-character {
     border-right: 0;
     border-bottom: 1px solid #e6ddd2;
+  }
+
+  .recording-folder-reorder-actions {
+    grid-template-columns: repeat(3, 34px);
+    justify-content: end;
+    border-top: 1px solid #e6ddd2;
+    border-left: 0;
   }
 
   .production-link-field {
@@ -3746,6 +3780,38 @@ h1 {
   font-weight: 900;
 }
 
+.line-status-selects .line-recorded-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid #cfc4b5;
+  border-radius: 5px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.line-status-selects .line-recorded-check.checked {
+  border-color: #70ae96;
+  background: #e8f6ef;
+  color: #205e45;
+}
+
+.line-recorded-check input {
+  width: 17px;
+  height: 17px;
+  min-height: auto;
+  margin: 0;
+  accent-color: #2f8b67;
+}
+
+.line-recorded-check span {
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .line-status-selects select {
   min-height: 32px;
   padding: 4px 24px 4px 7px;
@@ -5386,6 +5452,10 @@ h1 {
 
   .line-status-selects label {
     grid-template-columns: 1fr;
+  }
+
+  .line-status-selects .line-recorded-check {
+    justify-content: flex-start;
   }
 
   .line-status-selects select {

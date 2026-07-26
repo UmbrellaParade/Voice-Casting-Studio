@@ -26,6 +26,13 @@ export const reorderProductionCharacters = (characters = [], sourceId = "", targ
 export const reorderProductionSharedLinks = (links = [], sourceId = "", targetId = "") =>
   reorderProductionItems(links, sourceId, targetId);
 
+export const reorderProductionRecordingFolders = (characterIds = [], sourceId = "", targetId = "") =>
+  reorderProductionItems(
+    (Array.isArray(characterIds) ? characterIds : []).map((id) => ({ id })),
+    sourceId,
+    targetId
+  ).map((item) => item.id);
+
 export const parseManualChapterBody = (bodyText = "", chapterTitle = "") => {
   const chapter = String(chapterTitle || "").trim();
   const rows = [];
@@ -403,6 +410,7 @@ export const createRecordingProject = ({ episodeId = "", title = "新しい収�
   scheduleItems: [],
   announcements: [],
   sharedLinks: [],
+  recordingFolderOrder: [],
   sharedAt: "",
   updatedAt: new Date().toISOString()
 });
@@ -739,6 +747,15 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
 
   characters = ensureUniqueCharacterColors(characters);
   const characterIds = new Set(characters.map((character) => character.id));
+  const configuredRecordingFolderOrder = [...new Set(
+    (Array.isArray(project.recordingFolderOrder) ? project.recordingFolderOrder : [])
+      .map((id) => characterIdAliases.get(id) || String(id || ""))
+      .filter((id) => characterIds.has(id))
+  )];
+  const recordingFolderOrder = [
+    ...configuredRecordingFolderOrder,
+    ...characters.map((character) => character.id).filter((id) => !configuredRecordingFolderOrder.includes(id))
+  ];
   const characterById = new Map(characters.map((character) => [character.id, character]));
   const characterByName = new Map(
     [...characterTargetIdByName.entries()]
@@ -844,6 +861,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
     releaseDate: String(project.releaseDate || ""),
     editingStatus: String(project.editingStatus || "未着手"),
     characters,
+    recordingFolderOrder,
     castMembers: (Array.isArray(project.castMembers) ? project.castMembers : []).map((member, memberIndex) => ({
       id: member.id || createLocalId("cast"),
       actorName: member.actorName || `声優さん${memberIndex + 1}`,
