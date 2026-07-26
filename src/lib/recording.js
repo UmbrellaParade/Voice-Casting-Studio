@@ -4,12 +4,35 @@ export const LINE_PERFORMANCE_TYPES = ["通常", "ナレーション", "心の�
 export const PRODUCTION_MATERIAL_CATEGORIES = ["主題歌", "BGM", "SE", "完成音源", "サムネイル"];
 export const PRODUCTION_MATERIAL_STATUSES = ["準備中", "制作中", "確認待ち", "完成"];
 export const PRODUCTION_QUESTION_STATUSES = ["未回答", "回答済み", "解決済み"];
-export const PRODUCTION_SCHEDULE_TYPES = ["収録締切", "公開予定", "編集", "収録", "その他"];
+export const PRODUCTION_SCHEDULE_TYPES = ["収録締切", "リテイク締切", "確認日", "公開予定", "編集", "収録", "打ち合わせ", "その他"];
 export const PRODUCTION_SCHEDULE_STATUSES = ["予定", "進行中", "完了", "延期"];
 export const SHARED_LINK_COLORS = [
   "#168b9a", "#b04f74", "#6f5aa7", "#b36b1f",
   "#397c50", "#4b6fa9", "#9b4b45", "#7c5c3d"
 ];
+
+const normalizeScheduleTime = (value = "") => {
+  const time = String(value || "").trim().slice(0, 5);
+  return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time) ? time : "";
+};
+
+const normalizeScheduleDateTime = (item = {}) => {
+  const rawDate = String(item.date || item.deadlineDate || item.dateTime || "").trim();
+  const dateTimeMatch = rawDate.match(/^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}))?/);
+  return {
+    date: dateTimeMatch?.[1] || rawDate,
+    time: normalizeScheduleTime(item.time || item.deadlineTime || dateTimeMatch?.[2])
+  };
+};
+
+export const sortProductionScheduleItems = (items = []) => [...(Array.isArray(items) ? items : [])]
+  .sort((first, second) => {
+    const firstDate = String(first?.date || "9999-12-31");
+    const secondDate = String(second?.date || "9999-12-31");
+    const dateOrder = firstDate.localeCompare(secondDate);
+    if (dateOrder) return dateOrder;
+    return String(first?.time || "00:00").localeCompare(String(second?.time || "00:00"));
+  });
 
 export const canResolveProductionQuestion = (question = {}, userId) => {
   const questionUserId = Number(question.wpUserId);
@@ -527,7 +550,9 @@ export const createRecordingProject = ({ episodeId = "", title = "新しい収�
   scriptSnapshots: [],
   status: "準備中",
   recordingDeadline: "",
+  recordingDeadlineTime: "",
   releaseDate: "",
+  releaseTime: "",
   editingStatus: "未着手",
   characters: [],
   castMembers: [],
@@ -700,7 +725,9 @@ export const sampleRecordingProjects = [
       }
     ],
     recordingDeadline: "2026-08-31",
+    recordingDeadlineTime: "18:00",
     releaseDate: "2026-10-01",
+    releaseTime: "20:00",
     editingStatus: "脚本・配役調整中",
     materials: [
       {
@@ -745,6 +772,7 @@ export const sampleRecordingProjects = [
         type: "収録締切",
         title: "第一章の初回収録",
         date: "2026-08-15",
+        time: "18:00",
         status: "予定",
         notes: "担当セリフを一度提出してください。"
       },
@@ -753,6 +781,7 @@ export const sampleRecordingProjects = [
         type: "編集",
         title: "音声編集・リテイク確認",
         date: "2026-09-15",
+        time: "",
         status: "予定",
         notes: "収録済み音源をまとめて確認します。"
       }
@@ -1007,7 +1036,9 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
     scriptSnapshots: compactScriptSnapshots(project.scriptSnapshots),
     status: project.status || "準備中",
     recordingDeadline: String(project.recordingDeadline || ""),
+    recordingDeadlineTime: normalizeScheduleTime(project.recordingDeadlineTime || project.deadlineTime),
     releaseDate: String(project.releaseDate || ""),
+    releaseTime: normalizeScheduleTime(project.releaseTime),
     editingStatus: String(project.editingStatus || "未着手"),
     characters,
     recordingFolderOrder,
@@ -1051,14 +1082,18 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       createdAt: String(question.createdAt || new Date().toISOString()),
       updatedAt: String(question.updatedAt || question.createdAt || "")
     })),
-    scheduleItems: (Array.isArray(project.scheduleItems) ? project.scheduleItems : []).map((item, itemIndex) => ({
-      id: item.id || createLocalId("schedule"),
-      type: PRODUCTION_SCHEDULE_TYPES.includes(item.type) ? item.type : "その他",
-      title: String(item.title || `予定${itemIndex + 1}`),
-      date: String(item.date || ""),
-      status: PRODUCTION_SCHEDULE_STATUSES.includes(item.status) ? item.status : "予定",
-      notes: String(item.notes || "")
-    })),
+    scheduleItems: (Array.isArray(project.scheduleItems) ? project.scheduleItems : []).map((item, itemIndex) => {
+      const scheduleDateTime = normalizeScheduleDateTime(item);
+      return {
+        id: item.id || createLocalId("schedule"),
+        type: PRODUCTION_SCHEDULE_TYPES.includes(item.type) ? item.type : "その他",
+        title: String(item.title || `予定${itemIndex + 1}`),
+        date: scheduleDateTime.date,
+        time: scheduleDateTime.time,
+        status: PRODUCTION_SCHEDULE_STATUSES.includes(item.status) ? item.status : "予定",
+        notes: String(item.notes || "")
+      };
+    }),
     announcements: (Array.isArray(project.announcements) ? project.announcements : []).map((announcement, announcementIndex) => ({
       id: announcement.id || createLocalId("announcement"),
       title: String(announcement.title || `お知らせ${announcementIndex + 1}`),

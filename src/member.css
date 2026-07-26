@@ -678,7 +678,7 @@
 
 .member-schedule-list > article {
   display: grid;
-  grid-template-columns: 110px minmax(0, 1fr);
+  grid-template-columns: 150px minmax(0, 1fr);
   gap: 12px;
   padding: 13px;
   border: 1px solid #d8cec1;

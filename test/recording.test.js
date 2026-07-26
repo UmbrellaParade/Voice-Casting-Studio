@@ -26,7 +26,8 @@ import {
   reorderProductionSharedLinks,
   renameProductionCharacter,
   repairScriptHierarchy,
-  restoreScriptSnapshot
+  restoreScriptSnapshot,
+  sortProductionScheduleItems
 } from "../src/lib/recording.js";
 
 test("only lets the questioner resolve an answered question", () => {
@@ -47,6 +48,26 @@ test("merges legacy character backgrounds and keeps actor social links", () => {
   assert.equal(project.characters[0].profile, "人物像\n\nこれまでの経歴");
   assert.equal(project.characters[0].background, "");
   assert.equal(project.castMembers[0].socialUrl, "https://x.com/example");
+});
+
+test("keeps detailed production deadlines in date and time order", () => {
+  const project = normalizeRecordingProject({
+    recordingDeadline: "2026-08-31",
+    recordingDeadlineTime: "18:00",
+    releaseDate: "2026-10-01",
+    releaseTime: "20:00",
+    scheduleItems: [
+      { id: "evening", title: "夕方確認", date: "2026-08-20", time: "18:30" },
+      { id: "morning", title: "朝確認", date: "2026-08-20T09:15:00" }
+    ]
+  });
+
+  assert.equal(project.recordingDeadlineTime, "18:00");
+  assert.equal(project.releaseTime, "20:00");
+  assert.deepEqual(sortProductionScheduleItems(project.scheduleItems).map((item) => [item.id, item.date, item.time]), [
+    ["morning", "2026-08-20", "09:15"],
+    ["evening", "2026-08-20", "18:30"]
+  ]);
 });
 
 test("builds an embeddable Google Drive audio preview URL", () => {

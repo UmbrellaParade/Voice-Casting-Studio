@@ -55,7 +55,8 @@ import {
   reorderProductionCharacters,
   reorderProductionMaterials,
   reorderProductionRecordingFolders,
-  reorderProductionSharedLinks
+  reorderProductionSharedLinks,
+  sortProductionScheduleItems
 } from "../lib/recording.js";
 import { getWordPressRuntime, uploadWordPressImage } from "../lib/wordpress.js";
 import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
@@ -75,6 +76,17 @@ const formatDate = (value, withTime = false) => {
 };
 
 const toDateInputValue = (value) => String(value || "").slice(0, 10);
+
+const createScheduleItem = (overrides = {}) => ({
+  id: newId("schedule"),
+  type: "収録締切",
+  title: "新しい期日",
+  date: "",
+  time: "",
+  status: "予定",
+  notes: "",
+  ...overrides
+});
 
 const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -185,11 +197,17 @@ function ProductionKeyDates({ project, updateProject, canEditScript = true }) {
     <div className="production-key-dates">
       <label>
         <span>作品全体の収録締切</span>
-        <input type="date" value={project.recordingDeadline} disabled={!canEditScript} onChange={(event) => updateProject({ recordingDeadline: event.target.value })} />
+        <div className="production-key-date-time">
+          <input type="date" aria-label="作品全体の収録締切日" value={project.recordingDeadline} disabled={!canEditScript} onChange={(event) => updateProject({ recordingDeadline: event.target.value })} />
+          <input type="time" aria-label="作品全体の収録締切時刻" value={project.recordingDeadlineTime || ""} disabled={!canEditScript} onChange={(event) => updateProject({ recordingDeadlineTime: event.target.value })} />
+        </div>
       </label>
       <label>
         <span>公開予定日</span>
-        <input type="date" value={project.releaseDate} disabled={!canEditScript} onChange={(event) => updateProject({ releaseDate: event.target.value })} />
+        <div className="production-key-date-time">
+          <input type="date" aria-label="公開予定日" value={project.releaseDate} disabled={!canEditScript} onChange={(event) => updateProject({ releaseDate: event.target.value })} />
+          <input type="time" aria-label="公開予定時刻" value={project.releaseTime || ""} disabled={!canEditScript} onChange={(event) => updateProject({ releaseTime: event.target.value })} />
+        </div>
       </label>
       <label>
         <span>現在の編集状況</span>
@@ -201,26 +219,68 @@ function ProductionKeyDates({ project, updateProject, canEditScript = true }) {
   );
 }
 
+function ScheduleItemsEditor({ project, updateProject, canEditScript = true, compact = false }) {
+  const scheduleItems = [
+    ...project.scheduleItems.filter((item) => !item.date),
+    ...sortProductionScheduleItems(project.scheduleItems.filter((item) => item.date))
+  ];
+  const patchScheduleItem = (itemId, patch) => updateProject((current) => ({
+    ...current,
+    scheduleItems: current.scheduleItems.map((item) => item.id === itemId ? { ...item, ...patch } : item)
+  }));
+  const removeScheduleItem = (itemId) => {
+    if (!confirm("この期日を削除しますか？")) return;
+    updateProject((current) => ({
+      ...current,
+      scheduleItems: current.scheduleItems.filter((item) => item.id !== itemId)
+    }));
+  };
+
+  return (
+    <div className={`schedule-editor-list${compact ? " home-deadline-editor-list" : ""}`}>
+      {scheduleItems.map((item) => (
+        <article key={item.id}>
+          <label><span>日付</span><input type="date" value={item.date} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { date: event.target.value })} /></label>
+          <label><span>時刻（任意）</span><input type="time" value={item.time || ""} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { time: event.target.value })} /></label>
+          <label><span>種類</span><select value={item.type} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { type: event.target.value })}>{PRODUCTION_SCHEDULE_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
+          <label className="schedule-title-field"><span>期日名</span><input value={item.title} readOnly={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { title: event.target.value })} /></label>
+          <label><span>状態</span><select value={item.status} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { status: event.target.value })}>{PRODUCTION_SCHEDULE_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label>
+          <label className="wide"><span>共有メモ</span><textarea value={item.notes} readOnly={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { notes: event.target.value })} /></label>
+          {canEditScript && <button type="button" className="icon-button danger-icon" title="期日を削除" aria-label={`${item.title || "期日"}を削除`} onClick={() => removeScheduleItem(item.id)}><Trash2 size={16} /></button>}
+        </article>
+      ))}
+      {!project.scheduleItems.length && <p className="production-list-empty">追加の期日はまだ登録されていません。</p>}
+    </div>
+  );
+}
+
 function ProductionHome({ project, setActive, updateProject, canEditScript }) {
   const progress = getRecordingProgress(project);
   const unreviewedLines = project.lines.filter((line) =>
     line.kind !== "direction" && line.actorStatus !== "未収録" && ["未確認", "確認中"].includes(line.reviewStatus)
   );
   const unansweredQuestions = project.questions.filter((question) => question.status === "未回答");
-  const schedule = [
-    ...(project.recordingDeadline ? [{ id: "recording-deadline", type: "収録締切", title: "作品全体の収録締切", date: project.recordingDeadline, status: "予定" }] : []),
-    ...(project.releaseDate ? [{ id: "release-date", type: "公開予定", title: "作品の公開予定", date: project.releaseDate, status: "予定" }] : []),
+  const schedule = sortProductionScheduleItems([
+    ...(project.recordingDeadline ? [{ id: "recording-deadline", type: "収録締切", title: "作品全体の収録締切", date: project.recordingDeadline, time: project.recordingDeadlineTime || "", status: "予定" }] : []),
+    ...(project.releaseDate ? [{ id: "release-date", type: "公開予定", title: "作品の公開予定", date: project.releaseDate, time: project.releaseTime || "", status: "予定" }] : []),
     ...project.scheduleItems
-  ].filter((item) => item.date && item.status !== "完了").sort((a, b) => a.date.localeCompare(b.date));
+  ].filter((item) => item.date && item.status !== "完了"));
 
   return (
     <div className="production-page-stack">
       <section className="production-home-key-dates">
         <header>
-          <div><CalendarClock size={19} /><h3>締切・制作状況</h3></div>
-          <button type="button" onClick={() => setActive("schedule")}>予定の詳細</button>
+          <div><CalendarClock size={19} /><h3>締切・期日・制作状況</h3></div>
+          <div className="production-home-key-date-actions">
+            <button type="button" className="key-date-detail-button" onClick={() => setActive("schedule")}>予定の詳細</button>
+            {canEditScript && <button type="button" className="secondary" onClick={() => updateProject((current) => ({ ...current, scheduleItems: [...current.scheduleItems, createScheduleItem()] }))}><Plus size={16} />期日を追加</button>}
+          </div>
         </header>
         <ProductionKeyDates project={project} updateProject={updateProject} canEditScript={canEditScript} />
+        <div className="production-home-deadlines">
+          <div className="production-home-deadlines-heading"><span>追加した期日</span><strong>{project.scheduleItems.length}件</strong></div>
+          <ScheduleItemsEditor project={project} updateProject={updateProject} canEditScript={canEditScript} compact />
+        </div>
       </section>
 
       <div className="production-metrics-grid">
@@ -275,8 +335,8 @@ function ProductionHome({ project, setActive, updateProject, canEditScript }) {
           <div className="production-dashboard-list compact">
             {schedule.slice(0, 5).map((item) => (
               <article className="production-schedule-mini" key={item.id}>
-                <time dateTime={item.date}><strong>{new Date(`${item.date}T00:00:00`).getDate()}</strong><span>{new Date(`${item.date}T00:00:00`).toLocaleDateString("ja-JP", { month: "short" })}</span></time>
-                <div><b>{item.title}</b><span>{item.type} / {item.status}</span></div>
+                <time dateTime={`${item.date}${item.time ? `T${item.time}` : ""}`}><strong>{new Date(`${item.date}T00:00:00`).getDate()}</strong><span>{new Date(`${item.date}T00:00:00`).toLocaleDateString("ja-JP", { month: "short" })}</span></time>
+                <div><b>{item.title}</b><span>{item.type} / {item.status}{item.time ? ` / ${item.time}` : ""}</span></div>
               </article>
             ))}
             {!schedule.length && <p className="production-list-empty">予定はまだ登録されていません。</p>}
@@ -1234,10 +1294,6 @@ function QuestionsView({ project, updateProject }) {
 }
 
 function ScheduleView({ project, updateProject, canEditScript = true }) {
-  const patchScheduleItem = (itemId, patch) => updateProject((current) => ({
-    ...current,
-    scheduleItems: current.scheduleItems.map((item) => item.id === itemId ? { ...item, ...patch } : item)
-  }));
   const patchAnnouncement = (announcementId, patch) => updateProject((current) => ({
     ...current,
     announcements: current.announcements.map((item) => item.id === announcementId ? { ...item, ...patch } : item)
@@ -1248,20 +1304,8 @@ function ScheduleView({ project, updateProject, canEditScript = true }) {
       <ProductionKeyDates project={project} updateProject={updateProject} canEditScript={canEditScript} />
 
       <section className="schedule-section">
-        <header><div><CalendarClock size={20} /><div><h3>制作予定</h3><p>収録、編集、公開までの予定を全員で確認します。</p></div></div>{canEditScript && <button type="button" className="primary" onClick={() => updateProject((current) => ({ ...current, scheduleItems: [...current.scheduleItems, { id: newId("schedule"), type: "収録", title: "新しい予定", date: "", status: "予定", notes: "" }] }))}><Plus size={16} />予定</button>}</header>
-        <div className="schedule-editor-list">
-          {[...project.scheduleItems].sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999")).map((item) => (
-            <article key={item.id}>
-              <label><span>日付</span><input type="date" value={item.date} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { date: event.target.value })} /></label>
-              <label><span>種類</span><select value={item.type} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { type: event.target.value })}>{PRODUCTION_SCHEDULE_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
-              <label className="schedule-title-field"><span>予定名</span><input value={item.title} readOnly={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { title: event.target.value })} /></label>
-              <label><span>状態</span><select value={item.status} disabled={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { status: event.target.value })}>{PRODUCTION_SCHEDULE_STATUSES.map((status) => <option key={status}>{status}</option>)}</select></label>
-              <label className="wide"><span>共有メモ</span><textarea value={item.notes} readOnly={!canEditScript} onChange={(event) => patchScheduleItem(item.id, { notes: event.target.value })} /></label>
-              {canEditScript && <button type="button" className="icon-button danger-icon" title="予定を削除" onClick={() => updateProject((current) => ({ ...current, scheduleItems: current.scheduleItems.filter((currentItem) => currentItem.id !== item.id) }))}><Trash2 size={16} /></button>}
-            </article>
-          ))}
-          {!project.scheduleItems.length && <p className="production-list-empty">制作予定はまだ登録されていません。</p>}
-        </div>
+        <header><div><CalendarClock size={20} /><div><h3>制作予定・期日</h3><p>収録、編集、公開までの予定を全員で確認します。</p></div></div>{canEditScript && <button type="button" className="primary" onClick={() => updateProject((current) => ({ ...current, scheduleItems: [...current.scheduleItems, createScheduleItem()] }))}><Plus size={16} />期日を追加</button>}</header>
+        <ScheduleItemsEditor project={project} updateProject={updateProject} canEditScript={canEditScript} />
       </section>
 
       <section className="schedule-section announcements-editor">
@@ -1286,12 +1330,12 @@ function ScheduleView({ project, updateProject, canEditScript = true }) {
 }
 
 const PAGE_COPY = {
-  home: ["ホーム", "収録、確認、質問、締切を作品単位でまとめて確認します。"],
+  home: ["ホーム", "収録、確認、質問、締切と追加した期日を作品単位でまとめて確認します。"],
   characters: ["キャラクター", "人物設定、担当声優、担当者SNSと収録フォルダーを管理します。"],
   links: ["共有リンク", "キャラクター別の収録フォルダーと作品全体の共有URLを管理します。"],
   materials: ["素材", "音源とサムネイルを種類別に登録し、その場で確認します。"],
   questions: ["質問", "作品やセリフに紐づく質問と回答状況を共有します。"],
-  schedule: ["予定", "収録締切、公開予定、編集状況と全体連絡を管理します。"]
+  schedule: ["予定", "収録締切、追加の期日、公開予定、編集状況と全体連絡を管理します。"]
 };
 
 export function ProductionWorkspace({

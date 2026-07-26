@@ -20,7 +20,7 @@ import {
   Users
 } from "lucide-react";
 import { getGoogleDriveFileId, isWebUrl, makeDirectAudioDownloadUrl, makeGoogleDrivePreviewUrl, makeImagePreviewUrl } from "../lib/core.js";
-import { canResolveProductionQuestion, getCharacterImageCropStyle, getCharacterName, getCharacterScriptName, getRecordingDisplayProject, getRecordingProgress, parseRubyText, partitionCharactersByScript } from "../lib/recording.js";
+import { canResolveProductionQuestion, getCharacterImageCropStyle, getCharacterName, getCharacterScriptName, getRecordingDisplayProject, getRecordingProgress, parseRubyText, partitionCharactersByScript, sortProductionScheduleItems } from "../lib/recording.js";
 import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
 import { ConceptView } from "./ConceptView.jsx";
 import { ManualView } from "./ManualView.jsx";
@@ -43,6 +43,12 @@ const formatDate = (value) => {
   if (!value) return "未設定";
   const date = new Date(value.length === 10 ? `${value}T00:00:00` : value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("ja-JP");
+};
+
+const formatScheduleDateTime = (item = {}) => {
+  if (!item.date) return "未設定";
+  const date = formatDate(item.date);
+  return item.time ? `${date} ${item.time}` : date;
 };
 
 const makeTint = (color = "#5f6d7a", alpha = 0.09) => {
@@ -117,8 +123,8 @@ function MemberProjectBar({ projects, project, setProjectId, runtime, connection
 function MemberKeyDates({ project }) {
   return (
     <section className="production-key-dates" aria-label="締切と制作状況">
-      <div><span>収録締切</span><strong>{formatDate(project.recordingDeadline)}</strong></div>
-      <div><span>公開予定</span><strong>{formatDate(project.releaseDate)}</strong></div>
+      <div><span>収録締切</span><strong>{formatScheduleDateTime({ date: project.recordingDeadline, time: project.recordingDeadlineTime })}</strong></div>
+      <div><span>公開予定</span><strong>{formatScheduleDateTime({ date: project.releaseDate, time: project.releaseTime })}</strong></div>
       <div><span>編集状況</span><strong>{project.editingStatus || "未設定"}</strong></div>
     </section>
   );
@@ -130,7 +136,7 @@ function MemberHome({ project, assignedCharacterIds, setActive }) {
   const unreviewed = assignedLines.filter((line) => line.actorStatus !== "未収録" && ["未確認", "確認中"].includes(line.reviewStatus));
   const retakes = assignedLines.filter((line) => line.reviewStatus === "リテイク");
   const questions = project.questions.filter((question) => question.status !== "解決済み" && (!question.characterId || assignedCharacterIds.has(question.characterId)));
-  const schedule = project.scheduleItems.filter((item) => item.status !== "完了").sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999"));
+  const schedule = sortProductionScheduleItems(project.scheduleItems.filter((item) => item.status !== "完了"));
   return (
     <div className="production-page-stack member-home">
       <MemberKeyDates project={project} />
@@ -142,7 +148,7 @@ function MemberHome({ project, assignedCharacterIds, setActive }) {
       </div>
       <div className="production-home-grid">
         <section className="panel production-dashboard-section announcements"><header><div><Megaphone size={19} /><h3>お知らせ</h3></div></header><div className="production-dashboard-list compact">{project.announcements.map((item) => <article className={item.priority === "重要" ? "important" : ""} key={item.id}><div><b>{item.title}</b><span>{formatDate(item.publishedAt)}</span></div><p>{item.body}</p></article>)}{!project.announcements.length && <p className="production-list-empty">お知らせはありません。</p>}</div></section>
-        <section className="panel production-dashboard-section"><header><div><CalendarDays size={19} /><h3>直近の予定</h3></div></header><div className="production-dashboard-list compact">{schedule.slice(0, 6).map((item) => <article key={item.id}><div><b>{item.title}</b><span>{formatDate(item.date)}</span></div><p>{item.type} / {item.status}{item.notes ? ` / ${item.notes}` : ""}</p></article>)}{!schedule.length && <p className="production-list-empty">予定はありません。</p>}</div></section>
+        <section className="panel production-dashboard-section"><header><div><CalendarDays size={19} /><h3>直近の予定</h3></div></header><div className="production-dashboard-list compact">{schedule.slice(0, 6).map((item) => <article key={item.id}><div><b>{item.title}</b><span>{formatScheduleDateTime(item)}</span></div><p>{item.type} / {item.status}{item.notes ? ` / ${item.notes}` : ""}</p></article>)}{!schedule.length && <p className="production-list-empty">予定はありません。</p>}</div></section>
       </div>
     </div>
   );
@@ -398,7 +404,7 @@ function MemberQuestions({ project, assignedCharacterIds, currentUser, onCreateQ
 }
 
 function MemberSchedule({ project }) {
-  return <div className="production-page-stack"><MemberKeyDates project={project} /><div className="member-schedule-list">{[...project.scheduleItems].sort((a, b) => (a.date || "9999").localeCompare(b.date || "9999")).map((item) => <article key={item.id}><time>{formatDate(item.date)}</time><div><span>{item.type} / {item.status}</span><h3>{item.title}</h3>{item.notes && <p>{item.notes}</p>}</div></article>)}</div></div>;
+  return <div className="production-page-stack"><MemberKeyDates project={project} /><div className="member-schedule-list">{sortProductionScheduleItems(project.scheduleItems).map((item) => <article key={item.id}><time>{formatScheduleDateTime(item)}</time><div><span>{item.type} / {item.status}</span><h3>{item.title}</h3>{item.notes && <p>{item.notes}</p>}</div></article>)}</div></div>;
 }
 
 export function WordPressMemberPortal({ logoSrc, data, runtime, appTitle = "Voice Cast Studio", connectionState, onRefresh, onUpdateLine, onCreateQuestion, onResolveQuestion }) {
