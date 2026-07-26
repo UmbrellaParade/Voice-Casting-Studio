@@ -63,7 +63,112 @@ export const parseManualChapterBody = (bodyText = "", chapterTitle = "") => {
 
 const RUBY_SOURCE = "(?:[|｜]([^《\\n]+)《([^》\\n]+)》|\\{([^|{}\\n]+)\\|([^{}\\n]+)\\})";
 
-const CHARACTER_COLORS = ["#168b9a", "#d65285", "#7a63ad", "#b57024", "#2f7d4a", "#5f6d7a"];
+const CHARACTER_COLORS = [
+  "#168b9a", "#d65285", "#7a63ad", "#b57024", "#2f7d4a", "#5f6d7a",
+  "#c63f3f", "#2870c7", "#a45714", "#0f766e", "#a23b72", "#6b5fbd",
+  "#477a1e", "#b23a78", "#3b6e8f", "#8a5d1d", "#596f2a", "#bb4d00",
+  "#006d77", "#8b4f9f", "#2d6a4f", "#9d4edd", "#c2415c", "#4c6faf",
+  "#7f5539", "#0081a7", "#6a994e", "#bc4749", "#5a189a", "#3d5a80",
+  "#c05621", "#52796f"
+];
+
+const CHARACTER_ALIAS_TARGETS = new Map([
+  ["ヴェルイヤモニ", "ヴェル"],
+  ["ヴェルのイヤモニ", "ヴェル"],
+  ["ヴェルイヤモニ越し", "ヴェル"],
+  ["ヴェルイヤモニ越しの声", "ヴェル"],
+  ["ヴェルイヤーモニター", "ヴェル"],
+  ["ヴェルイヤーモニター越し", "ヴェル"],
+  ["ヴェル心の声", "ヴェル"],
+  ["ヴェルの心の声", "ヴェル"],
+  ["アマモリナレーター", "アマモリ"],
+  ["アマモリのナレーター", "アマモリ"],
+  ["アマモリナレーション", "アマモリ"],
+  ["アマモリのナレーション", "アマモリ"],
+  ["アマモリ語り", "アマモリ"],
+  ["アマモリの語り", "アマモリ"]
+]);
+
+const CHARACTER_ALIAS_SUFFIXES = [
+  "のイヤモニ越しの声", "イヤモニ越しの声", "のイヤーモニター越し", "イヤーモニター越し",
+  "のイヤモニ越し", "イヤモニ越し", "のイヤーモニター", "イヤーモニター",
+  "のイヤモニ", "イヤモニ", "の心の声", "心の声",
+  "のナレーター", "ナレーター", "のナレーション", "ナレーション", "の語り", "語り"
+];
+
+const normalizeCharacterAliasToken = (value = "") => String(value || "")
+  .normalize("NFKC")
+  .replace(/\s+/g, "")
+  .replace(/[()[\]【】〈〉《》「」『』・･／/\\:：_\-―—–]/g, "")
+  .toLocaleLowerCase("ja");
+
+export const getCanonicalCharacterName = (value = "", availableNames = []) => {
+  const name = String(value || "").normalize("NFKC").trim();
+  const token = normalizeCharacterAliasToken(name);
+  const availableByToken = new Map(
+    (availableNames || [])
+      .map((availableName) => [normalizeCharacterAliasToken(availableName), String(availableName || "").normalize("NFKC").trim()])
+      .filter(([availableToken]) => availableToken)
+  );
+  for (const suffix of CHARACTER_ALIAS_SUFFIXES) {
+    const suffixToken = normalizeCharacterAliasToken(suffix);
+    if (!token.endsWith(suffixToken) || token.length <= suffixToken.length) continue;
+    const baseName = availableByToken.get(token.slice(0, -suffixToken.length));
+    if (baseName) return baseName;
+  }
+  const explicitTarget = CHARACTER_ALIAS_TARGETS.get(token);
+  if (explicitTarget) return explicitTarget;
+  if (token === "心の声") {
+    const velName = availableByToken.get(normalizeCharacterAliasToken("ヴェル"));
+    if (velName) return velName;
+  }
+  return name;
+};
+
+const normalizeCharacterColor = (value = "") => {
+  const color = String(value || "").trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(color) ? color : "";
+};
+
+const hslToHex = (hue, saturation, lightness) => {
+  const s = saturation / 100;
+  const l = lightness / 100;
+  const chroma = (1 - Math.abs((2 * l) - 1)) * s;
+  const segment = ((hue % 360) + 360) % 360 / 60;
+  const x = chroma * (1 - Math.abs((segment % 2) - 1));
+  const channels = segment < 1 ? [chroma, x, 0]
+    : segment < 2 ? [x, chroma, 0]
+      : segment < 3 ? [0, chroma, x]
+        : segment < 4 ? [0, x, chroma]
+          : segment < 5 ? [x, 0, chroma]
+            : [chroma, 0, x];
+  const match = l - (chroma / 2);
+  return `#${channels.map((channel) => Math.round((channel + match) * 255).toString(16).padStart(2, "0")).join("")}`;
+};
+
+const findUnusedCharacterColor = (usedColors, preferredIndex = 0) => {
+  for (let offset = 0; offset < CHARACTER_COLORS.length; offset += 1) {
+    const color = CHARACTER_COLORS[(preferredIndex + offset) % CHARACTER_COLORS.length];
+    if (!usedColors.has(color)) return color;
+  }
+  for (let index = 0; index < 360; index += 1) {
+    const color = hslToHex((index * 137.508) + 11, 62 + ((index % 3) * 5), 38 + ((index % 4) * 4));
+    if (!usedColors.has(color)) return color;
+  }
+  return "#334155";
+};
+
+export const ensureUniqueCharacterColors = (characters = []) => {
+  const usedColors = new Set();
+  return (Array.isArray(characters) ? characters : []).map((character, index) => {
+    const requestedColor = normalizeCharacterColor(character.color);
+    const color = requestedColor && !usedColors.has(requestedColor)
+      ? requestedColor
+      : findUnusedCharacterColor(usedColors, index);
+    usedColors.add(color);
+    return { ...character, color };
+  });
+};
 export const MAX_SCRIPT_SNAPSHOTS = 30;
 
 export const normalizeImagePosition = (value, fallback = 50) => {
@@ -494,7 +599,6 @@ const makeStableScopeId = (prefix, value) => {
 export const normalizeRecordingProject = (project = {}, index = 0) => {
   const rawLines = Array.isArray(project.lines) ? project.lines : [];
   const rawCharacters = Array.isArray(project.characters) ? project.characters : [];
-  const characterByName = new Map();
   const normalizedCharacters = rawCharacters.map((character, characterIndex) => {
     const normalized = {
       id: character.id || createLocalId("character"),
@@ -515,16 +619,53 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       .filter((character) => isScriptStructureLabel(character.name))
       .map((character) => character.id)
   );
-  const characters = normalizedCharacters.filter((character) => !structuralCharacterIds.has(character.id));
-  characters.forEach((character) => characterByName.set(normalizeCharacterNameKey(character.name), character));
+  const characterCandidates = normalizedCharacters.filter((character) => !structuralCharacterIds.has(character.id));
+  const availableCharacterNames = [
+    ...characterCandidates.map((character) => character.name),
+    ...rawLines.map((line) => String(line.character || line.speaker || "").trim()).filter(Boolean)
+  ];
+  const characterGroups = new Map();
+  characterCandidates.forEach((character) => {
+    const canonicalName = getCanonicalCharacterName(character.name, availableCharacterNames);
+    const canonicalKey = normalizeCharacterNameKey(canonicalName);
+    if (!characterGroups.has(canonicalKey)) characterGroups.set(canonicalKey, { canonicalName, canonicalKey, members: [] });
+    characterGroups.get(canonicalKey).members.push(character);
+  });
+
+  const characterIdAliases = new Map();
+  const characterTargetIdByName = new Map();
+  let characters = [...characterGroups.values()].map((group) => {
+    const target = group.members.find((character) => normalizeCharacterNameKey(character.name) === group.canonicalKey) || group.members[0];
+    const firstValue = (key) => group.members.find((character) => String(character[key] || "").trim())?.[key] || "";
+    const imageSource = target.imageUrl ? target : group.members.find((character) => character.imageUrl) || target;
+    const merged = {
+      ...target,
+      name: group.canonicalName,
+      imageUrl: imageSource.imageUrl,
+      imagePositionX: imageSource.imagePositionX,
+      imagePositionY: imageSource.imagePositionY,
+      profile: target.profile || firstValue("profile"),
+      background: target.background || firstValue("background"),
+      recordingFolderUrl: target.recordingFolderUrl || firstValue("recordingFolderUrl"),
+      openChatUrl: target.openChatUrl || firstValue("openChatUrl")
+    };
+    group.targetId = merged.id;
+    characterTargetIdByName.set(group.canonicalKey, merged.id);
+    group.members.forEach((character) => {
+      characterIdAliases.set(character.id, merged.id);
+      characterTargetIdByName.set(normalizeCharacterNameKey(character.name), merged.id);
+    });
+    return merged;
+  });
 
   rawLines.forEach((line) => {
     const speakerName = String(line.character || line.speaker || "").trim();
-    const speakerKey = normalizeCharacterNameKey(speakerName);
-    if (!line.characterId && speakerName && !isScriptStructureLabel(speakerName) && !characterByName.has(speakerKey)) {
+    const canonicalSpeakerName = getCanonicalCharacterName(speakerName, availableCharacterNames);
+    const speakerKey = normalizeCharacterNameKey(canonicalSpeakerName);
+    if (!line.characterId && speakerName && !isScriptStructureLabel(speakerName) && !characterTargetIdByName.has(speakerKey)) {
       const character = {
         id: createLocalId("character"),
-        name: speakerName,
+        name: canonicalSpeakerName,
         color: CHARACTER_COLORS[characters.length % CHARACTER_COLORS.length],
         imageUrl: "",
         imagePositionX: 50,
@@ -535,11 +676,20 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
         openChatUrl: ""
       };
       characters.push(character);
-      characterByName.set(speakerKey, character);
+      characterIdAliases.set(character.id, character.id);
+      characterTargetIdByName.set(speakerKey, character.id);
+      characterTargetIdByName.set(normalizeCharacterNameKey(speakerName), character.id);
     }
   });
 
+  characters = ensureUniqueCharacterColors(characters);
   const characterIds = new Set(characters.map((character) => character.id));
+  const characterById = new Map(characters.map((character) => [character.id, character]));
+  const characterByName = new Map(
+    [...characterTargetIdByName.entries()]
+      .map(([name, characterId]) => [name, characterById.get(characterId)])
+      .filter((entry) => entry[1])
+  );
   const fallbackCharacter = characters[0];
   const chapterByTitle = new Map();
   const chapterIdOwners = new Map();
@@ -548,9 +698,11 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
   const lines = rawLines.map((line, lineIndex) => {
     const speakerName = String(line.character || line.speaker || "").trim();
     const structuralSpeaker = structuralCharacterIds.has(line.characterId) || isScriptStructureLabel(speakerName);
-    const matchedCharacter = characterByName.get(normalizeCharacterNameKey(speakerName));
-    const characterId = !structuralSpeaker && characterIds.has(line.characterId)
-      ? line.characterId
+    const canonicalSpeakerName = getCanonicalCharacterName(speakerName, availableCharacterNames);
+    const matchedCharacter = characterByName.get(normalizeCharacterNameKey(canonicalSpeakerName));
+    const remappedCharacterId = characterIdAliases.get(line.characterId) || line.characterId;
+    const characterId = !structuralSpeaker && characterIds.has(remappedCharacterId)
+      ? remappedCharacterId
       : matchedCharacter?.id || fallbackCharacter?.id || "";
     const rawSceneTitle = String(line.sceneTitle || line.scene || `Scene ${line.sceneNo || 1}`).trim();
     const legacyChapterHeading = !line.chapterTitle && !line.chapter && isChapterHeading(rawSceneTitle);
@@ -620,7 +772,11 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       id: member.id || createLocalId("cast"),
       actorName: member.actorName || `声優さん${memberIndex + 1}`,
       contact: member.contact || "",
-      characterIds: (Array.isArray(member.characterIds) ? member.characterIds : []).filter((id) => characterIds.has(id)),
+      characterIds: [...new Set(
+        (Array.isArray(member.characterIds) ? member.characterIds : [])
+          .map((id) => characterIdAliases.get(id) || id)
+          .filter((id) => characterIds.has(id))
+      )],
       wpUserId: Number.isFinite(Number(member.wpUserId)) ? Number(member.wpUserId) : 0,
       accessKey: member.accessKey || createRecordingAccessKey()
     })),
@@ -639,7 +795,9 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
     questions: (Array.isArray(project.questions) ? project.questions : []).map((question) => ({
       id: question.id || createLocalId("question"),
       lineId: String(question.lineId || ""),
-      characterId: characterIds.has(question.characterId) ? question.characterId : "",
+      characterId: characterIds.has(characterIdAliases.get(question.characterId) || question.characterId)
+        ? characterIdAliases.get(question.characterId) || question.characterId
+        : "",
       authorName: String(question.authorName || "メンバー"),
       wpUserId: Number.isFinite(Number(question.wpUserId)) ? Number(question.wpUserId) : 0,
       body: String(question.body || question.question || ""),
@@ -1218,10 +1376,12 @@ const parseInlineDialogue = (line = "") => {
 export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
   const sourceLines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
   const firstChapterLineIndex = sourceLines.findIndex((line) => isChapterHeading(normalizeDocumentLine(line)));
+  const knownSpeakerNames = (knownSpeakers || [])
+    .map((speaker) => cleanSpeakerLabel(speaker))
+    .filter((speaker) => speaker && !isScriptStructureLabel(speaker));
   const knownSpeakerSet = new Set(
-    (knownSpeakers || [])
-      .map((speaker) => cleanSpeakerLabel(speaker))
-      .filter((speaker) => speaker && !isScriptStructureLabel(speaker))
+    knownSpeakerNames
+      .flatMap((speaker) => [speaker, getCanonicalCharacterName(speaker, knownSpeakerNames)])
       .map(normalizeCharacterNameKey)
   );
   const rows = [];
@@ -1236,10 +1396,13 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
     const normalizedText = normalizeDocumentLine(lineText);
     const normalizedDirection = normalizeDocumentLine(direction);
     if (!normalizedText && !normalizedDirection) return;
+    const cleanedSpeaker = cleanSpeakerLabel(speaker) || "ト書き";
     rows.push({
       chapterTitle: currentChapter,
       sceneTitle: currentScene,
-      speaker: cleanSpeakerLabel(speaker) || "ト書き",
+      speaker: cleanedSpeaker === "ト書き"
+        ? cleanedSpeaker
+        : getCanonicalCharacterName(cleanedSpeaker, knownSpeakerNames),
       text: normalizedText || normalizedDirection,
       direction: normalizedText ? normalizedDirection : "",
       fileName: "",
@@ -1394,9 +1557,9 @@ export const parseGoogleDocsScript = (text = "", knownSpeakers = []) => {
     const nextLine = nextNonEmptyLine(index);
     const standaloneSpeaker = cleanSpeakerLabel(line);
     const nextStartsWithQuote = /^[「『]/.test(nextLine);
-    const isKnownSpeaker = knownSpeakerSet.has(normalizeCharacterNameKey(standaloneSpeaker));
+    const isKnownSpeaker = knownSpeakerSet.has(normalizeCharacterNameKey(getCanonicalCharacterName(standaloneSpeaker, knownSpeakerNames)));
     const nextSpeaker = cleanSpeakerLabel(nextLine);
-    const nextIsKnownSpeaker = knownSpeakerSet.has(normalizeCharacterNameKey(nextSpeaker));
+    const nextIsKnownSpeaker = knownSpeakerSet.has(normalizeCharacterNameKey(getCanonicalCharacterName(nextSpeaker, knownSpeakerNames)));
     const nextIsStructure = isScriptStructureLabel(nextLine);
     const knownSpeakerHasPlainDialogue = isKnownSpeaker && nextLine && !nextIsKnownSpeaker && !nextIsStructure && !parseInlineDialogue(nextLine);
     if (isPlausibleSpeaker(standaloneSpeaker) && (nextStartsWithQuote || knownSpeakerHasPlainDialogue)) {

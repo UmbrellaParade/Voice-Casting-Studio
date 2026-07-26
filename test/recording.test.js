@@ -63,6 +63,68 @@ test("normalizes and preserves character image positions", () => {
   assert.equal(archiveScriptVersion(project).scriptSnapshots[0].characters[0].imagePositionY, 100);
 });
 
+test("assigns a different color whenever character colors overlap", () => {
+  const characters = Array.from({ length: 40 }, (_, index) => ({
+    id: `character_${index}`,
+    name: `登場人物${index + 1}`,
+    color: "#168b9a"
+  }));
+  const project = normalizeRecordingProject({ characters });
+  const colors = project.characters.map((character) => character.color);
+
+  assert.equal(colors[0], "#168b9a");
+  assert.equal(new Set(colors).size, characters.length);
+  assert.deepEqual(normalizeRecordingProject(project).characters.map((character) => character.color), colors);
+});
+
+test("merges alternate performance labels into their canonical characters", () => {
+  const project = normalizeRecordingProject({
+    characters: [
+      { id: "vel_monitor", name: "ヴェルイヤモニ", color: "#168b9a", recordingFolderUrl: "https://drive.example/vel" },
+      { id: "vel", name: "ヴェル", color: "#168b9a", imageUrl: "vel.png" },
+      { id: "vel_inner", name: "心の声", color: "#168b9a", profile: "ヴェルの内面" },
+      { id: "amamori_narrator", name: "アマモリのナレーター", color: "#168b9a" },
+      { id: "amamori", name: "アマモリ", color: "#168b9a" },
+      { id: "amamori_narration", name: "アマモリ／ナレーション", color: "#168b9a" },
+      { id: "kara", name: "カーラ", color: "#168b9a" },
+      { id: "kara_inner", name: "カーラ（心の声）", color: "#168b9a" }
+    ],
+    castMembers: [{ id: "cast_one", actorName: "声優さん", characterIds: ["vel_monitor", "vel", "amamori_narrator"] }],
+    questions: [{ id: "question_one", characterId: "amamori_narration", body: "読み方について" }],
+    lines: [
+      { id: "line_monitor", characterId: "vel_monitor", text: "聞こえるか。", actorStatus: "収録済み", reviewStatus: "OK" },
+      { id: "line_inner", characterId: "vel_inner", text: "まだ終われない。" },
+      { id: "line_narrator", characterId: "amamori_narrator", text: "雨が降っていました。" },
+      { id: "line_narration", characterId: "amamori_narration", text: "彼は歩き出しました。" },
+      { id: "line_kara_inner", characterId: "kara_inner", text: "ヴェル、待っていて。" }
+    ]
+  });
+
+  assert.deepEqual(project.characters.map((character) => character.name), ["ヴェル", "アマモリ", "カーラ"]);
+  assert.equal(project.characters[0].id, "vel");
+  assert.equal(project.characters[0].recordingFolderUrl, "https://drive.example/vel");
+  assert.equal(project.characters[0].profile, "ヴェルの内面");
+  assert.equal(new Set(project.characters.map((character) => character.color)).size, 3);
+  assert.deepEqual(project.lines.map((line) => line.characterId), ["vel", "vel", "amamori", "amamori", "kara"]);
+  assert.equal(project.lines[0].actorStatus, "収録済み");
+  assert.equal(project.lines[0].reviewStatus, "OK");
+  assert.deepEqual(project.castMembers[0].characterIds, ["vel", "amamori"]);
+  assert.equal(project.questions[0].characterId, "amamori");
+});
+
+test("uses canonical character names while parsing performance labels", () => {
+  const rows = parseGoogleDocsScript(`ヴェルイヤモニ
+「聞こえるか。」
+心の声
+「まだ終われない。」
+アマモリのナレーター
+「彼は歩き出しました。」
+カーラ（心の声）
+「ヴェル、待っていて。」`, ["ヴェル", "アマモリ", "カーラ"]);
+
+  assert.deepEqual(rows.map((row) => row.speaker), ["ヴェル", "ヴェル", "アマモリ", "カーラ"]);
+});
+
 test("splits a manually pasted chapter only at heading 2 markers", () => {
   const rows = parseManualChapterBody(`章の導入文です。\n\n## 雨上がり\nヴェル「行こう。」\nアマモリ「待って。」\n\n## 出発\n駅へ向かう。`, "第一章");
 
