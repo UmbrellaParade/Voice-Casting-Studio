@@ -484,6 +484,8 @@ function App() {
   const autoThumbnailGenerationRef = useRef("");
   const pendingSaveRef = useRef(null);
   const wordpressLoadedRef = useRef(false);
+  const wordpressSaveQueueRef = useRef(Promise.resolve());
+  const wordpressSaveRevisionRef = useRef(0);
 
   const setCollapsibleOpen = (key, open) => {
     setCollapsibleState((current) => (current[key] === open ? current : { ...current, [key]: open }));
@@ -625,16 +627,25 @@ function App() {
 
   useEffect(() => {
     if (!WORDPRESS_RUNTIME?.canManage || !wordpressLoadedRef.current || sharedPayload || restorePayload) return undefined;
+    const saveRevision = ++wordpressSaveRevisionRef.current;
     setWordpressState((current) => ({ ...current, status: "saving", message: "WordPressへ保存しています…" }));
     const timer = window.setTimeout(() => {
-      saveWordPressWorkspace(data)
-        .then((result) => setWordpressState((current) => ({
-          ...current,
-          status: "ready",
-          message: "WordPressへ保存済み",
-          version: Number(result.version) || current.version
-        })))
-        .catch((error) => setWordpressState((current) => ({ ...current, status: "error", message: error.message })));
+      wordpressSaveQueueRef.current = wordpressSaveQueueRef.current
+        .catch(() => undefined)
+        .then(() => saveWordPressWorkspace(data))
+        .then((result) => {
+          if (saveRevision !== wordpressSaveRevisionRef.current) return;
+          setWordpressState((current) => ({
+            ...current,
+            status: "ready",
+            message: "WordPressへ保存済み",
+            version: Number(result.version) || current.version
+          }));
+        })
+        .catch((error) => {
+          if (saveRevision !== wordpressSaveRevisionRef.current) return;
+          setWordpressState((current) => ({ ...current, status: "error", message: error.message }));
+        });
     }, 850);
     return () => window.clearTimeout(timer);
   }, [data, sharedPayload, restorePayload]);

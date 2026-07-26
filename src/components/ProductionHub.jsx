@@ -44,6 +44,7 @@ import {
   PRODUCTION_SCHEDULE_TYPES,
   SHARED_LINK_COLORS,
   archiveScriptVersion,
+  assignProductionActorName,
   buildProductionQuestionThreads,
   canResolveProductionQuestion,
   createRecordingAccessKey,
@@ -492,6 +493,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
   const [characterNameDrafts, setCharacterNameDrafts] = useState({});
   const [characterScriptNameDrafts, setCharacterScriptNameDrafts] = useState({});
   const [actorNameDrafts, setActorNameDrafts] = useState({});
+  const [socialUrlDrafts, setSocialUrlDrafts] = useState({});
   const [draggingCharacterId, setDraggingCharacterId] = useState("");
   const [dragOverCharacterId, setDragOverCharacterId] = useState("");
   const [message, setMessage] = useState("");
@@ -552,30 +554,12 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
   const assignActorName = (characterId, actorName) => {
     if (!canEditScript) return;
     const name = String(actorName || "").trim();
-    updateProject((current) => {
-      const unassignedMembers = current.castMembers.map((member) => ({
-        ...member,
-        characterIds: member.characterIds.filter((id) => id !== characterId)
-      }));
-      if (!name) return { ...current, castMembers: unassignedMembers };
-      const actorKey = name.normalize("NFKC").toLocaleLowerCase("ja");
-      const existing = unassignedMembers.find((member) => member.actorName.normalize("NFKC").toLocaleLowerCase("ja") === actorKey);
-      const castMembers = existing
-        ? unassignedMembers.map((member) => member.id === existing.id
-          ? { ...member, characterIds: [...new Set([...member.characterIds, characterId])] }
-          : member)
-        : [...unassignedMembers, {
-          id: newId("cast"),
-          actorName: name,
-          contact: "",
-          socialUrl: "",
-          characterIds: [characterId],
-          wpUserId: 0,
-          accessKey: createRecordingAccessKey()
-        }];
-      return { ...current, castMembers };
+    updateProject((current) => assignProductionActorName(current, characterId, name));
+    setActorNameDrafts((current) => {
+      const next = { ...current };
+      delete next[characterId];
+      return next;
     });
-    setActorNameDrafts((current) => ({ ...current, [characterId]: name }));
   };
 
   const moveCharacter = (sourceId, targetId) => {
@@ -692,6 +676,54 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
     }));
   };
 
+  const commitCastMemberSocialUrl = (memberId, value) => {
+    if (!canEditScript || !memberId) return;
+    const socialUrl = String(value || "").trim();
+    setSocialUrlDrafts((current) => {
+      const next = { ...current };
+      delete next[memberId];
+      return next;
+    });
+    patchCastMember(memberId, { socialUrl });
+    setMessage(socialUrl ? "担当者SNSを保存しました。" : "担当者SNSを未登録に戻しました。");
+  };
+
+  const renderSocialField = (member, label = "担当者SNS") => {
+    const memberId = member?.id || "";
+    const socialUrl = socialUrlDrafts[memberId] ?? member?.socialUrl ?? "";
+    const canOpen = isWebUrl(socialUrl);
+    return (
+      <label className="cast-member-social-label">
+        <span>{label}</span>
+        <div className="character-social-field">
+          <input
+            type="url"
+            value={socialUrl}
+            placeholder={member ? "https://x.com/..." : "担当声優を先に入力"}
+            readOnly={!canEditScript}
+            disabled={!member}
+            onChange={(event) => setSocialUrlDrafts((current) => ({ ...current, [memberId]: event.target.value }))}
+            onBlur={(event) => commitCastMemberSocialUrl(memberId, event.target.value)}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return;
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+          />
+          <a
+            className={`secondary character-social-open${canOpen ? "" : " disabled"}`}
+            href={canOpen ? socialUrl : undefined}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={canOpen ? `${member?.actorName || "担当者"}のSNSを開く` : "担当者SNSは未登録です"}
+            aria-disabled={!canOpen}
+            tabIndex={canOpen ? undefined : -1}
+            title={canOpen ? "担当者SNSを開く" : "担当者SNSは未登録です"}
+          ><ExternalLink size={16} />{canOpen ? "SNSを開く" : "未登録"}</a>
+        </div>
+      </label>
+    );
+  };
+
   const copyMemberShareUrl = async (member) => {
     const shareUrl = makeWordPressMemberShareUrl({
       projectId: project.id,
@@ -777,7 +809,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
           <div className="character-field-grid">
             <div className="character-actor-fields">
               <label><span>担当声優</span><input value={actorNameDrafts[character.id] ?? assignedMember?.actorName ?? ""} placeholder="声優さんの名前を入力" readOnly={!canEditScript} onChange={(event) => setActorNameDrafts((current) => ({ ...current, [character.id]: event.target.value }))} onBlur={(event) => assignActorName(character.id, event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>
-              <label><span>担当者SNS</span><div className="character-social-field"><input value={assignedMember?.socialUrl || ""} placeholder={assignedMember ? "https://x.com/..." : "担当声優を先に入力"} disabled={!assignedMember || !canEditScript} onChange={(event) => patchCastMember(assignedMember.id, { socialUrl: event.target.value })} /><a className={`icon-button character-social-open${isWebUrl(assignedMember?.socialUrl) ? "" : " disabled"}`} href={isWebUrl(assignedMember?.socialUrl) ? assignedMember.socialUrl : undefined} target="_blank" rel="noreferrer" aria-label="担当者SNSを開く" aria-disabled={!isWebUrl(assignedMember?.socialUrl)} title="担当者SNSを開く"><ExternalLink size={16} /></a></div></label>
+              {renderSocialField(assignedMember)}
             </div>
             <label className="character-folder-label"><span>収録フォルダー</span><div className="character-folder-field"><input value={character.recordingFolderUrl} placeholder="Google DriveフォルダーURL" readOnly={!canEditScript} onChange={(event) => patchCharacter(character.id, { recordingFolderUrl: event.target.value })} /><a className={`icon-button character-folder-open${isWebUrl(character.recordingFolderUrl) ? "" : " disabled"}`} href={isWebUrl(character.recordingFolderUrl) ? character.recordingFolderUrl : undefined} target="_blank" rel="noreferrer" aria-label={`${character.name}の収録フォルダーを開く`} aria-disabled={!isWebUrl(character.recordingFolderUrl)} title="収録フォルダーを開く"><FolderOpen size={16} /></a></div></label>
             <label className="wide"><span>設定・人物像</span><textarea value={character.profile} readOnly={!canEditScript} onChange={(event) => patchCharacter(character.id, { profile: event.target.value })} /></label>
@@ -828,6 +860,7 @@ function CharactersView({ project, updateProject, siteUsers = [], canEditScript 
                 if (!confirm(`${member.actorName}を担当声優一覧から削除しますか？`)) return;
                 updateProject((current) => ({ ...current, castMembers: current.castMembers.filter((item) => item.id !== member.id) }));
               }}><Trash2 size={16} /></button>}
+              {renderSocialField(member)}
               {canEditScript && getWordPressRuntime() && (
                 <div className="cast-member-share-field">
                   <input value={shareUrl} readOnly aria-label={`${member.actorName || "声優さん"}用のログイン不要共有URL`} />

@@ -510,6 +510,68 @@ export const createRecordingAccessKey = () => {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
 };
 
+const getActorNameKey = (value = "") => String(value || "")
+  .normalize("NFKC")
+  .trim()
+  .toLocaleLowerCase("ja");
+
+const isActorNameCorrection = (previousName = "", nextName = "") => {
+  const previousKey = getActorNameKey(previousName).replace(/[\s・._-]+/g, "");
+  const nextKey = getActorNameKey(nextName).replace(/[\s・._-]+/g, "");
+  return previousKey.length >= 2
+    && nextKey.length >= 2
+    && (previousKey.includes(nextKey) || nextKey.includes(previousKey));
+};
+
+export const assignProductionActorName = (project = {}, characterId = "", actorName = "") => {
+  const name = String(actorName || "").trim();
+  const members = Array.isArray(project.castMembers) ? project.castMembers : [];
+  const currentMember = members.find((member) => member.characterIds?.includes(characterId));
+  const withoutCharacter = members.map((member) => ({
+    ...member,
+    characterIds: (Array.isArray(member.characterIds) ? member.characterIds : [])
+      .filter((id) => id !== characterId)
+  }));
+
+  if (!name) return { ...project, castMembers: withoutCharacter };
+
+  const actorKey = getActorNameKey(name);
+  const matchingMember = members.find((member) => getActorNameKey(member.actorName) === actorKey);
+  if (matchingMember) {
+    return {
+      ...project,
+      castMembers: withoutCharacter.map((member) => member.id === matchingMember.id
+        ? { ...member, actorName: name, characterIds: [...new Set([...member.characterIds, characterId])] }
+        : member)
+    };
+  }
+
+  // A name correction for a single-role actor must keep SNS, contact and the share URL key.
+  if (currentMember
+    && currentMember.characterIds?.length === 1
+    && isActorNameCorrection(currentMember.actorName, name)) {
+    return {
+      ...project,
+      castMembers: members.map((member) => member.id === currentMember.id
+        ? { ...member, actorName: name }
+        : member)
+    };
+  }
+
+  return {
+    ...project,
+    castMembers: [...withoutCharacter, {
+      id: createLocalId("cast"),
+      actorName: name,
+      contact: "",
+      socialUrl: "",
+      characterIds: [characterId],
+      wpUserId: 0,
+      accessKey: createRecordingAccessKey()
+    }]
+  };
+};
+
 const makeRubyPattern = () => new RegExp(RUBY_SOURCE, "g");
 
 export const parseRubyText = (value = "") => {

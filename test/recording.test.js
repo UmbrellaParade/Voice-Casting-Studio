@@ -5,6 +5,7 @@ import { makeGoogleDrivePreviewUrl, makePlayableEmbedUrl, migrateData } from "..
 
 import {
   archiveScriptVersion,
+  assignProductionActorName,
   buildProductionQuestionThreads,
   canResolveProductionQuestion,
   getCharacterDialogueCounts,
@@ -30,6 +31,62 @@ import {
   restoreScriptSnapshot,
   sortProductionScheduleItems
 } from "../src/lib/recording.js";
+
+test("keeps actor SNS and share credentials when correcting a single-role actor name", () => {
+  const project = {
+    castMembers: [{
+      id: "cast_vel",
+      actorName: "声優さん",
+      contact: "連絡済み",
+      socialUrl: "https://x.com/example",
+      characterIds: ["vel"],
+      wpUserId: 12,
+      accessKey: "existing-key"
+    }]
+  };
+
+  const updated = assignProductionActorName(project, "vel", "声優さん（正式名）");
+
+  assert.deepEqual(updated.castMembers, [{
+    ...project.castMembers[0],
+    actorName: "声優さん（正式名）"
+  }]);
+});
+
+test("reuses an existing actor without dropping their SNS when assigning another role", () => {
+  const project = {
+    castMembers: [
+      { id: "cast_a", actorName: "Aさん", socialUrl: "https://x.com/a", characterIds: ["vel"] },
+      { id: "cast_b", actorName: "Bさん", socialUrl: "https://x.com/b", characterIds: ["carla"] }
+    ]
+  };
+
+  const updated = assignProductionActorName(project, "vel", "Ｂさん");
+
+  assert.deepEqual(updated.castMembers[0].characterIds, []);
+  assert.equal(updated.castMembers[1].socialUrl, "https://x.com/b");
+  assert.deepEqual(updated.castMembers[1].characterIds, ["carla", "vel"]);
+});
+
+test("keeps the previous actor record when a role is reassigned to a different person", () => {
+  const project = {
+    castMembers: [{
+      id: "cast_previous",
+      actorName: "前任さん",
+      socialUrl: "https://x.com/previous",
+      characterIds: ["vel"],
+      accessKey: "previous-key"
+    }]
+  };
+
+  const updated = assignProductionActorName(project, "vel", "新任さん");
+
+  assert.equal(updated.castMembers[0].socialUrl, "https://x.com/previous");
+  assert.deepEqual(updated.castMembers[0].characterIds, []);
+  assert.equal(updated.castMembers[1].actorName, "新任さん");
+  assert.equal(updated.castMembers[1].socialUrl, "");
+  assert.deepEqual(updated.castMembers[1].characterIds, ["vel"]);
+});
 
 test("only lets the questioner resolve an answered question", () => {
   const answered = { wpUserId: 11, answer: "こちらでお願いします。", status: "回答済み" };
