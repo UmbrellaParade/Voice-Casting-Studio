@@ -2271,13 +2271,14 @@ function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, 
     >
       <div className="script-line-main">
         <div className="script-line-sequence">
-          <span>{String(line.order).padStart(3, "0")}</span>
+          <span>{String(line.displayOrder ?? line.order).padStart(3, "0")}</span>
           <b><i />{isManualBody ? "本文" : isDirection ? "ト書き" : character?.name || "話者未設定"}</b>
         </div>
         <div className="script-line-copy">
           <p><RubyText text={line.text} /></p>
           {line.direction && <small><MessageSquareText size={14} />{line.direction}</small>}
           {line.fileName && <code>{line.fileName}</code>}
+          {line.derivedFromManualBody && <small className="derived-manual-note">章本文から表示・収録チェックは管理者側で反映されます</small>}
         </div>
         {!isDirection && (
           <div className="script-line-states">
@@ -2379,15 +2380,16 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
   const [drafts, setDrafts] = useState({});
   const [openSceneIds, setOpenSceneIds] = useState(new Set());
   const [openChapterIds, setOpenChapterIds] = useState(new Set());
-  const allChapters = useMemo(() => getChapterGroups(project?.lines || []), [project?.lines]);
-  const scopedProject = useMemo(() => project ? ({
-    ...project,
-    lines: project.lines.filter((line) => {
+  const displayProject = useMemo(() => project ? getRecordingDisplayProject(project) : null, [project]);
+  const allChapters = useMemo(() => getChapterGroups(displayProject?.lines || []), [displayProject?.lines]);
+  const scopedProject = useMemo(() => displayProject ? ({
+    ...displayProject,
+    lines: displayProject.lines.filter((line) => {
       if (selectedSceneId) return line.sceneId === selectedSceneId;
       if (selectedChapterId) return line.chapterId === selectedChapterId;
       return true;
     })
-  }) : null, [project, selectedChapterId, selectedSceneId]);
+  }) : null, [displayProject, selectedChapterId, selectedSceneId]);
   const chapterSignature = allChapters.map((chapter) => `${chapter.chapterId}:${chapter.scenes.map((scene) => scene.sceneId).join(",")}`).join("|");
   const characterScopeSignature = (scopedProject?.lines || [])
     .map((line) => `${line.id}:${line.kind}:${line.characterId}`)
@@ -2646,7 +2648,7 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
                             key={line.id}
                             project={project}
                             line={line}
-                            canEdit={!line.isContext && editableCharacters.has(line.characterId)}
+                            canEdit={!line.isContext && !line.derivedFromManualBody && editableCharacters.has(line.characterId)}
                             draft={draft}
                             setDraft={setDraft}
                             submitPatch={submitPatch}
