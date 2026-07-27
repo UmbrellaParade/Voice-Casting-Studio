@@ -49,15 +49,8 @@ function vcsFindFile_(folder, fileName) {
   return files.hasNext() ? files.next() : null;
 }
 
-function vcsRefreshFileUploadItems_(form) {
-  const uploadItems = form.getItems(FormApp.ItemType.FILE_UPLOAD);
-  uploadItems.forEach((item) => {
-    const originalIndex = item.getIndex();
-    const replacement = item.duplicate();
-    form.moveItem(replacement, originalIndex);
-    form.deleteItem(item);
-  });
-  return uploadItems.length;
+function vcsCountFileUploadItems_(form) {
+  return form.getItems(FormApp.ItemType.FILE_UPLOAD).length;
 }
 
 function vcsBuildAuditionResult_(form, headerFile, socialFile, recovered) {
@@ -104,9 +97,9 @@ function vcsLookupAuditionForm_(request) {
   if (!formFile || !headerFile || !socialFile) return { ok: true, found: false };
 
   const form = FormApp.openById(formFile.getId());
-  const refreshedUploadItems = vcsRefreshFileUploadItems_(form);
+  const fileUploadItems = vcsCountFileUploadItems_(form);
   const result = vcsBuildAuditionResult_(form, headerFile, socialFile, true);
-  result.refreshedUploadItems = refreshedUploadItems;
+  result.fileUploadItems = fileUploadItems;
   properties.setProperty(propertyKey, JSON.stringify(result));
   return result;
 }
@@ -127,15 +120,15 @@ function vcsCreateAuditionForm_(request) {
       || DriveApp.getFileById(VCS_AUDITION_TEMPLATE_FORM_ID).makeCopy(names.formName, folder);
     const form = FormApp.openById(copiedFile.getId());
     form.setTitle(names.formName);
-    form.setDescription(`『${names.roleName}』役オーディションに応募される方は、このフォームからお願いします。`);
-    const refreshedUploadItems = vcsRefreshFileUploadItems_(form);
+    form.setDescription(`「${names.roleName}」役オーディションに応募される方は、このフォームからお願いします。`);
+    const fileUploadItems = vcsCountFileUploadItems_(form);
     form.setPublished(true);
     form.setAcceptingResponses(true);
 
     const headerFile = vcsSaveImage_(folder, request.headerImage, names.headerName);
     const socialFile = vcsSaveImage_(folder, request.socialImage, names.socialName);
     const result = vcsBuildAuditionResult_(form, headerFile, socialFile, false);
-    result.refreshedUploadItems = refreshedUploadItems;
+    result.fileUploadItems = fileUploadItems;
     properties.setProperty(propertyKey, JSON.stringify(result));
     return result;
   } finally {

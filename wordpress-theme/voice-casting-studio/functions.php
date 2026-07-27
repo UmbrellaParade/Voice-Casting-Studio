@@ -1531,6 +1531,16 @@ function vcs_normalize_audition_title(string $value): string
     return is_string($normalized) ? $normalized : trim($value);
 }
 
+function vcs_audition_display_role_name(string $role_name): string
+{
+    $original = trim($role_name);
+    if ('' === $original) return '';
+
+    $display_name = preg_replace('/(?:\s*(?:\([^()]*\)|（[^（）]*）))+\s*$/u', '', $original);
+    $display_name = is_string($display_name) ? trim($display_name) : '';
+    return '' !== $display_name ? $display_name : $original;
+}
+
 function vcs_audit_audition_image(
     string $api_key,
     array $image,
@@ -1845,6 +1855,7 @@ function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Respon
     if ('' === $role_name) {
         return new WP_Error('vcs_character_name_required', 'キャラクター名を登録してください。', ['status' => 409]);
     }
+    $audition_role_name = vcs_audition_display_role_name($role_name);
     foreach (($project['auditionRoleProgress'] ?? []) as $progress) {
         if (is_array($progress)
             && (string) ($progress['characterId'] ?? '') === $character_id
@@ -1866,7 +1877,7 @@ function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Respon
         $lookup_result = vcs_call_audition_apps_script($apps_script_url, $apps_script_secret, 'lookupAuditionForm', [
             'requestKey' => $request_key,
             'projectTitle' => $project_title,
-            'roleName' => $role_name,
+            'roleName' => $audition_role_name,
         ]);
         if (is_wp_error($lookup_result)) return $lookup_result;
         if (!empty($lookup_result['found']) && !$replace_images) {
@@ -1888,10 +1899,10 @@ function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Respon
         if (is_wp_error($logo_image)) return $logo_image;
         $profile = trim(wp_strip_all_tags((string) ($character['profile'] ?? '')));
         $profile = function_exists('mb_substr') ? mb_substr($profile, 0, 700) : substr($profile, 0, 700);
-        $common_prompt = "Input image 1 is the official character reference. Preserve the same character identity, face, hairstyle, outfit, colors, and overall design. Input image 2 is the official Umbrella Parade logo; reproduce it faithfully without changing its lettering or proportions. Do not add other characters, third-party logos, watermarks, or unreadable decorative text. Project: {$project_title}. Role: {$role_name}. Character notes: {$profile}.";
+        $common_prompt = "Input image 1 is the official character reference. Preserve the same character identity, face, hairstyle, outfit, colors, and overall design. Input image 2 is the official Umbrella Parade logo; reproduce it faithfully without changing its lettering or proportions. Do not add other characters, third-party logos, watermarks, or unreadable decorative text. Project: {$project_title}. Role: {$audition_role_name}. Character notes: {$profile}.";
 
-        $required_title = "『{$role_name}』役オーディション";
-        $header_prompt = $common_prompt . " Create polished Japanese voice-actor audition key art on a 1600x544 canvas that will be center-cropped to a final 1600x400 Google Forms header. The only usable vertical band is y=72 through y=472. Keep every essential face, logo, and title entirely within that band. Place the character mainly in x=60..620. Place the complete Umbrella Parade logo in x=700..1450 and y=105..220. Include the exact Japanese title {$required_title}, spelled exactly, inside x=700..1450 and y=245..420. Use two or three lines and deliberately smaller lettering when the role name is long. Leave at least 90 pixels of empty space at both horizontal canvas edges and do not let any glyph touch the final crop boundary. Balanced contrast, professional production artwork.";
+        $required_title = "「{$audition_role_name}」役オーディション";
+        $header_prompt = $common_prompt . " Create polished Japanese voice-actor audition key art on a 1600x544 canvas that will be center-cropped to a final 1600x400 Google Forms header by removing 72 pixels from both the top and bottom. Reserve the entire y=0..125 area for background only: no logo, umbrella, face, title, or other essential element may enter it. Place the character mainly in x=60..620 and keep the complete face within y=135..445. Place the complete Umbrella Parade logo in x=720..1450 and y=145..265. The umbrella at the top of the logo must remain fully visible and its highest point must be below y=145. Include the exact Japanese title {$required_title}, spelled exactly, inside x=720..1450 and y=295..430. Use two or three lines and deliberately smaller lettering when the role name is long. Keep every essential element within y=130..455, leave at least 90 pixels of empty space at both horizontal edges, and do not let any glyph touch a crop boundary. Balanced contrast, professional production artwork.";
         $header_result = vcs_generate_audited_audition_image(
             $api_key,
             $header_prompt,
@@ -1919,13 +1930,13 @@ function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Respon
         $google_result = vcs_call_audition_apps_script($apps_script_url, $apps_script_secret, $google_action, [
             'requestKey' => $request_key,
             'projectTitle' => $project_title,
-            'roleName' => $role_name,
+            'roleName' => $audition_role_name,
             'headerImage' => ['base64' => $header_image['base64'], 'mimeType' => 'image/png'],
             'socialImage' => ['base64' => $social_image['base64'], 'mimeType' => 'image/png'],
         ]);
         if (is_wp_error($google_result)) return $google_result;
 
-        $safe_role_name = preg_replace('/[\\\\\/:*?"<>|]+/u', '_', $role_name);
+        $safe_role_name = preg_replace('/[\\\\\/:*?"<>|]+/u', '_', $audition_role_name);
         return vcs_store_audition_form_result(
             $data,
             $project_index,
