@@ -2278,7 +2278,7 @@ function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, 
           <p><RubyText text={line.text} /></p>
           {line.direction && <small><MessageSquareText size={14} />{line.direction}</small>}
           {line.fileName && <code>{line.fileName}</code>}
-          {line.derivedFromManualBody && <small className="derived-manual-note">章本文から表示・収録チェックは管理者側で反映されます</small>}
+          {line.derivedFromManualBody && <small className="derived-manual-note">章本文から表示</small>}
         </div>
         {!isDirection && (
           <div className="script-line-states">
@@ -2483,6 +2483,7 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
 
   const submitPatch = async (lineId, patch, attachment = null) => {
     setState({ busy: false, message: "変更を共有しています…", error: false, busyLineId: lineId });
+    const displayLine = displayProject?.lines.find((item) => item.id === lineId);
     try {
       const result = await postToGasEndpoint(endpointUrl, {
         action: "updateRecordingLine",
@@ -2492,6 +2493,15 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
         accessKey: reference.accessKey,
         lineId,
         patch,
+        lineContext: displayLine ? {
+          id: displayLine.id,
+          derivedFromManualBody: Boolean(displayLine.derivedFromManualBody),
+          sourceLineId: displayLine.sourceLineId || "",
+          characterId: displayLine.characterId,
+          chapterId: displayLine.chapterId,
+          sceneId: displayLine.sceneId,
+          performanceType: displayLine.performanceType || "通常"
+        } : null,
         recordingAttachment: attachment
       });
       setProject(normalizeRecordingProject(result.project));
@@ -2514,7 +2524,7 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
     try {
       setState({ busy: false, message: `${file.name} を送信しています…`, error: false, busyLineId: lineId });
       const dataUrl = await readFileAsDataUrl(file);
-      const line = project.lines.find((item) => item.id === lineId);
+      const line = displayProject?.lines.find((item) => item.id === lineId);
       await submitPatch(
         lineId,
         {
@@ -2648,7 +2658,7 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
                             key={line.id}
                             project={project}
                             line={line}
-                            canEdit={!line.isContext && !line.derivedFromManualBody && editableCharacters.has(line.characterId)}
+                            canEdit={!line.isContext && editableCharacters.has(line.characterId)}
                             draft={draft}
                             setDraft={setDraft}
                             submitPatch={submitPatch}

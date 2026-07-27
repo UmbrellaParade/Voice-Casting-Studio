@@ -452,10 +452,56 @@ function mergeExistingRecordingProgress(incoming, existing) {
       updatedAt: saved.updatedAt || line.updatedAt
     });
   });
+  incoming.derivedLineProgress = mergeDerivedLineProgress(
+    incoming.derivedLineProgress,
+    existing.derivedLineProgress
+  );
   return incoming;
 }
 
+// 管理者の再公開で、声優さんがDriveへ書き込んだ章本文由来の進捗を消さない。
+// 同じ行が両側にある場合は updatedAt が新しいほうの提出状態を残す。
+function mergeDerivedLineProgress(incoming, existing) {
+  const merged = {};
+  const incomingMap = incoming && typeof incoming === "object" ? incoming : {};
+  const existingMap = existing && typeof existing === "object" ? existing : {};
+  Object.keys(incomingMap).forEach(function (lineId) {
+    merged[lineId] = incomingMap[lineId];
+  });
+  const actorFields = ["actorStatus", "recordingUrl", "recordingFileName", "actorNote", "updatedAt"];
+  Object.keys(existingMap).forEach(function (lineId) {
+    const saved = existingMap[lineId];
+    if (!saved || typeof saved !== "object") return;
+    const current = merged[lineId];
+    if (!current || typeof current !== "object") {
+      merged[lineId] = saved;
+      return;
+    }
+    const savedTime = Date.parse(saved.updatedAt || "") || 0;
+    const currentTime = Date.parse(current.updatedAt || "") || 0;
+    if (savedTime <= currentTime) return;
+    const updated = Object.assign({}, current);
+    actorFields.forEach(function (key) {
+      if (Object.prototype.hasOwnProperty.call(saved, key)) updated[key] = saved[key];
+    });
+    merged[lineId] = updated;
+  });
+  return merged;
+}
+
 function handlePublishRecordingProject(payload) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) {
+    throw new Error("他の更新と重なりました。少し待ってからもう一度お試しください。");
+  }
+  try {
+    return publishRecordingProjectWithinLock(payload);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function publishRecordingProjectWithinLock(payload) {
   const root = getRootFolder(payload.driveFolderUrl);
   let project = normalizeRecordingProjectForStorage(payload.project);
   try {
@@ -511,14 +557,67 @@ function saveRecordingAttachment(root, project, viewer, line, attachment) {
   return { url: file.getUrl(), fileName: fileName };
 }
 
+// 章本文から展開されたセリフは project.lines に実体がなく、進捗だけを
+// project.derivedLineProgress[lineId] に保存する。lineIdは台本の内容から
+// 決まる安定IDなので、受信口は中身を解釈せずキーとして扱えばよい。
+function resolveDerivedRecordingLine(project, lineId, context) {
+  if (lineId.indexOf("derived_line_") !== 0 || !context.derivedFromManualBody) {
+    throw new Error("対象のセリフが見つかりません。");
+  }
+  const sourceLineId = String(context.sourceLineId || "");
+  const sourceLine = (project.lines || []).filter(function (item) {
+    return String(item.id || "") === sourceLineId && item.manualBody;
+  })[0];
+  if (!sourceLine) throw new Error("対象のセリフが見つかりません。");
+
+  const characterId = String(context.characterId || "");
+  const known = (project.characters || []).filter(function (item) {
+    return String(item.id || "") === characterId;
+  })[0];
+  if (!known) throw new Error("対象の登場人物が見つかりません。");
+
+  const stored = (project.derivedLineProgress || {})[lineId] || {};
+  const performanceTypes = ["通常", "ナレーション", "心の声", "イヤモニ"];
+  const performanceType = String(context.performanceType || "通常");
+  return {
+    id: lineId,
+    sourceLineId: sourceLineId,
+    characterId: characterId,
+    chapterId: String(context.chapterId || stored.chapterId || sourceLine.chapterId || ""),
+    sceneId: String(context.sceneId || stored.sceneId || sourceLine.sceneId || ""),
+    performanceType: performanceTypes.indexOf(performanceType) < 0 ? "通常" : performanceType,
+    actorStatus: String(stored.actorStatus || "未収録"),
+    reviewStatus: String(stored.reviewStatus || "未確認"),
+    recordingUrl: String(stored.recordingUrl || ""),
+    recordingFileName: String(stored.recordingFileName || ""),
+    actorNote: String(stored.actorNote || ""),
+    directorNote: String(stored.directorNote || ""),
+    updatedAt: String(stored.updatedAt || "")
+  };
+}
+
+// 声優さんが同時にレ点を打つとDrive上の同じJSONを読んで書き戻すため、
+// スクリプトロックを取らないと後勝ちで取りこぼす。
 function handleUpdateRecordingLine(payload) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) {
+    throw new Error("他の更新と重なりました。少し待ってからもう一度お試しください。");
+  }
+  try {
+    return updateRecordingLineWithinLock(payload);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function updateRecordingLineWithinLock(payload) {
   const root = getRootFolder(payload.driveFolderUrl);
   const project = readRecordingProject(root, payload.projectId);
   const lines = Array.isArray(project.lines) ? project.lines : [];
-  const line = lines.filter(function (item) {
-    return String(item.id || "") === String(payload.lineId || "");
+  const lineId = String(payload.lineId || "");
+  const storedLine = lines.filter(function (item) {
+    return String(item.id || "") === lineId;
   })[0];
-  if (!line) throw new Error("対象のセリフが見つかりません。");
 
   let viewer = null;
   let isAdmin = false;
@@ -527,9 +626,12 @@ function handleUpdateRecordingLine(payload) {
     isAdmin = true;
   } else {
     viewer = findRecordingViewer(project, payload.memberId, payload.accessKey);
-    if ((viewer.characterIds || []).indexOf(line.characterId) < 0) {
-      throw new Error("このセリフは担当外のため変更できません。");
-    }
+  }
+
+  const isDerived = !storedLine;
+  const line = storedLine || resolveDerivedRecordingLine(project, lineId, payload.lineContext || {});
+  if (!isAdmin && (viewer.characterIds || []).indexOf(line.characterId) < 0) {
+    throw new Error("このセリフは担当外のため変更できません。");
   }
 
   const patch = payload.patch || {};
@@ -553,6 +655,12 @@ function handleUpdateRecordingLine(payload) {
   }
 
   line.updatedAt = new Date().toISOString();
+  if (isDerived) {
+    if (!project.derivedLineProgress || typeof project.derivedLineProgress !== "object") {
+      project.derivedLineProgress = {};
+    }
+    project.derivedLineProgress[lineId] = line;
+  }
   project.updatedAt = line.updatedAt;
   writeRecordingProject(root, project);
   return jsonOutput({
