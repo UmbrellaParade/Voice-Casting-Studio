@@ -1803,10 +1803,10 @@ function vcs_store_audition_form_result(
     return rest_ensure_response([
         'ok' => true,
         'progress' => $progress,
-        'imageFiles' => $image_files,
         'imageAudit' => $progress['imageAudit'] ?? [],
         'recovered' => !empty($google_result['recovered']),
         'imagesReplaced' => !empty($google_result['imagesReplaced']),
+        'imagesStoredInGoogleDrive' => true,
         'headerThemeNeedsManualSelection' => true,
     ]);
 }
@@ -1936,17 +1936,13 @@ function vcs_rest_create_audition_form(WP_REST_Request $request): WP_REST_Respon
         ]);
         if (is_wp_error($google_result)) return $google_result;
 
-        $safe_role_name = preg_replace('/[\\\\\/:*?"<>|]+/u', '_', $audition_role_name);
         return vcs_store_audition_form_result(
             $data,
             $project_index,
             $project,
             $character_id,
             $google_result,
-            [
-                ['fileName' => $safe_role_name . '_Googleフォームヘッダー_1600x400.png', 'mimeType' => 'image/png', 'base64' => $header_image['base64']],
-                ['fileName' => $safe_role_name . '_SNS_16x9.png', 'mimeType' => 'image/png', 'base64' => $social_image['base64']],
-            ],
+            [],
             [
                 'passed' => true,
                 'model' => VCS_AUDITION_AUDIT_MODEL,

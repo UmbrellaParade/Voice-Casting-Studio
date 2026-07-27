@@ -65,6 +65,7 @@ const normalizeAuditionRoleProgress = (value) => {
       formResponderUrl: String(progress.formResponderUrl || ""),
       headerImageUrl: String(progress.headerImageUrl || ""),
       socialImageUrl: String(progress.socialImageUrl || ""),
+      imageAudit: progress.imageAudit && typeof progress.imageAudit === "object" ? progress.imageAudit : {},
       createdAt: String(progress.createdAt || ""),
       updatedAt: String(progress.updatedAt || "")
     });

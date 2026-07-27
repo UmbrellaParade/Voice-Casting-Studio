@@ -7,7 +7,8 @@
  */
 const VCS_AUDITION_SECRET = "__VCS_AUDITION_SECRET__";
 const VCS_AUDITION_TEMPLATE_FORM_ID = "1-xfkPZchzQDyAjJUVcfxODw8Cjd61pHaqkv1UyLWSkY";
-const VCS_AUDITION_FOLDER_ID = "1LR58DIiMLNu5BaOEVBvYwQrxC9ffDudS";
+const VCS_AUDITION_FORMS_FOLDER_ID = "1LR58DIiMLNu5BaOEVBvYwQrxC9ffDudS";
+const VCS_AUDITION_IMAGE_FOLDER_ID = "11uxFA2aHVaKv99sRq7yXJKiR5blVn_s9";
 
 function doPost(event) {
   try {
@@ -53,6 +54,41 @@ function vcsCountFileUploadItems_(form) {
   return form.getItems(FormApp.ItemType.FILE_UPLOAD).length;
 }
 
+function vcsCleanStoredResult_(storedResult) {
+  const result = Object.assign({}, storedResult || {});
+  const itemId = Number(result.formHeaderImageItemId);
+  if (result.formId && Number.isFinite(itemId) && itemId > 0) {
+    try {
+      const form = FormApp.openById(result.formId);
+      const item = form.getItemById(itemId);
+      if (item && item.getType() === FormApp.ItemType.IMAGE) form.deleteItem(item);
+      result.fileUploadItems = vcsCountFileUploadItems_(form);
+    } catch (error) {
+      console.warn(`Could not remove the legacy form-body header image: ${error}`);
+    }
+  }
+  delete result.formHeaderImageItemId;
+  delete result.formHeaderImageAttached;
+  try {
+    const imageFolder = DriveApp.getFolderById(VCS_AUDITION_IMAGE_FOLDER_ID);
+    [result.headerImageFileId, result.socialImageFileId].filter(Boolean).forEach((fileId) => {
+      DriveApp.getFileById(fileId).moveTo(imageFolder);
+    });
+  } catch (error) {
+    console.warn(`Could not move a stored audition image: ${error}`);
+  }
+  return result;
+}
+
+function vcsFindImageFile_(imageFolder, legacyFolder, fileName) {
+  const current = vcsFindFile_(imageFolder, fileName);
+  if (current) return current;
+  const legacy = vcsFindFile_(legacyFolder, fileName);
+  if (!legacy) return null;
+  legacy.moveTo(imageFolder);
+  return legacy;
+}
+
 function vcsBuildAuditionResult_(form, headerFile, socialFile, recovered) {
   const formId = form.getId();
   let formEditUrl = `https://docs.google.com/forms/d/${formId}/edit`;
@@ -88,12 +124,17 @@ function vcsLookupAuditionForm_(request) {
   const properties = PropertiesService.getScriptProperties();
   const propertyKey = `VCS_AUDITION_RESULT_${names.requestKey}`;
   const stored = properties.getProperty(propertyKey);
-  if (stored) return Object.assign({ found: true }, JSON.parse(stored));
+  if (stored) {
+    const storedResult = vcsCleanStoredResult_(JSON.parse(stored));
+    properties.setProperty(propertyKey, JSON.stringify(storedResult));
+    return Object.assign({ found: true }, storedResult);
+  }
 
-  const folder = DriveApp.getFolderById(VCS_AUDITION_FOLDER_ID);
-  const formFile = vcsFindFile_(folder, names.formName);
-  const headerFile = vcsFindFile_(folder, names.headerName);
-  const socialFile = vcsFindFile_(folder, names.socialName);
+  const formsFolder = DriveApp.getFolderById(VCS_AUDITION_FORMS_FOLDER_ID);
+  const imageFolder = DriveApp.getFolderById(VCS_AUDITION_IMAGE_FOLDER_ID);
+  const formFile = vcsFindFile_(formsFolder, names.formName);
+  const headerFile = vcsFindImageFile_(imageFolder, formsFolder, names.headerName);
+  const socialFile = vcsFindImageFile_(imageFolder, formsFolder, names.socialName);
   if (!formFile || !headerFile || !socialFile) return { ok: true, found: false };
 
   const form = FormApp.openById(formFile.getId());
@@ -113,11 +154,16 @@ function vcsCreateAuditionForm_(request) {
     const properties = PropertiesService.getScriptProperties();
     const propertyKey = `VCS_AUDITION_RESULT_${names.requestKey}`;
     const stored = properties.getProperty(propertyKey);
-    if (stored) return JSON.parse(stored);
+    if (stored) {
+      const storedResult = vcsCleanStoredResult_(JSON.parse(stored));
+      properties.setProperty(propertyKey, JSON.stringify(storedResult));
+      return storedResult;
+    }
 
-    const folder = DriveApp.getFolderById(VCS_AUDITION_FOLDER_ID);
-    const copiedFile = vcsFindFile_(folder, names.formName)
-      || DriveApp.getFileById(VCS_AUDITION_TEMPLATE_FORM_ID).makeCopy(names.formName, folder);
+    const formsFolder = DriveApp.getFolderById(VCS_AUDITION_FORMS_FOLDER_ID);
+    const imageFolder = DriveApp.getFolderById(VCS_AUDITION_IMAGE_FOLDER_ID);
+    const copiedFile = vcsFindFile_(formsFolder, names.formName)
+      || DriveApp.getFileById(VCS_AUDITION_TEMPLATE_FORM_ID).makeCopy(names.formName, formsFolder);
     const form = FormApp.openById(copiedFile.getId());
     form.setTitle(names.formName);
     form.setDescription(`「${names.roleName}」役オーディションに応募される方は、このフォームからお願いします。`);
@@ -125,8 +171,8 @@ function vcsCreateAuditionForm_(request) {
     form.setPublished(true);
     form.setAcceptingResponses(true);
 
-    const headerFile = vcsSaveImage_(folder, request.headerImage, names.headerName);
-    const socialFile = vcsSaveImage_(folder, request.socialImage, names.socialName);
+    const headerFile = vcsSaveImage_(imageFolder, request.headerImage, names.headerName);
+    const socialFile = vcsSaveImage_(imageFolder, request.socialImage, names.socialName);
     const result = vcsBuildAuditionResult_(form, headerFile, socialFile, false);
     result.fileUploadItems = fileUploadItems;
     properties.setProperty(propertyKey, JSON.stringify(result));
@@ -161,18 +207,19 @@ function vcsReplaceAuditionImages_(request) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    const folder = DriveApp.getFolderById(VCS_AUDITION_FOLDER_ID);
-    const formFile = vcsFindFile_(folder, names.formName);
+    const formsFolder = DriveApp.getFolderById(VCS_AUDITION_FORMS_FOLDER_ID);
+    const imageFolder = DriveApp.getFolderById(VCS_AUDITION_IMAGE_FOLDER_ID);
+    const formFile = vcsFindFile_(formsFolder, names.formName);
     if (!formFile) throw new Error(`${names.formName} was not found.`);
 
-    const oldHeaderFiles = vcsListFiles_(folder, names.headerName);
-    const oldSocialFiles = vcsListFiles_(folder, names.socialName);
+    const oldHeaderFiles = vcsListFiles_(imageFolder, names.headerName);
+    const oldSocialFiles = vcsListFiles_(imageFolder, names.socialName);
     const newFiles = [];
     const trashedOldFiles = [];
     try {
-      const headerFile = folder.createFile(vcsImageBlob_(request.headerImage, names.headerName));
+      const headerFile = imageFolder.createFile(vcsImageBlob_(request.headerImage, names.headerName));
       newFiles.push(headerFile);
-      const socialFile = folder.createFile(vcsImageBlob_(request.socialImage, names.socialName));
+      const socialFile = imageFolder.createFile(vcsImageBlob_(request.socialImage, names.socialName));
       newFiles.push(socialFile);
 
       oldHeaderFiles.concat(oldSocialFiles).forEach((file) => {
@@ -182,6 +229,7 @@ function vcsReplaceAuditionImages_(request) {
 
       const form = FormApp.openById(formFile.getId());
       const result = vcsBuildAuditionResult_(form, headerFile, socialFile, false);
+      result.fileUploadItems = vcsCountFileUploadItems_(form);
       result.imagesReplaced = true;
       const propertyKey = `VCS_AUDITION_RESULT_${names.requestKey}`;
       PropertiesService.getScriptProperties().setProperty(propertyKey, JSON.stringify(result));

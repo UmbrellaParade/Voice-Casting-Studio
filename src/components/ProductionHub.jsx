@@ -8,7 +8,6 @@ import {
   ChevronDown,
   ClipboardCopy,
   CircleHelp,
-  Download,
   ExternalLink,
   FileAudio,
   FileImage,
@@ -34,12 +33,6 @@ import {
   UserPlus,
   Users
 } from "lucide-react";
-import {
-  chooseAuditionImageFolder,
-  downloadAuditionImageFiles,
-  getAuditionImageFolderStatus,
-  saveAuditionImageFiles
-} from "../lib/audition.js";
 import {
   getGoogleDriveFileId,
   isWebUrl,
@@ -88,6 +81,7 @@ import { SectionTitle } from "./ui.jsx";
 const EDITING_STATUS_OPTIONS = ["未着手", "脚本・配役調整中", "収録中", "音声編集中", "確認中", "公開準備中", "完了"];
 const MATERIAL_ASPECT_RATIOS = ["", "16:9", "9:16", "1:1"];
 const WORDPRESS_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp";
+const AUDITION_IMAGE_FOLDER_URL = "https://drive.google.com/drive/folders/11uxFA2aHVaKv99sRq7yXJKiR5blVn_s9";
 const PUBLIC_QUESTIONER_NAME_KEY = "voice-casting-studio-questioner-name";
 
 const readPublicQuestionerName = () => {
@@ -1637,7 +1631,6 @@ function TasksView({
   const [appsScriptSecret, setAppsScriptSecret] = useState("");
   const [automationMessage, setAutomationMessage] = useState("");
   const [creatingCharacterId, setCreatingCharacterId] = useState("");
-  const [imageFolderStatus, setImageFolderStatus] = useState({ supported: true, selected: false, permitted: false, name: "" });
   const unassignedCharacters = getUnassignedProductionCharacters(project);
   const tasks = sortProductionTasks(project.tasks);
   const incompleteTaskCount = tasks.filter((task) => !task.completed).length;
@@ -1649,17 +1642,6 @@ function TasksView({
   const canOpenAuditionFolder = isWebUrl(project.auditionFormsFolderUrl);
   const automationSettings = auditionAutomation.settings || {};
   const automationReady = Boolean(automationSettings.hasOpenAiKey && automationSettings.appsScriptConfigured);
-
-  useEffect(() => {
-    if (!canEditScript) return undefined;
-    let cancelled = false;
-    getAuditionImageFolderStatus().then((status) => {
-      if (!cancelled) setImageFolderStatus(status);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [canEditScript]);
 
   const patchTask = (taskId, patch) => updateProject((current) => ({
     ...current,
@@ -1730,17 +1712,6 @@ function TasksView({
     }
   };
 
-  const chooseImageFolder = async () => {
-    setAutomationMessage("");
-    try {
-      const status = await chooseAuditionImageFolder();
-      setImageFolderStatus((current) => ({ ...current, ...status, supported: true }));
-      setAutomationMessage(`画像のPC保存先を「${status.name}」に設定しました。`);
-    } catch (error) {
-      if (error?.name !== "AbortError") setAutomationMessage(error.message);
-    }
-  };
-
   const createAuditionFormForCharacter = async (character, replaceImages = false) => {
     if (!onCreateAuditionForm || creatingCharacterId) return;
     setCreatingCharacterId(character.id);
@@ -1749,20 +1720,15 @@ function TasksView({
       : `${character.name}の画像を生成し、文字と余白を監査してからフォームを作成しています…`);
     try {
       const result = await onCreateAuditionForm(project.id, character.id, { replaceImages });
-      const imageFiles = Array.isArray(result.imageFiles) ? result.imageFiles : [];
-      if (!imageFiles.length) {
-        setAutomationMessage(`${character.name}の作成済みフォームを確認し、ツールへ反映しました。`);
-        return;
-      }
-      const saveResult = await saveAuditionImageFiles(imageFiles);
-      if (!saveResult.saved && imageFiles.length) downloadAuditionImageFiles(imageFiles);
       const headerAttempts = Number(result.imageAudit?.header?.attempts) || 1;
       const socialAttempts = Number(result.imageAudit?.social?.attempts) || 1;
       const auditSummary = `画像監査はヘッダー${headerAttempts}回目、SNS${socialAttempts}回目で合格しました。`;
-      const actionSummary = replaceImages ? "Driveの古い画像を削除し、合格画像へ差し替えました。" : "フォームを作成しました。";
-      setAutomationMessage(saveResult.saved
-        ? `${character.name}：${actionSummary}${auditSummary}PCの「${saveResult.folderName}」にも保存しました。`
-        : `${character.name}：${actionSummary}${auditSummary}PC保存先が未選択のため、画像をダウンロードしました。`);
+      const actionSummary = replaceImages
+        ? "Driveの画像を、監査に合格した画像へ差し替えました。"
+        : result.recovered
+          ? "作成済みフォームとDrive画像をツールへ反映しました。"
+          : "フォームを作成し、2種類の画像をDriveへ保存しました。";
+      setAutomationMessage(`${character.name}：${actionSummary}${auditSummary} Googleフォーム編集画面でテーマヘッダーを設定し、「復元」が表示された場合は押してください。`);
     } catch (error) {
       setAutomationMessage(error.message);
     } finally {
@@ -1828,10 +1794,6 @@ function TasksView({
                   {auditionAutomation.status === "saving" ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}
                   APIキーを保存
                 </button>
-                <button type="button" className="secondary" disabled={!imageFolderStatus.supported} onClick={chooseImageFolder}>
-                  <Download size={16} />
-                  {imageFolderStatus.selected ? "PC保存先を変更" : "PC保存先を選択"}
-                </button>
               </div>
               {!automationSettings.appsScriptConfigured && <details className="audition-google-setup">
                 <summary>初回のGoogle連携設定</summary>
@@ -1866,7 +1828,8 @@ function TasksView({
               <div className="audition-automation-notes">
                 <span><ShieldCheck size={15} />APIキーと作成ボタンは制作オーナーだけに表示され、キーそのものは画面へ再表示しません。</span>
                 <span><ShieldCheck size={15} />文字切れ・誤字・ロゴ欠けを監査し、不合格なら最大{automationSettings.maxImageAttempts || 3}回まで自動で作り直します。</span>
-                <span>PC保存先：{imageFolderStatus.selected ? imageFolderStatus.name : "オーディションフォームサムネ一覧（最初に一度選択）"}</span>
+                <span><FolderOpen size={15} />生成画像はGoogle Driveの専用フォルダーへ自動保存します。PCの保存画面は開きません。</span>
+                <a href={AUDITION_IMAGE_FOLDER_URL} target="_blank" rel="noreferrer"><ExternalLink size={15} />生成画像フォルダーを開く</a>
               </div>
               {(automationMessage || auditionAutomation.message) && <p className={`audition-automation-message${auditionAutomation.status === "error" ? " error" : ""}`} role="status">{automationMessage || auditionAutomation.message}</p>}
             </section>}
@@ -1929,7 +1892,8 @@ function TasksView({
                     {roleProgress.headerImageUrl && <a href={roleProgress.headerImageUrl} target="_blank" rel="noreferrer"><FileImage size={14} />ヘッダー画像</a>}
                     {roleProgress.socialImageUrl && <a href={roleProgress.socialImageUrl} target="_blank" rel="noreferrer"><FileImage size={14} />SNS画像</a>}
                     {roleProgress.imageAudit?.passed && <span className="audition-audit-pass"><ShieldCheck size={14} />画像監査済み（ヘッダー{roleProgress.imageAudit.header?.attempts || 1}回・SNS{roleProgress.imageAudit.social?.attempts || 1}回）</span>}
-                    <span>Googleフォームのテーマ画面で、生成済みヘッダー画像を選ぶと完成です。</span>
+                    <span>ヘッダー設定：「フォームを編集」→「テーマをカスタマイズ」→「ヘッダー」→「画像を選択」→「アップロード」</span>
+                    <span>「ファイルのアップロード先のフォルダが見つかりません」と表示された場合は、フォーム編集画面で「復元」を押してください。</span>
                   </div>}
                 </article>
               })}

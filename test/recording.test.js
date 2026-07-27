@@ -44,7 +44,12 @@ test("keeps unassigned role tasks in sync with actor assignments", () => {
       { id: "old_role", name: "旧台本の役" }
     ],
     castMembers: [{ id: "actor_a", actorName: "声優A", characterIds: ["role_a"] }],
-    auditionRoleProgress: [{ characterId: "role_b", formCreated: true, recruitmentStarted: true }],
+    auditionRoleProgress: [{
+      characterId: "role_b",
+      formCreated: true,
+      recruitmentStarted: true,
+      imageAudit: { passed: true }
+    }],
     lines: [
       { id: "line_a", characterId: "role_a", text: "Aのセリフ", kind: "dialogue" },
       { id: "line_b", characterId: "role_b", text: "Bのセリフ", kind: "dialogue" }
@@ -63,6 +68,7 @@ test("keeps unassigned role tasks in sync with actor assignments", () => {
     formResponderUrl: "",
     headerImageUrl: "",
     socialImageUrl: "",
+    imageAudit: { passed: true },
     createdAt: "",
     updatedAt: ""
   });
@@ -94,6 +100,7 @@ test("normalizes and sorts manual production tasks", () => {
     formResponderUrl: "",
     headerImageUrl: "",
     socialImageUrl: "",
+    imageAudit: {},
     createdAt: "",
     updatedAt: ""
   }]);
