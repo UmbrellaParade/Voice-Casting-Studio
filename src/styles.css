@@ -4891,6 +4891,138 @@ h1 {
   white-space: nowrap;
 }
 
+.line-status-selects .line-reviewed-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid #cfc4b5;
+  border-radius: 5px;
+  background: #fff;
+  cursor: default;
+}
+
+.line-status-selects .line-reviewed-check.checked {
+  border-color: #7f9fd0;
+  background: #eaf1fa;
+  color: #274c7d;
+}
+
+.line-reviewed-check input {
+  width: 17px;
+  height: 17px;
+  min-height: auto;
+  margin: 0;
+  accent-color: #3b6fb0;
+}
+
+.line-reviewed-check span {
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+/* 声優さん用の共有台本では、セリフの縦幅を伸ばさないよう操作を右列へ寄せる */
+.script-line-states.shared-line-controls {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  max-width: none;
+  width: 152px;
+}
+
+.shared-line-controls .line-recorded-check,
+.shared-line-controls .line-reviewed-check {
+  min-height: 28px;
+  padding: 4px 8px;
+}
+
+.shared-line-controls .line-recorded-check input,
+.shared-line-controls .line-reviewed-check input {
+  width: 15px;
+  height: 15px;
+}
+
+.shared-note-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid #cfc4b5;
+  border-radius: 5px;
+  background: #fff;
+  color: #675e70;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.shared-note-toggle.has-note {
+  border-color: #b9a27f;
+  background: #fbf5ea;
+  color: #6b5327;
+}
+
+.shared-note-toggle i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c08a2e;
+}
+
+.shared-line-notes {
+  display: grid;
+  gap: 9px;
+  margin-top: 10px;
+  padding: 11px;
+  border: 1px solid #ded3c4;
+  border-radius: 7px;
+  background: #fdfaf5;
+}
+
+.shared-line-notes > label {
+  display: grid;
+  gap: 5px;
+}
+
+.shared-line-notes > label > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #675e70;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.shared-line-notes textarea {
+  width: 100%;
+  min-height: 68px;
+  padding: 8px 9px;
+  border: 1px solid #cfc4b5;
+  border-radius: 5px;
+  background: #fff;
+  color: #3f3748;
+  font: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.shared-line-notes button {
+  justify-self: start;
+}
+
+@media (max-width: 720px) {
+  .script-line-states.shared-line-controls {
+    width: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+}
+
 .line-status-selects select {
   min-height: 32px;
   padding: 4px 24px 4px 7px;
@@ -6157,138 +6289,6 @@ h1 {
   border-left-color: var(--character-color, #7763a4);
 }
 
-.shared-line-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 10px;
-  border-top: 1px solid #ece4da;
-}
-
-.record-complete {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: 38px;
-  padding: 7px 12px;
-  border: 1px solid #6fa88f;
-  border-radius: 6px;
-  background: #eff9f4;
-  color: #29684f;
-  font-weight: 900;
-}
-
-.record-complete.active {
-  background: #2d805f;
-  color: #fff;
-}
-
-.shared-director-note {
-  display: flex;
-  gap: 9px;
-  padding: 11px 12px;
-  border-left: 3px solid #d65285;
-  border-radius: 5px;
-  background: #fff0f5;
-  color: #8e2d53;
-}
-
-.shared-director-note svg {
-  flex: 0 0 auto;
-  margin-top: 2px;
-}
-
-.shared-director-note b {
-  font-size: 12px;
-}
-
-.shared-director-note p {
-  margin: 4px 0 0;
-  line-height: 1.65;
-}
-
-.shared-submission-editor {
-  display: grid;
-  gap: 11px;
-  padding: 14px;
-  border: 1px solid #d8ccbd;
-  border-radius: 7px;
-  background: #fffaf3;
-}
-
-.recording-upload-button {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 58px;
-  padding: 10px 12px;
-  border: 1px dashed #168b9a;
-  border-radius: 6px;
-  background: #edf8f8;
-  color: #126d78;
-  cursor: pointer;
-  font-weight: 900;
-}
-
-.recording-upload-button span {
-  display: grid;
-}
-
-.recording-upload-button small {
-  color: #65747a;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.recording-upload-button input {
-  display: none;
-}
-
-.submission-or {
-  position: relative;
-  color: #8a818e;
-  font-size: 11px;
-  text-align: center;
-}
-
-.submission-or::before {
-  position: absolute;
-  top: 50%;
-  right: 0;
-  left: 0;
-  height: 1px;
-  background: #ded5c9;
-  content: "";
-}
-
-.submission-or span {
-  position: relative;
-  padding: 0 8px;
-  background: #fffaf3;
-}
-
-.shared-submission-editor > label:not(.recording-upload-button) {
-  display: grid;
-  gap: 5px;
-  color: #5d5366;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.shared-submission-editor input,
-.shared-submission-editor textarea {
-  width: 100%;
-  min-height: 40px;
-  padding: 8px 10px;
-  border: 1px solid #d2c8bc;
-  border-radius: 5px;
-  background: #fff;
-}
-
-.shared-submission-editor textarea {
-  min-height: 80px;
-  resize: vertical;
-}
 
 .shared-actor-note {
   display: flex;

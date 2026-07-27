@@ -35,9 +35,7 @@ import {
 } from "lucide-react";
 import { getFromGasEndpoint, loadAppConfig, postToGasEndpoint } from "../lib/gas.js";
 import {
-  AUDIO_FILE_ACCEPT,
   getGoogleDriveFileId,
-  isWebUrl,
   makeDirectAudioDownloadUrl,
   newId,
   parseCsv
@@ -81,7 +79,6 @@ import {
 import { Field, SectionTitle, TextArea } from "./ui.jsx";
 import { getScriptSceneAnchorId, ScriptSceneToc } from "./ScriptSceneToc.jsx";
 
-const MAX_RECORDING_UPLOAD_BYTES = 25 * 1024 * 1024;
 const COLLABORATIVE_LINE_FIELDS = new Set([
   "actorStatus",
   "reviewStatus",
@@ -230,14 +227,6 @@ const copyText = async (text, setMessage, message = "コピーしました。") 
     setMessage("コピーできませんでした。URLを選択してコピーしてください。");
   }
 };
-
-const readFileAsDataUrl = (file) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("録音ファイルを読み取れませんでした。"));
-    reader.readAsDataURL(file);
-  });
 
 const getSceneGroups = (lines = []) => {
   const groups = [];
@@ -2255,12 +2244,19 @@ export function RecordingStudio({
   );
 }
 
-function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, uploadRecording, busy }) {
+function SharedLineCard({ project, line, canEdit, submitPatch, busy }) {
   const character = project.characters.find((item) => item.id === line.characterId);
   const isDirection = line.kind === "direction";
   const isManualBody = isDirection && line.manualBody;
-  const [editorOpen, setEditorOpen] = useState(false);
   const characterColor = character?.color || "#5f6d7a";
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteDraft, setNoteDraft] = useState(line.actorNote || "");
+  const openNotes = () => {
+    setNoteDraft(line.actorNote || "");
+    setNoteOpen((current) => !current);
+  };
+  const hasNote = Boolean(line.actorNote || line.directorNote);
+  const needsAttention = line.reviewStatus === "リテイク" || line.reviewStatus === "保留";
   return (
     <article
       className={`script-line-card shared${line.isContext ? " context-line" : ""}${isDirection ? " stage-direction-line" : ""}`}
@@ -2281,84 +2277,66 @@ function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, 
           {line.derivedFromManualBody && <small className="derived-manual-note">章本文から表示</small>}
         </div>
         {!isDirection && (
-          <div className="script-line-states">
-            <StatusBadge status={line.actorStatus} type="actor" />
-            <StatusBadge status={line.reviewStatus} type="review" />
+          <div className="script-line-states shared-line-controls">
+            {needsAttention && <StatusBadge status={line.reviewStatus} type="review" />}
+            <label className={`line-recorded-check${line.actorStatus !== "未収録" ? " checked" : ""}`}>
+              <input
+                type="checkbox"
+                checked={line.actorStatus !== "未収録"}
+                disabled={!canEdit || busy}
+                onChange={(event) => submitPatch(line.id, {
+                  actorStatus: event.target.checked
+                    ? (line.reviewStatus === "リテイク" ? "再提出済み" : "収録済み")
+                    : "未収録"
+                })}
+              />
+              <span>収録済み</span>
+            </label>
+            <label className={`line-reviewed-check${line.reviewStatus === "OK" ? " checked" : ""}`}>
+              <input type="checkbox" checked={line.reviewStatus === "OK"} disabled readOnly />
+              <span>確認済み</span>
+            </label>
+            {!line.isContext && (
+              <button type="button" className={`shared-note-toggle${hasNote ? " has-note" : ""}`} onClick={openNotes}>
+                {noteOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}メモ{hasNote && <i />}
+              </button>
+            )}
           </div>
         )}
       </div>
       {!line.isContext && !isDirection && (
         <>
-          <RecordingPlayer url={line.recordingUrl} fileName={line.recordingFileName} />
-          {line.directorNote && (
-            <div className="shared-director-note">
-              <Eye size={16} />
-              <div><b>{line.reviewStatus === "リテイク" ? "リテイク内容" : "確認メモ"}</b><p>{line.directorNote}</p></div>
-            </div>
-          )}
-          {canEdit && (
-            <div className="shared-line-actions">
-              <button
-                type="button"
-                className={line.actorStatus !== "未収録" ? "record-complete active" : "record-complete"}
-                onClick={() => submitPatch(line.id, { actorStatus: line.actorStatus !== "未収録" ? "未収録" : "収録済み" })}
-                disabled={busy}
-              >
-                <CheckCircle2 size={18} />{line.actorStatus !== "未収録" ? line.actorStatus : "収録完了にする"}
-              </button>
-              <button type="button" className="secondary" onClick={() => setEditorOpen((current) => !current)}>
-                <Upload size={16} />録音を提出
-              </button>
-            </div>
-          )}
-          {canEdit && editorOpen && (
-            <div className="shared-submission-editor">
-              <label className="recording-upload-button">
-                <FileAudio size={18} />
-                <span>MP3・WAV・M4Aを選択<small>1ファイル25MBまで</small></span>
-                <input
-                  type="file"
-                  accept={AUDIO_FILE_ACCEPT}
-                  disabled={busy}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) uploadRecording(line.id, file);
-                    event.target.value = "";
-                  }}
-                />
-              </label>
-              <div className="submission-or"><span>または</span></div>
+          {line.recordingUrl && <RecordingPlayer url={line.recordingUrl} fileName={line.recordingFileName} />}
+          {noteOpen && (
+            <div className="shared-line-notes">
+              {line.directorNote && (
+                <div className="shared-director-note">
+                  <Eye size={16} />
+                  <div><b>{line.reviewStatus === "リテイク" ? "リテイク内容" : "確認メモ"}</b><p>{line.directorNote}</p></div>
+                </div>
+              )}
               <label>
-                <span>Google Driveなどの録音URL</span>
-                <input
-                  value={draft.recordingUrl}
-                  onChange={(event) => setDraft(line.id, { recordingUrl: event.target.value })}
-                  placeholder="https://drive.google.com/..."
-                />
-              </label>
-              <label>
-                <span>提出メモ</span>
+                <span><UserRound size={14} />収録メモ</span>
                 <textarea
-                  value={draft.actorNote}
-                  onChange={(event) => setDraft(line.id, { actorNote: event.target.value })}
-                  placeholder="収録時の補足があれば入力"
+                  value={noteDraft}
+                  onChange={(event) => setNoteDraft(event.target.value)}
+                  disabled={!canEdit || busy}
+                  placeholder={canEdit ? "気になった点や、確認したいことを書けます。管理者にも共有されます。" : "担当セリフではないため入力できません。"}
                 />
               </label>
-              <button
-                type="button"
-                className="primary"
-                disabled={busy || (draft.recordingUrl && !isWebUrl(draft.recordingUrl))}
-                onClick={() => submitPatch(line.id, {
-                  recordingUrl: draft.recordingUrl,
-                  actorNote: draft.actorNote,
-                  actorStatus: line.reviewStatus === "リテイク" ? "再提出済み" : "収録済み"
-                })}
-              >
-                <Save size={16} />提出内容を保存
-              </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy || noteDraft === (line.actorNote || "")}
+                  onClick={() => submitPatch(line.id, { actorNote: noteDraft })}
+                >
+                  <Save size={16} />メモを保存
+                </button>
+              )}
             </div>
           )}
-          {line.actorNote && <p className="shared-actor-note"><UserRound size={14} /><span>{line.actorNote}</span></p>}
+          {!noteOpen && line.actorNote && <p className="shared-actor-note"><UserRound size={14} /><span>{line.actorNote}</span></p>}
         </>
       )}
     </article>
@@ -2377,7 +2355,6 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("すべて");
   const [state, setState] = useState({ busy: true, message: "共有台本を読み込んでいます…", error: false, busyLineId: "" });
-  const [drafts, setDrafts] = useState({});
   const [openSceneIds, setOpenSceneIds] = useState(new Set());
   const [openChapterIds, setOpenChapterIds] = useState(new Set());
   const displayProject = useMemo(() => project ? getRecordingDisplayProject(project) : null, [project]);
@@ -2469,19 +2446,7 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
     return () => window.clearInterval(timer);
   }, [project?.id, endpointUrl]);
 
-  const setDraft = (lineId, patch) => {
-    setDrafts((current) => ({
-      ...current,
-      [lineId]: {
-        recordingUrl: project.lines.find((line) => line.id === lineId)?.recordingUrl || "",
-        actorNote: project.lines.find((line) => line.id === lineId)?.actorNote || "",
-        ...(current[lineId] || {}),
-        ...patch
-      }
-    }));
-  };
-
-  const submitPatch = async (lineId, patch, attachment = null) => {
+  const submitPatch = async (lineId, patch) => {
     setState({ busy: false, message: "変更を共有しています…", error: false, busyLineId: lineId });
     const displayLine = displayProject?.lines.find((item) => item.id === lineId);
     try {
@@ -2501,40 +2466,12 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
           chapterId: displayLine.chapterId,
           sceneId: displayLine.sceneId,
           performanceType: displayLine.performanceType || "通常"
-        } : null,
-        recordingAttachment: attachment
+        } : null
       });
       setProject(normalizeRecordingProject(result.project));
-      setDrafts((current) => {
-        const next = { ...current };
-        delete next[lineId];
-        return next;
-      });
       setState({ busy: false, message: "変更を共有しました。", error: false, busyLineId: "" });
     } catch (error) {
       setState({ busy: false, message: `保存できませんでした: ${error.message}`, error: true, busyLineId: "" });
-    }
-  };
-
-  const uploadRecording = async (lineId, file) => {
-    if (file.size > MAX_RECORDING_UPLOAD_BYTES) {
-      setState({ busy: false, message: "25MBを超える録音は、Google Driveへ置いて共有URLを貼ってください。", error: true, busyLineId: "" });
-      return;
-    }
-    try {
-      setState({ busy: false, message: `${file.name} を送信しています…`, error: false, busyLineId: lineId });
-      const dataUrl = await readFileAsDataUrl(file);
-      const line = displayProject?.lines.find((item) => item.id === lineId);
-      await submitPatch(
-        lineId,
-        {
-          actorStatus: line?.reviewStatus === "リテイク" ? "再提出済み" : "収録済み",
-          recordingFileName: file.name
-        },
-        { fileName: file.name, mimeType: file.type || "audio/mpeg", size: file.size, dataUrl }
-      );
-    } catch (error) {
-      setState({ busy: false, message: error.message, error: true, busyLineId: "" });
     }
   };
 
@@ -2651,22 +2588,16 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
                     anchorId={getScriptSceneAnchorId(tocScopeId, scene.sceneId)}
                   >
                     <div className="script-line-list">
-                      {scene.lines.map((line) => {
-                        const draft = drafts[line.id] || { recordingUrl: line.recordingUrl, actorNote: line.actorNote };
-                        return (
-                          <SharedLineCard
-                            key={line.id}
-                            project={project}
-                            line={line}
-                            canEdit={!line.isContext && editableCharacters.has(line.characterId)}
-                            draft={draft}
-                            setDraft={setDraft}
-                            submitPatch={submitPatch}
-                            uploadRecording={uploadRecording}
-                            busy={state.busyLineId === line.id}
-                          />
-                        );
-                      })}
+                      {scene.lines.map((line) => (
+                        <SharedLineCard
+                          key={line.id}
+                          project={project}
+                          line={line}
+                          canEdit={!line.isContext && editableCharacters.has(line.characterId)}
+                          submitPatch={submitPatch}
+                          busy={state.busyLineId === line.id}
+                        />
+                      ))}
                     </div>
                   </ScriptSceneSection>
                 ))}
