@@ -27,7 +27,9 @@ export const DEFAULT_AUDIO_SAVE_MEMO = "Drive: 回答保存先フォルダー内
 export const publicAsset = (path) => {
   const runtimeBase = globalThis.VoiceCastingStudio?.assetBaseUrl;
   const base = runtimeBase || VITE_ENV.BASE_URL || "/";
-  return `${String(base).replace(/\/?$/, "/")}${path.replace(/^\/+/, "")}`;
+  const url = `${String(base).replace(/\/?$/, "/")}${path.replace(/^\/+/, "")}`;
+  const assetVersion = globalThis.VoiceCastingStudio?.assetVersion;
+  return assetVersion ? `${url}?v=${encodeURIComponent(assetVersion)}` : url;
 };
 export const GUEST_BADGE_ASSET_URL = publicAsset("thumbnail-overlays/guest-in-badge.png");
 

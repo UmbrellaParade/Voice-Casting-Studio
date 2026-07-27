@@ -128,6 +128,7 @@ function vcs_enqueue_application(): void
     wp_localize_script('voice-casting-studio-app', 'VoiceCastingStudio', [
         'mode' => 'wordpress',
         'assetBaseUrl' => trailingslashit($theme_uri . '/assets'),
+        'assetVersion' => (string) wp_get_theme()->get('Version'),
         'restUrl' => trailingslashit(rest_url(VCS_REST_NAMESPACE)),
         'nonce' => is_user_logged_in() ? wp_create_nonce('wp_rest') : '',
         'publicNonce' => !is_user_logged_in() ? wp_create_nonce('vcs_public_collaboration') : '',
