@@ -35,6 +35,14 @@ import {
 } from "lucide-react";
 import { getFromGasEndpoint, loadAppConfig, postToGasEndpoint } from "../lib/gas.js";
 import {
+  SharedCharacters,
+  SharedLinks,
+  SharedMaterials,
+  SharedMemberNav,
+  SharedSchedule,
+  SharedTasks
+} from "./SharedMemberScreens.jsx";
+import {
   getGoogleDriveFileId,
   makeDirectAudioDownloadUrl,
   newId,
@@ -2357,6 +2365,7 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
   const [state, setState] = useState({ busy: true, message: "共有台本を読み込んでいます…", error: false, busyLineId: "" });
   const [openSceneIds, setOpenSceneIds] = useState(new Set());
   const [openChapterIds, setOpenChapterIds] = useState(new Set());
+  const [memberTab, setMemberTab] = useState("script");
   const displayProject = useMemo(() => project ? getRecordingDisplayProject(project) : null, [project]);
   const allChapters = useMemo(() => getChapterGroups(displayProject?.lines || []), [displayProject?.lines]);
   const scopedProject = useMemo(() => displayProject ? ({
@@ -2550,6 +2559,23 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
           </button>
         </div>
       </section>
+      <SharedMemberNav
+        active={memberTab}
+        onSelect={setMemberTab}
+        counts={{
+          characters: (project.characters || []).length,
+          materials: (project.materials || []).length,
+          links: (project.sharedLinks || []).length,
+          schedule: (project.announcements || []).length + (project.deadlineItems || []).length + (project.scheduleItems || []).length,
+          tasks: (project.tasks || []).length
+        }}
+      />
+      {memberTab === "characters" && <SharedCharacters project={project} viewer={viewer} />}
+      {memberTab === "materials" && <SharedMaterials project={project} />}
+      {memberTab === "links" && <SharedLinks project={project} />}
+      {memberTab === "schedule" && <SharedSchedule project={project} />}
+      {memberTab === "tasks" && <SharedTasks project={project} />}
+      {memberTab !== "script" ? null : <>
       <ChapterSelector
         chapters={allChapters}
         selectedChapterId={selectedChapterId}
@@ -2613,6 +2639,7 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
           )}
         </div>
       </div>
+      </>}
       <footer className="shared-recording-footer">
         <span>このページの進捗は管理者と共有されています。</span>
         <span>最終更新 {formatUpdatedAt(project.updatedAt)}</span>

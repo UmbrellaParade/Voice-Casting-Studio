@@ -1,0 +1,377 @@
+/* 声優さん用の共有ページ専用。既存の styles.css / member.css とは
+   クラス名が重ならないよう vcsm- 接頭辞で閉じている。 */
+
+.vcsm-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0 4px;
+}
+
+.vcsm-nav button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 13px;
+  border: 1px solid #cfc4b5;
+  border-radius: 999px;
+  background: #fff;
+  color: #675e70;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.vcsm-nav button:hover {
+  border-color: #b3a48f;
+}
+
+.vcsm-nav button.active {
+  border-color: #3f3748;
+  background: #3f3748;
+  color: #fdfaf5;
+}
+
+.vcsm-nav button i {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #ece3d6;
+  color: #6b5327;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  text-align: center;
+}
+
+.vcsm-nav button.active i {
+  background: #6b6274;
+  color: #fdfaf5;
+}
+
+.vcsm-empty {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  padding: 42px 18px;
+  border: 1px dashed #cfc4b5;
+  border-radius: 9px;
+  background: #fdfaf5;
+  color: #857a91;
+  text-align: center;
+}
+
+.vcsm-empty b {
+  color: #3f3748;
+  font-size: 14px;
+}
+
+.vcsm-empty span {
+  font-size: 12px;
+}
+
+.vcsm-section-stack {
+  display: grid;
+  gap: 13px;
+}
+
+.vcsm-panel {
+  padding: 15px;
+  border: 1px solid #ded3c4;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.vcsm-panel h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 11px;
+  color: #3f3748;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.vcsm-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vcsm-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid #ece3d6;
+  border-radius: 7px;
+  background: #fdfaf5;
+}
+
+.vcsm-list li.done {
+  opacity: 0.62;
+}
+
+.vcsm-list li.done b {
+  text-decoration: line-through;
+}
+
+.vcsm-list li > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 220px;
+}
+
+.vcsm-list b {
+  color: #3f3748;
+  font-size: 13px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.vcsm-list small {
+  color: #675e70;
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.vcsm-list a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border: 1px solid #cfc4b5;
+  border-radius: 6px;
+  background: #fff;
+  color: #3f3748;
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.vcsm-list a:hover {
+  border-color: #3f3748;
+}
+
+.vcsm-list-muted {
+  color: #a4998f;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.vcsm-schedule-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.vcsm-date {
+  color: #3f3748;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.vcsm-schedule-meta em {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #ece3d6;
+  color: #6b5327;
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.vcsm-status.status-完了,
+.vcsm-status.status-完了予定 {
+  background: #e8f6ef;
+  color: #205e45;
+}
+
+.vcsm-status.status-延期,
+.vcsm-status.status-中止 {
+  background: #fbe9e9;
+  color: #8c2f2f;
+}
+
+.vcsm-character-grid,
+.vcsm-link-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.vcsm-character-card {
+  display: grid;
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid #ded3c4;
+  border-left: 4px solid var(--character-color, #5f6d7a);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.vcsm-character-card.mine {
+  border-color: #b9a27f;
+  border-left-color: var(--character-color, #5f6d7a);
+  background: #fffdf8;
+  box-shadow: 0 1px 0 #efe4d2;
+}
+
+.vcsm-character-head {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+}
+
+.vcsm-character-head img,
+.vcsm-character-noimage {
+  width: 58px;
+  height: 58px;
+  flex: none;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #ece3d6;
+}
+
+.vcsm-character-noimage {
+  display: grid;
+  place-items: center;
+  color: #a4998f;
+}
+
+.vcsm-character-head > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.vcsm-character-head b {
+  color: #3f3748;
+  font-size: 14px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.vcsm-character-head small {
+  color: #857a91;
+  font-size: 11px;
+}
+
+.vcsm-character-actor {
+  color: var(--character-color, #5f6d7a);
+  font-size: 11.5px;
+  font-weight: 900;
+}
+
+.vcsm-character-badge {
+  justify-self: start;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #3f3748;
+  color: #fdfaf5;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.vcsm-character-profile,
+.vcsm-character-background {
+  margin: 0;
+  color: #4e4557;
+  font-size: 12.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.vcsm-character-background {
+  padding-top: 8px;
+  border-top: 1px dashed #ece3d6;
+  color: #675e70;
+  font-size: 12px;
+}
+
+.vcsm-character-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.vcsm-character-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 11px;
+  border: 1px solid #cfc4b5;
+  border-radius: 6px;
+  background: #fdfaf5;
+  color: #3f3748;
+  font-size: 11.5px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.vcsm-character-links a:hover {
+  border-color: #3f3748;
+}
+
+.vcsm-link-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid #ded3c4;
+  border-top: 4px solid var(--link-color, #5f6d7a);
+  border-radius: 9px;
+  background: #fff;
+  color: inherit;
+  text-decoration: none;
+}
+
+.vcsm-link-card:hover {
+  border-color: #3f3748;
+  border-top-color: var(--link-color, #5f6d7a);
+}
+
+.vcsm-link-card b {
+  color: #3f3748;
+  font-size: 13px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.vcsm-link-card small {
+  color: #675e70;
+  font-size: 11.5px;
+  white-space: pre-wrap;
+}
+
+.vcsm-link-card span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--link-color, #5f6d7a);
+  font-size: 11.5px;
+  font-weight: 900;
+}
+
+@media (max-width: 720px) {
+  .vcsm-character-grid,
+  .vcsm-link-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vcsm-nav button {
+    flex: 1 1 calc(50% - 6px);
+    justify-content: center;
+  }
+}
