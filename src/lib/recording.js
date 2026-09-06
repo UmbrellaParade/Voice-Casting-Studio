@@ -1,16 +1,243 @@
+import {
+  createDefaultAuditionSocialTemplate,
+  normalizeAuditionSocialPostText,
+  normalizeAuditionSocialTemplate
+} from "./audition-copy.js";
+import { normalizeSePromptDraft } from "./se-prompts.js";
+import { mergeRecordingProgress, normalizeProgressTimes, stampProgressPatch } from "./recording-sync.js";
+import { buildManualAccentPattern, normalizeRetakeInstructions } from "./retake.js";
+
 export const ACTOR_RECORDING_STATUSES = ["未収録", "収録済み", "再提出済み"];
 export const DIRECTOR_REVIEW_STATUSES = ["未確認", "確認中", "OK", "リテイク", "保留"];
 export const LINE_PERFORMANCE_TYPES = ["通常", "ナレーション", "心の声", "イヤモニ"];
 export const PRODUCTION_MATERIAL_CATEGORIES = ["主題歌", "BGM", "SE", "完成音源", "サムネイル"];
 export const PRODUCTION_MATERIAL_STATUSES = ["準備中", "制作中", "確認待ち", "完成"];
 export const PRODUCTION_QUESTION_STATUSES = ["未回答", "回答済み", "解決済み"];
-export const PRODUCTION_SCHEDULE_TYPES = ["収録締切", "リテイク締切", "確認日", "公開予定", "編集", "収録", "打ち合わせ", "その他"];
+export const PRODUCTION_SCHEDULE_TYPES = ["収録締切", "リテイク締切", "確認日", "公開予定", "オーディション", "編集", "収録", "打ち合わせ", "その他"];
 export const PRODUCTION_SCHEDULE_STATUSES = ["予定", "進行中", "完了", "延期"];
 export const PRODUCTION_TASK_PRIORITIES = ["通常", "重要"];
+export const PRODUCTION_AUDITION_APPLICANT_STATUSES = ["未選考", "キープ", "別役打診", "合格", "不合格"];
+export const DEFAULT_AUDITION_MANAGEMENT_SHEET_URL = "https://docs.google.com/spreadsheets/d/19O9_lkivbomT5WiTRv-wsU5KKPLBx_lngZI4CclIXbY/edit?gid=1808011708#gid=1808011708";
+export const DEFAULT_CONTACT_TEMPLATE_SHEET_URL = "https://docs.google.com/spreadsheets/d/19O9_lkivbomT5WiTRv-wsU5KKPLBx_lngZI4CclIXbY/edit?gid=85517127#gid=85517127";
+export const PRODUCTION_CONTACT_TEMPLATE_CATEGORIES = ["募集告知", "応募受付", "確認依頼", "合格連絡", "その他", "不合格連絡", "リマインド"];
+export const PRODUCTION_SOCIAL_TEMPLATE_CATEGORIES = ["募集", "結果発表", "制作進捗", "公開案内", "お知らせ"];
 export const SHARED_LINK_COLORS = [
   "#168b9a", "#b04f74", "#6f5aa7", "#b36b1f",
   "#397c50", "#4b6fa9", "#9b4b45", "#7c5c3d"
 ];
+
+const PRODUCTION_CONTACT_TEMPLATE_SCHEMA_VERSION = 1;
+
+const sanitizeProductionRetakeMessageBody = (body = "") => String(body || "")
+  .split(/\r?\n/u)
+  .filter((line) => !/^さらにリテイクがある場合[：:]\s*ファイル名_re2\.wav$/u.test(line.trim()))
+  .join("\n");
+
+const DEFAULT_PRODUCTION_CONTACT_TEMPLATES = [
+  {
+    id: "contact_template_recruitment",
+    category: "募集告知",
+    name: "募集開始のお知らせ",
+    body: "【声優オーディション開催】\n作品名：〇〇\n募集役：〇〇\n応募締切：〇月〇日\n応募方法：〇〇\n皆さまのご応募をお待ちしています！",
+    notes: "SNS・告知ページ用",
+    enabled: true
+  },
+  {
+    id: "contact_template_received",
+    category: "応募受付",
+    name: "応募受付のご連絡",
+    body: "〇〇さん\nこのたびは【作品名／役名】へご応募いただき、ありがとうございます。\n応募内容を受け付けました。結果発表まで今しばらくお待ちください。",
+    notes: "応募確認時",
+    enabled: true
+  },
+  {
+    id: "contact_template_missing_information",
+    category: "確認依頼",
+    name: "不足情報のお願い",
+    body: "〇〇さん\nご応募ありがとうございます。\n確認のため、次の情報をご共有いただけますでしょうか。\n・〇〇\n・〇〇\nよろしくお願いいたします。",
+    notes: "応募内容に不足がある場合",
+    enabled: true
+  },
+  {
+    id: "contact_template_retake",
+    category: "確認依頼",
+    name: "リテイクのお願い",
+    body: `〇〇さん
+
+お疲れさまです。べるぼです＾＾
+△△役の収録、本当にありがとうございます！
+
+音声を確認させていただき、下記の箇所についてリテイクをお願いできればと思い、ご連絡しました。
+
+{{リテイク一覧}}
+
+お手数をおかけして申し訳ありませんが、該当箇所をご確認のうえ、再収録をお願いいたします。
+
+再収録したファイルは、元のファイル名の末尾に「re1」のようにリテイク回数が分かる番号を付けて、いつもの収録フォルダーへアップロードをお願いいたします＾＾
+例：ファイル名_re1.wav
+
+分かりにくい点や確認したいことがありましたら、遠慮なくご連絡ください＾＾
+何卒よろしくお願いいたします。`,
+    notes: "台本で指定したリテイク箇所を担当声優へ送る場合",
+    enabled: true
+  },
+  {
+    id: "contact_template_accepted",
+    category: "合格連絡",
+    name: "合格のお知らせ",
+    body: `〇〇さん、初めてメッセージ送らせて頂きます＾＾
+べるぼと申します＾＾
+
+〇〇さん、この度は△△役をご応募頂きまして本当にありがとうございます！
+
+〇〇さんのお声を聴かせて頂き是非とも△△役をお願いさせて頂きたいと思いました＾＾
+是非ともよろしくお願いします！
+
+つきましては、LINEのオープンチャットで全声優さん達とやり取りをさせていただいておりますので以下のオープンチャットを登録しご入室頂けたらと思いますので何卒よろしくお願いいたします＾＾
+
+オープンチャット「Umbrella Parade アニメ&ボイスドラマ」
+line.me/ti/g2/1HHNE4n1JkYK9o8SL8dDbLnX96TgoUT1ubxd0Q?utm_source=invitation&utm_medium=link_copy&utm_campaign=default
+
+参加コード
+0703
+
+になりますので何卒よろしくお願いいたします🌟
+
+本当、お声を聴いたときに感動しました～☆彡
+
+録音についてですが、オプチャのノートの方に「セリフ録音について」という項目がありまして、その中に台本ツールについてと収録音声のアップロード先について書いております＾＾
+
+お手数おかけしますが一読して頂ければと思いますので何卒よろしくお願いいたします＾＾
+
+また、収録期日については現状ではまだ設けてない状態ですので焦らず録音して頂ければと思いますので何卒よろしくお願いいたします＾＾`,
+    notes: "合格者への連絡",
+    enabled: true
+  },
+  {
+    id: "contact_template_other_role",
+    category: "その他",
+    name: "別の役を依頼",
+    body: `〇〇さん、初めてメッセージ送らせて頂きます＾＾
+べるぼと申します＾＾
+
+この度は、△△役のご応募を頂き本当にありがとうございました！
+
+今回、△△役につきましては、〇〇さんのお声、物凄い素敵で本当に悩みましたが別の方に演じて頂くことになりました。
+本当にすみません。
+
+今回△△役ではないのですが、〇〇さんのお声のサンプルを聴く中で別の役をお願いできたらと思いまして連絡させて頂きました＾＾
+
+〇〇さんにお願いしたい役として、
+◆◆という役があります。
+こちらセリフ数は少ないのですが、もしよかったらサンプルにあった「◇◇」のお声の感じで演じて頂けないかと思いました＾＾
+
+以下、今回のボイスドラマの台本になっていて、
+{{登場案内}}
+よろしければご検討いただけましたら幸いです＾＾
+
+〇ボイスドラマ脚本
+drive.google.com/drive/folders/17aeoWD5sju-PJujaNF54Ot3JosK4AGvd
+
+お手数おかけしますがご返信いただけたらと嬉しいです＾＾
+何卒よろしくお願いいたします＾＾
+◆◆のキャラクター画像はこちらになります＾＾`,
+    notes: "別役をお願いする場合",
+    enabled: true
+  },
+  {
+    id: "contact_template_rejected",
+    category: "不合格連絡",
+    name: "選考結果のお知らせ",
+    body: "〇〇さん\nこのたびは【作品名／役名】へご応募いただき、ありがとうございました。\n慎重に選考した結果、今回はご希望に添えない結果となりました。\n素敵なお声をお寄せいただいたこと、心より感謝申し上げます。",
+    notes: "不合格者への連絡",
+    enabled: true
+  },
+  {
+    id: "contact_template_reminder",
+    category: "リマインド",
+    name: "応募締切のご案内",
+    body: "【締切間近】\n【作品名】声優オーディションの応募締切は〇月〇日です。\nご検討中の方は、ぜひご応募ください！",
+    notes: "SNS再告知用",
+    enabled: true
+  }
+];
+
+export const createDefaultProductionContactTemplates = () => DEFAULT_PRODUCTION_CONTACT_TEMPLATES.map((template) => ({
+  ...template,
+  updatedAt: ""
+}));
+
+const migrateProductionContactTemplates = (project = {}) => {
+  const templates = Array.isArray(project.contactTemplates)
+    ? [...project.contactTemplates]
+    : createDefaultProductionContactTemplates();
+  const schemaVersion = Number.parseInt(project.contactTemplateSchemaVersion, 10) || 0;
+  const hasRetakeTemplate = templates.some((template) => template?.id === "contact_template_retake");
+  if (schemaVersion >= PRODUCTION_CONTACT_TEMPLATE_SCHEMA_VERSION || hasRetakeTemplate) return templates;
+  const retakeTemplate = createDefaultProductionContactTemplates()
+    .find((template) => template.id === "contact_template_retake");
+  return retakeTemplate ? [...templates, retakeTemplate] : templates;
+};
+
+const DEFAULT_PRODUCTION_SOCIAL_TEMPLATES = [
+  {
+    id: "social_template_audition",
+    category: "募集",
+    name: "声優募集のお知らせ",
+    body: `【声優オーディション開催】
+『{{作品名}}』の声優さんを募集しています＾＾
+
+募集内容と応募方法は、各役の募集フォームをご確認ください。
+
+#声優募集 #ボイスドラマ`,
+    notes: "作品全体の募集告知",
+    enabled: true
+  },
+  {
+    id: "social_template_result",
+    category: "結果発表",
+    name: "選考結果のお知らせ",
+    body: `【結果発表】
+勝手ながら、今回は合格者のみご連絡させていただきます。
+
+たくさんのご応募、本当にありがとうございました＾＾`,
+    notes: "選考終了後の全体告知",
+    enabled: true
+  },
+  {
+    id: "social_template_progress",
+    category: "制作進捗",
+    name: "制作進捗のお知らせ",
+    body: `【制作進捗】
+『{{作品名}}』の制作を進めています＾＾
+
+{{お知らせ}}
+
+#ボイスドラマ`,
+    notes: "収録・編集などの進捗共有",
+    enabled: true
+  },
+  {
+    id: "social_template_release",
+    category: "公開案内",
+    name: "公開のお知らせ",
+    body: `【公開のお知らせ】
+『{{作品名}}』を公開しました＾＾
+
+{{公開URL}}
+
+ぜひお聴きください！
+
+#ボイスドラマ`,
+    notes: "完成作品の公開告知",
+    enabled: true
+  }
+];
+
+export const createDefaultProductionSocialTemplates = () => DEFAULT_PRODUCTION_SOCIAL_TEMPLATES.map((template) => ({
+  ...template,
+  updatedAt: ""
+}));
 
 const normalizeScheduleTime = (value = "") => {
   const time = String(value || "").trim().slice(0, 5);
@@ -35,6 +262,42 @@ export const sortProductionScheduleItems = (items = []) => [...(Array.isArray(it
     return String(first?.time || "00:00").localeCompare(String(second?.time || "00:00"));
   });
 
+const toLocalScheduleDateTime = (value = new Date()) => {
+  const date = value instanceof Date ? value : new Date(value);
+  const validDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  const pad = (number) => String(number).padStart(2, "0");
+  return {
+    date: `${validDate.getFullYear()}-${pad(validDate.getMonth() + 1)}-${pad(validDate.getDate())}`,
+    time: `${pad(validDate.getHours())}:${pad(validDate.getMinutes())}`
+  };
+};
+
+export const addProductionAuditionStartSchedule = (project = {}, characterId = "", startedAt = new Date()) => {
+  const normalizedCharacterId = String(characterId || "").trim();
+  const character = (Array.isArray(project.characters) ? project.characters : [])
+    .find((item) => item.id === normalizedCharacterId);
+  if (!character) return project;
+
+  const sourceKey = `audition-recruitment-start:${normalizedCharacterId}`;
+  const scheduleItems = Array.isArray(project.scheduleItems) ? project.scheduleItems : [];
+  if (scheduleItems.some((item) => item.sourceKey === sourceKey)) return project;
+
+  const dateTime = toLocalScheduleDateTime(startedAt);
+  return {
+    ...project,
+    scheduleItems: [...scheduleItems, {
+      id: createLocalId("schedule"),
+      type: "オーディション",
+      title: `「${character.name || "役名未設定"}」オーディション募集開始`,
+      date: dateTime.date,
+      time: dateTime.time,
+      status: "進行中",
+      notes: "タスク画面の「募集開始済み」から自動追加",
+      sourceKey
+    }]
+  };
+};
+
 export const sortProductionTasks = (tasks = []) => [...(Array.isArray(tasks) ? tasks : [])]
   .sort((first, second) => {
     if (Boolean(first?.completed) !== Boolean(second?.completed)) return first?.completed ? 1 : -1;
@@ -57,15 +320,44 @@ const normalizeAuditionRoleProgress = (value) => {
   entries.forEach((progress) => {
     const characterId = String(progress?.characterId || "").trim();
     if (!characterId) return;
+    const roleSummary = String(progress.auditionRoleSummary || "");
+    const hasFemaleSetting = typeof progress.auditionAcceptsFemaleApplicants === "boolean";
+    const hasMaleSetting = typeof progress.auditionAcceptsMaleApplicants === "boolean";
+    const summaryRequestsMaleApplicants = /(?:女性の応募はご遠慮|男性(?:の方)?のみ.{0,16}応募)/u.test(roleSummary);
+    const summaryRequestsFemaleApplicants = /(?:男性の応募はご遠慮|女性(?:の方)?のみ.{0,16}応募)/u.test(roleSummary);
+    const acceptsFemaleApplicants = hasFemaleSetting
+      ? progress.auditionAcceptsFemaleApplicants
+      : summaryRequestsMaleApplicants
+        ? false
+        : true;
+    const acceptsMaleApplicants = hasMaleSetting
+      ? progress.auditionAcceptsMaleApplicants
+      : summaryRequestsFemaleApplicants
+        ? false
+        : true;
     byCharacterId.set(characterId, {
       characterId,
       formCreated: Boolean(progress.formCreated),
+      formStructureVerified: Boolean(progress.formStructureVerified),
+      formValidation: progress.formValidation && typeof progress.formValidation === "object" ? progress.formValidation : {},
+      headerApplied: Boolean(progress.headerApplied),
+      uploadVerified: Boolean(progress.uploadVerified),
       recruitmentStarted: Boolean(progress.recruitmentStarted),
       formEditUrl: String(progress.formEditUrl || ""),
       formResponderUrl: String(progress.formResponderUrl || ""),
       headerImageUrl: String(progress.headerImageUrl || ""),
       socialImageUrl: String(progress.socialImageUrl || ""),
       imageAudit: progress.imageAudit && typeof progress.imageAudit === "object" ? progress.imageAudit : {},
+      auditionRoleSummary: roleSummary,
+      auditionAcceptsFemaleApplicants: Boolean(acceptsFemaleApplicants),
+      auditionAcceptsMaleApplicants: Boolean(acceptsMaleApplicants),
+      auditionLines: String(progress.auditionLines || ""),
+      auditionDeadline: String(progress.auditionDeadline || ""),
+      socialPostText: normalizeAuditionSocialPostText(progress.socialPostText),
+      socialPostUpdatedAt: String(progress.socialPostUpdatedAt || ""),
+      pcFinishStatus: String(progress.pcFinishStatus || ""),
+      pcFinishMessage: String(progress.pcFinishMessage || ""),
+      pcFinishedAt: String(progress.pcFinishedAt || ""),
       createdAt: String(progress.createdAt || ""),
       updatedAt: String(progress.updatedAt || "")
     });
@@ -140,6 +432,12 @@ export const reorderProductionCharacters = (characters = [], sourceId = "", targ
 
 export const reorderProductionSharedLinks = (links = [], sourceId = "", targetId = "") =>
   reorderProductionItems(links, sourceId, targetId);
+
+export const reorderProductionMaterialSourceSites = (sites = [], sourceId = "", targetId = "") =>
+  reorderProductionItems(sites, sourceId, targetId);
+
+export const reorderProductionTemplates = (templates = [], sourceId = "", targetId = "") =>
+  reorderProductionItems(templates, sourceId, targetId);
 
 export const reorderProductionRecordingFolders = (characterIds = [], sourceId = "", targetId = "") =>
   reorderProductionItems(
@@ -484,6 +782,10 @@ const cloneScriptLines = (lines = []) => (Array.isArray(lines) ? lines : [])
     recordingFileName: String(line.recordingFileName || ""),
     actorNote: String(line.actorNote || ""),
     directorNote: String(line.directorNote || ""),
+    retakeAnnotations: normalizeRetakeInstructions(
+      line.retakeAnnotations,
+      stripRubyNotation(String(line.text || line.line || ""))
+    ),
     updatedAt: String(line.updatedAt || "")
   }));
 
@@ -539,6 +841,18 @@ export const getShareableRecordingProject = (project = {}) => {
   delete sharedProject.scriptSnapshots;
   delete sharedProject.sourceScriptText;
   delete sharedProject.auditionFormsFolderUrl;
+  delete sharedProject.auditionManagementSheetUrl;
+  delete sharedProject.auditionSocialTemplate;
+  delete sharedProject.contactTemplateSheetUrl;
+  delete sharedProject.contactTemplateSchemaVersion;
+  delete sharedProject.contactTemplates;
+  delete sharedProject.contactMessageDrafts;
+  delete sharedProject.manualContactRecipients;
+  delete sharedProject.otherRoleContact;
+  delete sharedProject.socialTemplates;
+  delete sharedProject.socialMessageDrafts;
+  delete sharedProject.auditionApplicants;
+  delete sharedProject.auditionApplicantsImportedAt;
   delete sharedProject.auditionFormFolderUrl;
   delete sharedProject.auditionFormUrl;
   delete sharedProject.auditionUrl;
@@ -548,6 +862,14 @@ export const getShareableRecordingProject = (project = {}) => {
     delete publicProgress.formResponderUrl;
     delete publicProgress.headerImageUrl;
     delete publicProgress.socialImageUrl;
+    delete publicProgress.auditionRoleSummary;
+    delete publicProgress.auditionAcceptsFemaleApplicants;
+    delete publicProgress.auditionAcceptsMaleApplicants;
+    delete publicProgress.auditionLines;
+    delete publicProgress.auditionDeadline;
+    delete publicProgress.socialPostText;
+    delete publicProgress.socialPostUpdatedAt;
+    delete publicProgress.pcFinishMessage;
     return publicProgress;
   });
   return sharedProject;
@@ -565,6 +887,291 @@ const getActorNameKey = (value = "") => String(value || "")
   .normalize("NFKC")
   .trim()
   .toLocaleLowerCase("ja");
+
+export const normalizeXProfileUrl = (value = "") => {
+  const source = String(value || "").normalize("NFKC").trim();
+  if (!source) return "";
+  const handleMatch = source.match(/^@([A-Za-z0-9_]{1,15})$/);
+  if (handleMatch) return `https://x.com/${handleMatch[1]}`;
+  const bareHandleMatch = source.match(/^([A-Za-z0-9_]{1,15})$/);
+  if (bareHandleMatch) return `https://x.com/${bareHandleMatch[1]}`;
+  try {
+    const candidate = new URL(/^https?:\/\//i.test(source) ? source : `https://${source}`);
+    const host = candidate.hostname.toLocaleLowerCase("en").replace(/^www\./, "");
+    if (!["x.com", "twitter.com", "mobile.twitter.com"].includes(host)) return source;
+    const handle = candidate.pathname.split("/").filter(Boolean)[0] || "";
+    return /^[A-Za-z0-9_]{1,15}$/.test(handle) ? `https://x.com/${handle}` : source;
+  } catch {
+    return source;
+  }
+};
+
+export const getActorContactName = (member = {}) => {
+  const explicitName = String(member.contactName || "").trim();
+  if (explicitName) return explicitName.replace(/(?:さん|さま|様)$/u, "").trim();
+  const actorName = String(member.actorName || "").trim().replace(/(?:さん|さま|様)$/u, "").trim();
+  return actorName || "声優さん";
+};
+
+export const getActorContactHonorific = (member = {}) => (
+  Object.prototype.hasOwnProperty.call(member, "contactHonorific")
+    ? String(member.contactHonorific || "").trim()
+    : "さん"
+);
+
+const LOW_DIALOGUE_COUNT_NOTICE = "こちらセリフ数は少ないのですが、";
+const LOW_DIALOGUE_COUNT_CONTINUATION = "もしよかったらサンプルにあった";
+
+export const applyProductionContactDialogueCountNotice = (body = "", dialogueCount = null) => {
+  const source = String(body || "");
+  if (dialogueCount === null || dialogueCount === undefined || dialogueCount === "") return source;
+  const normalizedCount = Number(dialogueCount);
+  if (!Number.isFinite(normalizedCount)) return source;
+  if (Math.max(0, Math.trunc(normalizedCount)) <= 4) {
+    if (source.includes(LOW_DIALOGUE_COUNT_NOTICE)) return source;
+    return source.replace(
+      LOW_DIALOGUE_COUNT_CONTINUATION,
+      `${LOW_DIALOGUE_COUNT_NOTICE}${LOW_DIALOGUE_COUNT_CONTINUATION}`
+    );
+  }
+  return source.replaceAll(LOW_DIALOGUE_COUNT_NOTICE, "");
+};
+
+export const isOtherRoleRequestContactTemplate = (template = {}) => (
+  template.id === "contact_template_other_role"
+  || String(template.name || "").trim() === "別の役を依頼"
+);
+
+export const isRetakeRequestContactTemplate = (template = {}) => (
+  template.id === "contact_template_retake"
+  || String(template.name || "").trim() === "リテイクのお願い"
+);
+
+export const getProductionCharacterRetakes = (project = {}, characterId = "") => (
+  getRecordingDisplayProject(project).lines || []
+).filter((line) => (
+  line?.characterId === characterId
+  && line.kind !== "direction"
+  && line.reviewStatus === "リテイク"
+)).sort((left, right) => Number(left.order || 0) - Number(right.order || 0))
+  .map((line, index) => {
+    const text = stripRubyNotation(String(line.text || "")).trim();
+    const instructions = normalizeRetakeInstructions(line.retakeAnnotations, text).map((instruction) => {
+      const accent = instruction.reading
+        ? buildManualAccentPattern(instruction.reading, instruction.accentType, instruction.accentRiseAt)
+        : null;
+      return {
+        ...instruction,
+        accentNotation: accent?.notation || "",
+        accentInstruction: accent?.instruction || ""
+      };
+    });
+    return {
+      id: String(line.id || `retake_line_${index + 1}`),
+      order: Number.isFinite(Number(line.order)) ? Number(line.order) : index + 1,
+      chapterTitle: String(line.chapterTitle || "章未設定"),
+      sceneTitle: String(line.sceneTitle || "シーン未設定"),
+      performanceType: normalizeLinePerformanceType(line.performanceType),
+      text,
+      directorNote: String(line.directorNote || "").trim(),
+      instructions
+    };
+  });
+
+const buildProductionRetakeSection = (retake = {}, displayNumber = 1) => {
+  const instructionBlocks = (retake.instructions || []).map((instruction) => {
+    const lines = [
+      instruction.quote
+        ? `・「${instruction.quote}」`
+        : "・台本ツールで指定した箇所"
+    ];
+    if (instruction.reading) lines.push(`読み：${instruction.reading}`);
+    if (instruction.accentNotation) {
+      lines.push(`アクセント：${instruction.accentNotation}`);
+      if (instruction.accentInstruction) lines.push(`高低の目安：${instruction.accentInstruction}`);
+    }
+    if (instruction.instruction) lines.push("", instruction.instruction);
+    return lines.join("\n");
+  });
+  const sections = [
+    `【${displayNumber}】セリフ番号：${String(retake.order).padStart(3, "0")}${retake.performanceType !== "通常" ? ` / ${retake.performanceType}` : ""}`
+  ];
+  if (instructionBlocks.length) sections.push(instructionBlocks.join("\n\n"));
+  if (retake.directorNote) sections.push(`確認メモ：\n${retake.directorNote}`);
+  if (!instructionBlocks.length && !retake.directorNote) {
+    sections.push("確認メモ：\n台本ツールの該当セリフにあるリテイク表示をご確認ください。");
+  }
+  return sections.join("\n\n");
+};
+
+export const buildProductionRetakeList = (project = {}, characterId = "") => {
+  const retakes = getProductionCharacterRetakes(project, characterId);
+  if (!retakes.length) return "現在、リテイク指定はありません。";
+  return retakes.map((retake, index) => buildProductionRetakeSection(retake, index + 1)).join("\n\n");
+};
+
+const buildProductionRetakeListFromItems = (retakes = []) => (
+  (Array.isArray(retakes) ? retakes : [])
+    .map((retake, index) => buildProductionRetakeSection(retake, index + 1))
+    .join("\n\n")
+);
+
+const normalizeRetakeDraftText = (value = "") => String(value || "")
+  .normalize("NFKC")
+  .replace(/\s+/gu, "")
+  .trim();
+
+const productionRetakeIsInDraft = (body = "", retake = {}) => {
+  const source = String(body || "");
+  const order = Number(retake.order);
+  if (Number.isFinite(order) && order > 0) {
+    const lineNumberPattern = new RegExp(`セリフ番号\\s*[：:]\\s*0*${Math.trunc(order)}(?:\\D|$)`, "u");
+    if (lineNumberPattern.test(source)) return true;
+  }
+
+  const normalizedSource = normalizeRetakeDraftText(source);
+  const textCandidates = [
+    retake.text,
+    ...(retake.instructions || []).map((instruction) => instruction.quote)
+  ].map(normalizeRetakeDraftText).filter((candidate) => candidate.length >= 4);
+  return textCandidates.some((candidate) => normalizedSource.includes(candidate));
+};
+
+export const mergeMissingProductionRetakesIntoDraft = (body = "", retakes = []) => {
+  const source = String(body || "");
+  const normalizedRetakes = Array.isArray(retakes) ? retakes : [];
+  const latestList = buildProductionRetakeListFromItems(normalizedRetakes);
+  const firstSectionMatch = /(^|\n)【\d+】[^\n]*(?=\n|$)/u.exec(source);
+  if (firstSectionMatch && latestList) {
+    const sectionStart = firstSectionMatch.index + firstSectionMatch[1].length;
+    const closingMarkers = [
+      "\n\nお手数をおかけ",
+      "\n\n再収録したファイルは",
+      "\n\n分かりにくい点や確認したいこと"
+    ];
+    const closingIndex = closingMarkers
+      .map((marker) => source.indexOf(marker, sectionStart))
+      .filter((index) => index >= 0)
+      .sort((left, right) => left - right)[0] ?? source.length;
+    const synced = `${source.slice(0, sectionStart).trimEnd()}${source.slice(0, sectionStart).trimEnd() ? "\n\n" : ""}${latestList}${closingIndex < source.length ? `\n\n${source.slice(closingIndex).trimStart()}` : ""}`.trim();
+    return synced;
+  }
+
+  const missingRetakes = normalizedRetakes
+    .filter((retake) => !productionRetakeIsInDraft(source, retake));
+  if (!missingRetakes.length) return source;
+
+  const usedNumbers = [...source.matchAll(/【(\d+)】/gu)]
+    .map((match) => Number(match[1]))
+    .filter(Number.isFinite);
+  const firstNewNumber = Math.max(0, ...usedNumbers) + 1;
+  const additions = missingRetakes
+    .map((retake, index) => buildProductionRetakeSection(retake, firstNewNumber + index))
+    .join("\n\n");
+  const closingMarkers = [
+    "\n\nお手数をおかけ",
+    "\n\n再収録したファイルは",
+    "\n\n分かりにくい点や確認したいこと"
+  ];
+  const insertionIndex = closingMarkers
+    .map((marker) => source.indexOf(marker))
+    .find((index) => index >= 0);
+  if (insertionIndex === undefined) return `${source.trimEnd()}\n\n${additions}`.trim();
+  return `${source.slice(0, insertionIndex).trimEnd()}\n\n${additions}\n\n${source.slice(insertionIndex).trimStart()}`;
+};
+
+export const buildProductionContactMessage = (template = {}, {
+  actorName = "声優",
+  actorHonorific = "さん",
+  roleName = "役名",
+  offeredRoleName = "別の役",
+  offeredRoleDialogueCount = null,
+  appearanceLabel = "登場章未設定",
+  projectTitle = "作品名",
+  retakeList = "現在、リテイク指定はありません。"
+} = {}) => {
+  const honorific = String(actorHonorific || "").trim();
+  const addressedActorName = honorific && !String(actorName).endsWith(honorific)
+    ? `${actorName}${honorific}`
+    : String(actorName);
+  const appearanceSentence = appearanceLabel === "全章にわたって"
+    ? `${offeredRoleName}は全章にわたって登場します。`
+    : `${offeredRoleName}は${appearanceLabel}に登場します。`;
+  const templateBody = isRetakeRequestContactTemplate(template)
+    ? sanitizeProductionRetakeMessageBody(template.body)
+    : String(template.body || "");
+  const body = applyProductionContactDialogueCountNotice(
+    templateBody
+      .replaceAll("◆◆は第■章で出てきます。", appearanceSentence)
+      .replaceAll("{{登場案内}}", appearanceSentence)
+      .replaceAll("【作品名／役名】", `【${projectTitle}／${roleName}】`)
+      .replaceAll("【作品名/役名】", `【${projectTitle}／${roleName}】`)
+      .replaceAll("【作品名】", `【${projectTitle}】`)
+      .replaceAll("{{声優名}}", actorName)
+      .replaceAll("{{呼称}}", honorific)
+      .replaceAll("{{役名}}", roleName)
+      .replaceAll("{{別役名}}", offeredRoleName)
+      .replaceAll("{{登場章}}", appearanceLabel)
+      .replaceAll("{{作品名}}", projectTitle)
+      .replaceAll("{{リテイク一覧}}", retakeList)
+      .replaceAll("△△", roleName)
+      .replaceAll("◆◆", offeredRoleName)
+      .replaceAll("第■章", appearanceLabel)
+      .replaceAll("〇〇さん", addressedActorName)
+      .replaceAll("〇〇様", addressedActorName),
+    offeredRoleDialogueCount
+  );
+  const normalizeRecipientHonorific = (source) => {
+    if (!honorific || !addressedActorName) return source;
+    return String(source).replaceAll(`${addressedActorName}${honorific}`, addressedActorName);
+  };
+
+  if (template.category === "募集告知") {
+    return normalizeRecipientHonorific(body
+      .replace("作品名：〇〇", `作品名：${projectTitle}`)
+      .replace("募集役：〇〇", `募集役：${roleName}`));
+  }
+
+  if (template.category === "確認依頼") {
+    return normalizeRecipientHonorific(body);
+  }
+
+  return normalizeRecipientHonorific(body.replaceAll("〇〇", actorName));
+};
+
+export const formatProductionSocialRoleSelection = (roleNames = []) => [...new Set(
+  (Array.isArray(roleNames) ? roleNames : [])
+    .map((roleName) => String(roleName || "").trim().replace(/役$/u, "").trim())
+    .filter(Boolean)
+)].map((roleName) => `「${roleName}」役`).join("・");
+
+export const applyProductionSocialRoleSelection = (
+  body = "",
+  roleNames = [],
+  previousRoleNames = []
+) => {
+  const source = String(body || "");
+  const nextSelection = formatProductionSocialRoleSelection(roleNames) || "「〇〇」役";
+  const previousSelection = formatProductionSocialRoleSelection(previousRoleNames);
+  if (previousSelection && source.includes(previousSelection)) {
+    return source.replaceAll(previousSelection, nextSelection);
+  }
+  return source
+    .replaceAll("{{役名一覧}}", nextSelection)
+    .replaceAll("「〇〇」役", nextSelection)
+    .replace(
+      /「[^「」\r\n]+」役(?:・「[^「」\r\n]+」役)*(?=\s*をお願いさせていただく方へ、)/u,
+      nextSelection
+    );
+};
+
+export const buildProductionSocialMessage = (template = {}, {
+  projectTitle = "作品名",
+  roleNames = []
+} = {}) => applyProductionSocialRoleSelection(
+  String(template.body || "").replaceAll("{{作品名}}", projectTitle),
+  roleNames
+);
 
 const isActorNameCorrection = (previousName = "", nextName = "") => {
   const previousKey = getActorNameKey(previousName).replace(/[\s・._-]+/g, "");
@@ -614,12 +1221,135 @@ export const assignProductionActorName = (project = {}, characterId = "", actorN
     castMembers: [...withoutCharacter, {
       id: createLocalId("cast"),
       actorName: name,
+      contactName: "",
+      contactHonorific: "さん",
       contact: "",
       socialUrl: "",
       characterIds: [characterId],
       wpUserId: 0,
       accessKey: createRecordingAccessKey()
     }]
+  };
+};
+
+const normalizeAuditionApplicant = (applicant = {}, index = 0) => {
+  const responseId = String(applicant.responseId || "").trim();
+  const formId = String(applicant.formId || "").trim();
+  const name = String(applicant.name || applicant.actorName || "").trim();
+  const submittedAt = String(applicant.submittedAt || "").trim();
+  const socialInput = String(applicant.socialInput || applicant.socialUrl || "").trim();
+  const identity = responseId || [formId, submittedAt, name, socialInput].join("|") || String(index);
+  const status = PRODUCTION_AUDITION_APPLICANT_STATUSES.includes(applicant.status)
+    ? applicant.status
+    : "未選考";
+  return {
+    id: String(applicant.id || makeStableScopeId("audition_applicant", identity)),
+    responseId,
+    formId,
+    sourceCharacterId: String(applicant.sourceCharacterId || applicant.characterId || ""),
+    sourceRoleName: String(applicant.sourceRoleName || applicant.roleName || ""),
+    name,
+    contactName: String(applicant.contactName || ""),
+    contactHonorific: Object.prototype.hasOwnProperty.call(applicant, "contactHonorific")
+      ? String(applicant.contactHonorific || "").trim()
+      : "さん",
+    socialInput,
+    socialUrl: normalizeXProfileUrl(applicant.socialUrl || socialInput),
+    submittedAt,
+    status,
+    assignedCharacterId: String(applicant.assignedCharacterId || ""),
+    updatedAt: String(applicant.updatedAt || "")
+  };
+};
+
+export const mergeProductionAuditionApplicants = (currentApplicants = [], importedApplicants = []) => {
+  const existingByIdentity = new Map();
+  (Array.isArray(currentApplicants) ? currentApplicants : []).forEach((applicant, index) => {
+    const normalized = normalizeAuditionApplicant(applicant, index);
+    const key = normalized.responseId || normalized.id;
+    existingByIdentity.set(key, normalized);
+  });
+  (Array.isArray(importedApplicants) ? importedApplicants : []).forEach((applicant, index) => {
+    const normalized = normalizeAuditionApplicant(applicant, index);
+    if (!normalized.name) return;
+    const key = normalized.responseId || normalized.id;
+    const existing = existingByIdentity.get(key);
+    existingByIdentity.set(key, existing ? {
+      ...normalized,
+      id: existing.id,
+      contactName: existing.contactName,
+      contactHonorific: existing.contactHonorific,
+      status: existing.status,
+      assignedCharacterId: existing.assignedCharacterId,
+      updatedAt: existing.updatedAt
+    } : normalized);
+  });
+  return [...existingByIdentity.values()].sort((left, right) =>
+    String(right.submittedAt).localeCompare(String(left.submittedAt)));
+};
+
+const getAuditionRoleNameKey = (value = "") => String(value || "")
+  .normalize("NFKC")
+  .replace(/\s+/gu, "")
+  .toLocaleLowerCase("ja");
+
+export const groupProductionAuditionApplicantsByRole = (project = {}, applicants = project.auditionApplicants || []) => {
+  const characters = Array.isArray(project.characters) ? project.characters : [];
+  const characterById = new Map(characters.map((character) => [character.id, character]));
+  const characterByName = new Map(characters.map((character) => [getAuditionRoleNameKey(character.name), character]));
+  const characterOrder = new Map(characters.map((character, index) => [character.id, index]));
+  const groups = new Map();
+
+  (Array.isArray(applicants) ? applicants : []).forEach((applicant, index) => {
+    const sourceRoleName = String(applicant.sourceRoleName || "").trim();
+    const sourceCharacter = characterById.get(applicant.sourceCharacterId)
+      || characterByName.get(getAuditionRoleNameKey(sourceRoleName));
+    const characterId = String(sourceCharacter?.id || applicant.sourceCharacterId || "");
+    const roleName = String(sourceCharacter?.name || sourceRoleName || "応募役未設定");
+    const key = characterId ? `character:${characterId}` : `role:${getAuditionRoleNameKey(roleName) || "unset"}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        characterId,
+        roleName,
+        color: sourceCharacter?.color || "#168b9a",
+        order: characterOrder.has(characterId) ? characterOrder.get(characterId) : characters.length + index,
+        applicants: []
+      });
+    }
+    groups.get(key).applicants.push(applicant);
+  });
+
+  return [...groups.values()].sort((left, right) => left.order - right.order);
+};
+
+export const assignProductionAuditionApplicant = (project = {}, applicantId = "", characterId = "") => {
+  const applicant = (project.auditionApplicants || []).find((item) => item.id === applicantId);
+  if (!applicant || !characterId || !String(applicant.name || "").trim()) return project;
+  const assigned = assignProductionActorName(project, characterId, applicant.name);
+  const member = assigned.castMembers.find((item) => item.characterIds?.includes(characterId));
+  const contactName = String(applicant.contactName || "").trim()
+    || getActorContactName({ actorName: applicant.name });
+  const contactHonorific = Object.prototype.hasOwnProperty.call(applicant, "contactHonorific")
+    ? String(applicant.contactHonorific || "").trim()
+    : "さん";
+  return {
+    ...assigned,
+    castMembers: assigned.castMembers.map((item) => item.id === member?.id ? {
+      ...item,
+      actorName: applicant.name,
+      contactName,
+      contactHonorific,
+      socialUrl: normalizeXProfileUrl(applicant.socialUrl || applicant.socialInput)
+    } : item),
+    auditionApplicants: (assigned.auditionApplicants || []).map((item) => item.id === applicantId ? {
+      ...item,
+      contactName,
+      contactHonorific,
+      status: "合格",
+      assignedCharacterId: characterId,
+      updatedAt: new Date().toISOString()
+    } : item)
   };
 };
 
@@ -705,9 +1435,32 @@ export const createRecordingProject = ({ episodeId = "", title = "新しい収�
   castMembers: [],
   lines: [],
   materials: [],
+  requiredMaterials: [],
+  dismissedRequiredMaterialKeys: [],
+  materialSourceSites: [],
+  requiredMaterialFolderUrl: "",
+  requiredMaterialChapterFolders: [],
   questions: [],
   tasks: [],
   auditionFormsFolderUrl: "",
+  auditionManagementSheetUrl: DEFAULT_AUDITION_MANAGEMENT_SHEET_URL,
+  auditionSocialTemplate: createDefaultAuditionSocialTemplate(),
+  contactTemplateSheetUrl: DEFAULT_CONTACT_TEMPLATE_SHEET_URL,
+  contactTemplateSchemaVersion: PRODUCTION_CONTACT_TEMPLATE_SCHEMA_VERSION,
+  contactTemplates: createDefaultProductionContactTemplates(),
+  contactMessageDrafts: [],
+  manualContactRecipients: [],
+  otherRoleContact: {
+    contactName: "",
+    contactHonorific: "さん",
+    socialUrl: "",
+    sourceCharacterId: "",
+    sourceRoleName: ""
+  },
+  socialTemplates: createDefaultProductionSocialTemplates(),
+  socialMessageDrafts: [],
+  auditionApplicants: [],
+  auditionApplicantsImportedAt: "",
   auditionRoleProgress: [],
   scheduleItems: [],
   announcements: [],
@@ -763,6 +1516,8 @@ export const sampleRecordingProjects = [
       {
         id: "cast_vel",
         actorName: "ヴェル役 声優さん",
+        contactName: "",
+        contactHonorific: "さん",
         contact: "",
         socialUrl: "",
         characterIds: ["character_vel"],
@@ -771,6 +1526,8 @@ export const sampleRecordingProjects = [
       {
         id: "cast_amamori",
         actorName: "アマモリ役 声優さん",
+        contactName: "",
+        contactHonorific: "さん",
         contact: "",
         socialUrl: "",
         characterIds: ["character_amamori"],
@@ -903,6 +1660,11 @@ export const sampleRecordingProjects = [
         updatedAt: ""
       }
     ],
+    requiredMaterials: [],
+    dismissedRequiredMaterialKeys: [],
+    materialSourceSites: [],
+    requiredMaterialFolderUrl: "",
+    requiredMaterialChapterFolders: [],
     questions: [
       {
         id: "question_sample_001",
@@ -918,6 +1680,24 @@ export const sampleRecordingProjects = [
     ],
     tasks: [],
     auditionFormsFolderUrl: "",
+    auditionManagementSheetUrl: DEFAULT_AUDITION_MANAGEMENT_SHEET_URL,
+    auditionSocialTemplate: createDefaultAuditionSocialTemplate(),
+    contactTemplateSheetUrl: DEFAULT_CONTACT_TEMPLATE_SHEET_URL,
+    contactTemplateSchemaVersion: PRODUCTION_CONTACT_TEMPLATE_SCHEMA_VERSION,
+    contactTemplates: createDefaultProductionContactTemplates(),
+    contactMessageDrafts: [],
+    manualContactRecipients: [],
+    otherRoleContact: {
+      contactName: "",
+      contactHonorific: "さん",
+      socialUrl: "",
+      sourceCharacterId: "",
+      sourceRoleName: ""
+    },
+    socialTemplates: createDefaultProductionSocialTemplates(),
+    socialMessageDrafts: [],
+    auditionApplicants: [],
+    auditionApplicantsImportedAt: "",
     auditionRoleProgress: [],
     scheduleItems: [
       {
@@ -964,6 +1744,14 @@ const makeStableScopeId = (prefix, value) => {
     hash = Math.imul(hash, 16777619);
   }
   return `${prefix}_${(hash >>> 0).toString(36)}`;
+};
+
+export const applyRecordingProjectUpdate = (project = {}, updater, updatedAt = new Date().toISOString()) => {
+  const next = typeof updater === "function"
+    ? updater(project)
+    : { ...project, ...(updater && typeof updater === "object" ? updater : {}) };
+  if (!next || typeof next !== "object" || Array.isArray(next) || next === project) return project;
+  return { ...next, updatedAt: String(updatedAt || new Date().toISOString()) };
 };
 
 export const normalizeRecordingProject = (project = {}, index = 0) => {
@@ -1154,6 +1942,11 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       recordingFileName: String(line.recordingFileName || ""),
       actorNote: String(line.actorNote || ""),
       directorNote: String(line.directorNote || ""),
+      retakeAnnotations: normalizeRetakeInstructions(
+        line.retakeAnnotations,
+        stripRubyNotation(String(line.text || line.line || ""))
+      ),
+      fieldUpdatedAt: normalizeProgressTimes(line.fieldUpdatedAt),
       updatedAt: String(line.updatedAt || "")
     };
   });
@@ -1175,9 +1968,21 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
         recordingFileName: String(progress.recordingFileName || ""),
         actorNote: String(progress.actorNote || ""),
         directorNote: String(progress.directorNote || ""),
+        retakeAnnotations: normalizeRetakeInstructions(progress.retakeAnnotations),
+        fieldUpdatedAt: normalizeProgressTimes(progress.fieldUpdatedAt),
         updatedAt: String(progress.updatedAt || "")
       }])
   );
+  const rawOtherRoleContact = project.otherRoleContact && typeof project.otherRoleContact === "object"
+    ? project.otherRoleContact
+    : {};
+  const legacyOtherRoleDraft = [...(Array.isArray(project.contactMessageDrafts) ? project.contactMessageDrafts : [])]
+    .filter((draft) => draft?.templateId === "contact_template_other_role")
+    .sort((left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || "")))[0];
+  const legacyRecipientMatch = String(legacyOtherRoleDraft?.body || "").match(/^([^\r\n、]{1,80}?)(さん|さま|様)、初めてメッセージ/u);
+  const requestedOtherRoleCharacterId = rawOtherRoleContact.sourceCharacterId || legacyOtherRoleDraft?.characterId || "";
+  const normalizedOtherRoleCharacterId = characterIdAliases.get(requestedOtherRoleCharacterId) || requestedOtherRoleCharacterId;
+  const otherRoleCharacter = characters.find((character) => character.id === normalizedOtherRoleCharacterId);
 
   return {
     id: project.id || `recording_project_${index + 1}`,
@@ -1198,8 +2003,12 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
     castMembers: (Array.isArray(project.castMembers) ? project.castMembers : []).map((member, memberIndex) => ({
       id: member.id || createLocalId("cast"),
       actorName: member.actorName || `声優さん${memberIndex + 1}`,
+      contactName: String(member.contactName || member.shortName || ""),
+      contactHonorific: Object.prototype.hasOwnProperty.call(member, "contactHonorific")
+        ? String(member.contactHonorific || "").trim()
+        : "さん",
       contact: member.contact || "",
-      socialUrl: String(member.socialUrl || member.snsUrl || member.socialMediaUrl || ""),
+      socialUrl: normalizeXProfileUrl(member.socialUrl || member.snsUrl || member.socialMediaUrl || ""),
       characterIds: [...new Set(
         (Array.isArray(member.characterIds) ? member.characterIds : [])
           .map((id) => characterIdAliases.get(id) || id)
@@ -1210,6 +2019,7 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
     })),
     lines: lines.sort((a, b) => Number(a.order) - Number(b.order)),
     derivedLineProgress,
+    deletedQuestionIds: [...new Set((Array.isArray(project.deletedQuestionIds) ? project.deletedQuestionIds : []).map(String))],
     materials: (Array.isArray(project.materials) ? project.materials : []).map((material, materialIndex) => ({
       id: material.id || createLocalId("material"),
       category: PRODUCTION_MATERIAL_CATEGORIES.includes(material.category) ? material.category : "BGM",
@@ -1221,6 +2031,51 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       notes: String(material.notes || ""),
       updatedAt: String(material.updatedAt || "")
     })),
+    requiredMaterials: (Array.isArray(project.requiredMaterials) ? project.requiredMaterials : []).map((material, materialIndex) => {
+      const source = material.source === "script" ? "script" : "manual";
+      const id = String(material.id || createLocalId("required_material"));
+      return {
+        id,
+        source,
+        cueKey: String(material.cueKey || (source === "manual" ? `manual:${id}` : "")),
+        chapterId: String(material.chapterId || ""),
+        chapterTitle: String(material.chapterTitle || ""),
+        category: PRODUCTION_MATERIAL_CATEGORIES.includes(material.category) ? material.category : "SE",
+        title: String(material.title || `必要素材${materialIndex + 1}`),
+        searchQuery: String(material.searchQuery || material.title || ""),
+        notes: String(material.notes || ""),
+        sourceSiteId: String(material.sourceSiteId || ""),
+        candidateTitle: String(material.candidateTitle || ""),
+        candidatePageUrl: String(material.candidatePageUrl || ""),
+        previewUrl: String(material.previewUrl || ""),
+        downloadUrl: String(material.downloadUrl || ""),
+        confirmedMaterialId: String(material.confirmedMaterialId || ""),
+        commonSeName: String(material.commonSeName || ""),
+        sePrompt: normalizeSePromptDraft(material.sePrompt, material),
+        updatedAt: String(material.updatedAt || "")
+      };
+    }),
+    dismissedRequiredMaterialKeys: [...new Set(
+      (Array.isArray(project.dismissedRequiredMaterialKeys) ? project.dismissedRequiredMaterialKeys : [])
+        .map((key) => String(key || "").trim())
+        .filter(Boolean)
+    )],
+    materialSourceSites: (Array.isArray(project.materialSourceSites) ? project.materialSourceSites : []).map((site, siteIndex) => ({
+      id: String(site.id || createLocalId("material_source")),
+      name: String(site.name || `SE配布サイト${siteIndex + 1}`),
+      homeUrl: String(site.homeUrl || ""),
+      searchUrlTemplate: String(site.searchUrlTemplate || site.searchUrl || ""),
+      licenseUrl: String(site.licenseUrl || ""),
+      notes: String(site.notes || "")
+    })),
+    requiredMaterialFolderUrl: String(project.requiredMaterialFolderUrl || ""),
+    requiredMaterialChapterFolders: (Array.isArray(project.requiredMaterialChapterFolders)
+      ? project.requiredMaterialChapterFolders
+      : []).map((folder) => ({
+      chapterId: String(folder?.chapterId || ""),
+      chapterTitle: String(folder?.chapterTitle || ""),
+      url: String(folder?.url || folder?.folderUrl || "")
+    })).filter((folder) => folder.chapterId || folder.chapterTitle || folder.url),
     questions: (Array.isArray(project.questions) ? project.questions : []).map((question) => ({
       id: question.id || createLocalId("question"),
       lineId: String(question.lineId || ""),
@@ -1247,6 +2102,81 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       createdAt: String(task.createdAt || new Date().toISOString()),
       updatedAt: String(task.updatedAt || task.createdAt || "")
     })),
+    contactTemplateSheetUrl: String(project.contactTemplateSheetUrl || DEFAULT_CONTACT_TEMPLATE_SHEET_URL),
+    contactTemplateSchemaVersion: PRODUCTION_CONTACT_TEMPLATE_SCHEMA_VERSION,
+    contactTemplates: migrateProductionContactTemplates(project).map((template, templateIndex) => ({
+      id: String(template.id || createLocalId("contact_template")),
+      category: String(template.category || "その他"),
+      name: String(template.name || template.title || `連絡テンプレート${templateIndex + 1}`),
+      body: template.id === "contact_template_other_role"
+        ? String(template.body || template.text || "").replace(
+            "酔っ払いのキャラクター画像はこちらになります＾＾",
+            "◆◆のキャラクター画像はこちらになります＾＾"
+          )
+        : template.id === "contact_template_retake" || String(template.name || "").trim() === "リテイクのお願い"
+          ? sanitizeProductionRetakeMessageBody(template.body || template.text || "")
+          : String(template.body || template.text || ""),
+      notes: String(template.notes || template.memo || ""),
+      enabled: template.enabled !== false && template.inUse !== false,
+      updatedAt: String(template.updatedAt || "")
+    })),
+    contactMessageDrafts: (Array.isArray(project.contactMessageDrafts) ? project.contactMessageDrafts : []).map((draft) => ({
+      id: String(draft.id || createLocalId("contact_message")),
+      templateId: String(draft.templateId || ""),
+      characterId: String(draft.characterId || ""),
+      applicantId: String(draft.applicantId || ""),
+      targetKey: String(draft.targetKey || ""),
+      offeredCharacterId: String(draft.offeredCharacterId || ""),
+      body: draft.templateId === "contact_template_retake"
+        ? sanitizeProductionRetakeMessageBody(draft.body)
+        : String(draft.body || ""),
+      updatedAt: String(draft.updatedAt || "")
+    })),
+    manualContactRecipients: (Array.isArray(project.manualContactRecipients) ? project.manualContactRecipients : []).map((recipient) => ({
+      id: String(recipient.id || createLocalId("contact_recipient")),
+      actorName: String(recipient.actorName || recipient.name || ""),
+      contactName: String(recipient.contactName || ""),
+      contactHonorific: Object.prototype.hasOwnProperty.call(recipient, "contactHonorific")
+        ? String(recipient.contactHonorific || "").trim()
+        : "さん",
+      socialUrl: normalizeXProfileUrl(recipient.socialUrl || recipient.socialInput || ""),
+      sourceCharacterId: characterIds.has(characterIdAliases.get(recipient.sourceCharacterId) || recipient.sourceCharacterId)
+        ? characterIdAliases.get(recipient.sourceCharacterId) || recipient.sourceCharacterId
+        : "",
+      sourceRoleName: String(recipient.sourceRoleName || "")
+    })),
+    otherRoleContact: {
+      contactName: String(rawOtherRoleContact.contactName || legacyRecipientMatch?.[1] || ""),
+      contactHonorific: Object.prototype.hasOwnProperty.call(rawOtherRoleContact, "contactHonorific")
+        ? String(rawOtherRoleContact.contactHonorific || "").trim()
+        : String(legacyRecipientMatch?.[2] || "さん"),
+      socialUrl: normalizeXProfileUrl(rawOtherRoleContact.socialUrl || rawOtherRoleContact.socialInput || ""),
+      sourceCharacterId: otherRoleCharacter?.id || "",
+      sourceRoleName: String(rawOtherRoleContact.sourceRoleName || otherRoleCharacter?.name || "")
+    },
+    socialTemplates: (Array.isArray(project.socialTemplates)
+      ? project.socialTemplates
+      : createDefaultProductionSocialTemplates()
+    ).map((template, templateIndex) => ({
+      id: String(template.id || createLocalId("social_template")),
+      category: String(template.category || "お知らせ"),
+      name: String(template.name || template.title || `SNSテンプレート${templateIndex + 1}`),
+      body: String(template.body || template.text || ""),
+      notes: String(template.notes || template.memo || ""),
+      enabled: template.enabled !== false && template.inUse !== false,
+      updatedAt: String(template.updatedAt || "")
+    })),
+    socialMessageDrafts: (Array.isArray(project.socialMessageDrafts) ? project.socialMessageDrafts : []).map((draft) => ({
+      id: String(draft.id || createLocalId("social_message")),
+      templateId: String(draft.templateId || ""),
+      characterIds: [...new Set((Array.isArray(draft.characterIds) ? draft.characterIds : [])
+        .map((characterId) => String(characterId || "").trim())
+        .filter(Boolean))],
+      body: String(draft.body || ""),
+      updatedAt: String(draft.updatedAt || "")
+    })),
+    auditionApplicants: mergeProductionAuditionApplicants(project.auditionApplicants, []),
+    auditionApplicantsImportedAt: String(project.auditionApplicantsImportedAt || ""),
     auditionFormsFolderUrl: String(
       project.auditionFormsFolderUrl
       || project.auditionFormFolderUrl
@@ -1254,6 +2184,11 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
       || project.auditionUrl
       || ""
     ),
+    auditionManagementSheetUrl: String(
+      project.auditionManagementSheetUrl
+      || DEFAULT_AUDITION_MANAGEMENT_SHEET_URL
+    ),
+    auditionSocialTemplate: normalizeAuditionSocialTemplate(project.auditionSocialTemplate),
     auditionRoleProgress: normalizeAuditionRoleProgress(project.auditionRoleProgress),
     scheduleItems: (Array.isArray(project.scheduleItems) ? project.scheduleItems : []).map((item, itemIndex) => {
       const scheduleDateTime = normalizeScheduleDateTime(item);
@@ -1264,7 +2199,8 @@ export const normalizeRecordingProject = (project = {}, index = 0) => {
         date: scheduleDateTime.date,
         time: scheduleDateTime.time,
         status: PRODUCTION_SCHEDULE_STATUSES.includes(item.status) ? item.status : "予定",
-        notes: String(item.notes || "")
+        notes: String(item.notes || ""),
+        sourceKey: String(item.sourceKey || "")
       };
     }),
     deadlineItems: (Array.isArray(project.deadlineItems) ? project.deadlineItems : []).map((item, itemIndex) => {
@@ -1330,27 +2266,27 @@ export const restoreScriptSnapshot = (project = {}, snapshotId = "") => {
 
 export const mergeRemoteRecordingProject = (localProject, remoteProject) => {
   const remoteLines = new Map((remoteProject?.lines || []).map((line) => [line.id, line]));
+  const progress = { ...(localProject.derivedLineProgress || {}) };
+  for (const [id, remote] of Object.entries(remoteProject?.derivedLineProgress || {})) {
+    progress[id] = mergeRecordingProgress(progress[id] || remote, remote);
+  }
+  const questions = new Map((localProject.questions || []).map((question) => [question.id, question]));
+  const deletedQuestionIds = [...new Set([...(localProject.deletedQuestionIds || []), ...(remoteProject?.deletedQuestionIds || [])])];
+  for (const question of remoteProject?.questions || []) {
+    if (!questions.has(question.id) || String(question.updatedAt || "") >= String(questions.get(question.id).updatedAt || "")) questions.set(question.id, question);
+  }
+  for (const id of deletedQuestionIds) questions.delete(id);
   return normalizeRecordingProject({
     ...localProject,
     sharedAt: remoteProject?.sharedAt || localProject.sharedAt,
     updatedAt: remoteProject?.updatedAt || localProject.updatedAt,
-    derivedLineProgress: {
-      ...(localProject.derivedLineProgress || {}),
-      ...(remoteProject?.derivedLineProgress || {})
-    },
+    derivedLineProgress: progress,
+    questions: [...questions.values()],
+    deletedQuestionIds,
     lines: (localProject.lines || []).map((line) => {
       const remote = remoteLines.get(line.id);
       if (!remote) return line;
-      return {
-        ...line,
-        actorStatus: remote.actorStatus,
-        reviewStatus: remote.reviewStatus,
-        recordingUrl: remote.recordingUrl,
-        recordingFileName: remote.recordingFileName,
-        actorNote: remote.actorNote,
-        directorNote: remote.directorNote,
-        updatedAt: remote.updatedAt
-      };
+      return mergeRecordingProgress(line, remote);
     })
   });
 };
@@ -1443,6 +2379,47 @@ export const getRecordingProgress = (project) => {
   };
 };
 
+const extractSeCueTitles = (value = "") => String(value || "")
+  .split(/\r?\n/)
+  .map((line) => line.trim().replace(/^[（(【\[]\s*/u, "").replace(/\s*[）)】\]]$/u, ""))
+  .map((line) => line.match(/^(?:[-*・●■▶]\s*)?(?:SE|ＳＥ|SFX|効果音)(?:\s*(?:No\.?|#)?\d+)?\s*[：:]\s*(.+)$/iu)?.[1]?.trim() || "")
+  .filter(Boolean);
+
+const getSelectedCharacterMentionTokens = (project = {}, selectedCharacterIds = new Set()) => {
+  const selected = selectedCharacterIds instanceof Set
+    ? selectedCharacterIds
+    : new Set(selectedCharacterIds || []);
+  const tokens = new Set();
+  (project?.characters || []).forEach((character) => {
+    if (!selected.has(character.id)) return;
+    getCharacterKnownNames(character).forEach((name) => {
+      const token = normalizeCharacterAliasToken(name);
+      if (token) tokens.add(token);
+    });
+  });
+  return [...tokens];
+};
+
+const directionMentionsSelectedCharacter = (line = {}, characterMentionTokens = []) => {
+  if (line.kind !== "direction" || !characterMentionTokens.length) return false;
+  const cueText = [
+    ...extractSeCueTitles(line.text),
+    ...extractSeCueTitles(line.direction)
+  ].join(" ");
+  if (!cueText) return false;
+  const cueToken = normalizeCharacterAliasToken(stripRubyNotation(cueText));
+  return characterMentionTokens.some((token) => cueToken.includes(token));
+};
+
+const directionTextMentionsSelectedCharacter = (line = {}, characterMentionTokens = []) => {
+  if (line.kind !== "direction" || !characterMentionTokens.length) return false;
+  const directionToken = normalizeCharacterAliasToken(stripRubyNotation([
+    line.text,
+    line.direction
+  ].filter(Boolean).join(" ")));
+  return Boolean(directionToken) && characterMentionTokens.some((token) => directionToken.includes(token));
+};
+
 export const getFilteredRecordingLines = ({
   project,
   selectedCharacterIds = [],
@@ -1453,6 +2430,7 @@ export const getFilteredRecordingLines = ({
 }) => {
   const lines = project?.lines || [];
   const selected = new Set(selectedCharacterIds);
+  const selectedCharacterMentionTokens = getSelectedCharacterMentionTokens(project, selected);
   const normalizedQuery = String(query || "").trim().toLocaleLowerCase("ja");
   const matchingScenes = new Set();
 
@@ -1471,7 +2449,8 @@ export const getFilteredRecordingLines = ({
   const directIndexes = new Set();
   lines.forEach((line, index) => {
     const isDirection = line.kind === "direction";
-    const selectedMatch = selected.size === 0 || (!isDirection && selected.has(line.characterId));
+    const relatedCharacterSe = directionMentionsSelectedCharacter(line, selectedCharacterMentionTokens);
+    const selectedMatch = selected.size === 0 || (!isDirection && selected.has(line.characterId)) || relatedCharacterSe;
     const dialogueMatch = mode !== "dialogue" || selected.size < 2 || matchingScenes.has(line.sceneId);
     const statusMatch =
       statusFilter === "すべて" ||
@@ -1483,11 +2462,21 @@ export const getFilteredRecordingLines = ({
 
   const visibleIndexes = new Set(directIndexes);
   if (includeContext && selected.size > 0) {
+    const directSceneIds = new Set([...directIndexes].map((index) => lines[index]?.sceneId));
     directIndexes.forEach((index) => {
       const previous = lines[index - 1];
       const next = lines[index + 1];
       if (previous && previous.sceneId === lines[index].sceneId) visibleIndexes.add(index - 1);
       if (next && next.sceneId === lines[index].sceneId) visibleIndexes.add(index + 1);
+    });
+    lines.forEach((line, index) => {
+      if (
+        !visibleIndexes.has(index)
+        && directSceneIds.has(line.sceneId)
+        && directionTextMentionsSelectedCharacter(line, selectedCharacterMentionTokens)
+      ) {
+        visibleIndexes.add(index);
+      }
     });
   }
 
@@ -2265,6 +3254,7 @@ export const getRecordingDisplayProject = (project = {}) => {
         recordingFileName: String(savedProgress.recordingFileName || ""),
         actorNote: String(savedProgress.actorNote || ""),
         directorNote: String(savedProgress.directorNote || ""),
+        retakeAnnotations: normalizeRetakeInstructions(savedProgress.retakeAnnotations, stripRubyNotation(`${fallbackPrefix}${row.text || ""}`.trim())),
         updatedAt: String(savedProgress.updatedAt || "")
       };
     });
@@ -2279,6 +3269,36 @@ export const getRecordingDisplayProject = (project = {}) => {
   };
 };
 
+const getShortChapterTitle = (value = "") => {
+  const title = String(value || "").trim();
+  const match = title.match(/^(第\s*(?:[0-9０-９]+|[一二三四五六七八九十百]+)\s*章)/u);
+  return match ? match[1].replace(/\s+/g, "") : title || "章未設定";
+};
+
+export const getProductionCharacterAppearanceLabel = (project = {}, characterId = "") => {
+  const displayLines = getRecordingDisplayProject(project).lines || [];
+  const allChapters = [];
+  const chapterKeys = new Set();
+  displayLines.forEach((line) => {
+    const key = String(line.chapterId || line.chapterTitle || "").trim();
+    if (!key || chapterKeys.has(key)) return;
+    chapterKeys.add(key);
+    allChapters.push({ key, title: getShortChapterTitle(line.chapterTitle) });
+  });
+  const appearanceKeys = new Set(displayLines
+    .filter((line) => line.kind !== "direction" && line.characterId === characterId)
+    .map((line) => String(line.chapterId || line.chapterTitle || "").trim())
+    .filter(Boolean));
+  if (!appearanceKeys.size) return "登場章未設定";
+  if (allChapters.length > 1 && allChapters.every((chapter) => appearanceKeys.has(chapter.key))) {
+    return "全章にわたって";
+  }
+  return allChapters
+    .filter((chapter) => appearanceKeys.has(chapter.key))
+    .map((chapter) => chapter.title)
+    .join("、") || "登場章未設定";
+};
+
 const DERIVED_LINE_PROGRESS_FIELDS = new Set([
   "actorStatus",
   "reviewStatus",
@@ -2286,15 +3306,18 @@ const DERIVED_LINE_PROGRESS_FIELDS = new Set([
   "recordingFileName",
   "actorNote",
   "directorNote",
+  "retakeAnnotations",
+  "fieldUpdatedAt",
   "updatedAt"
 ]);
 
 export const patchRecordingLineProgress = (project = {}, lineId = "", patch = {}, lineContext = null) => {
   const storedLine = (project.lines || []).find((line) => line.id === lineId);
   if (storedLine) {
+    const stampedPatch = stampProgressPatch(storedLine, patch);
     return {
       ...project,
-      lines: project.lines.map((line) => line.id === lineId ? { ...line, ...patch } : line)
+      lines: project.lines.map((line) => line.id === lineId ? { ...line, ...stampedPatch } : line)
     };
   }
 
@@ -2324,11 +3347,290 @@ export const patchRecordingLineProgress = (project = {}, lineId = "", patch = {}
         recordingFileName: previous.recordingFileName || displayLine.recordingFileName || "",
         actorNote: previous.actorNote || displayLine.actorNote || "",
         directorNote: previous.directorNote || displayLine.directorNote || "",
+        retakeAnnotations: normalizeRetakeInstructions(
+          previous.retakeAnnotations || displayLine.retakeAnnotations,
+          stripRubyNotation(displayLine.text || "")
+        ),
         updatedAt: previous.updatedAt || displayLine.updatedAt || "",
-        ...progressPatch
+        ...stampProgressPatch(previous, progressPatch)
       }
     }
   };
+};
+
+export const patchRecordingChapterReviewStatus = (
+  project = {},
+  chapterId = "",
+  reviewStatus = "OK",
+  updatedAt = new Date().toISOString(),
+  characterIds = []
+) => {
+  const targetChapterId = String(chapterId || "");
+  if (!targetChapterId || !DIRECTOR_REVIEW_STATUSES.includes(reviewStatus)) return project;
+  const targetCharacterIds = new Set(
+    (Array.isArray(characterIds) ? characterIds : [characterIds])
+      .map((characterId) => String(characterId || "").trim())
+      .filter(Boolean)
+  );
+  const dialogueLines = getRecordingDisplayProject(project).lines.filter((line) => (
+    line.chapterId === targetChapterId
+    && line.kind !== "direction"
+    && (!targetCharacterIds.size || targetCharacterIds.has(line.characterId))
+    && (reviewStatus !== "OK" || line.reviewStatus !== "リテイク")
+    && (reviewStatus !== "未確認" || line.reviewStatus === "OK")
+  ));
+  return dialogueLines.reduce((current, line) => patchRecordingLineProgress(
+    current,
+    line.id,
+    { reviewStatus, updatedAt },
+    line
+  ), project);
+};
+
+export const patchRecordingChapterActorStatus = (
+  project = {},
+  chapterId = "",
+  actorStatus = "収録済み",
+  updatedAt = new Date().toISOString(),
+  characterIds = []
+) => {
+  const targetChapterId = String(chapterId || "");
+  if (!targetChapterId || !ACTOR_RECORDING_STATUSES.includes(actorStatus)) return project;
+  const targetCharacterIds = new Set(
+    (Array.isArray(characterIds) ? characterIds : [characterIds])
+      .map((characterId) => String(characterId || "").trim())
+      .filter(Boolean)
+  );
+  const dialogueLines = getRecordingDisplayProject(project).lines.filter((line) => (
+    line.chapterId === targetChapterId
+    && line.kind !== "direction"
+    && (!targetCharacterIds.size || targetCharacterIds.has(line.characterId))
+    && (actorStatus !== "収録済み" || line.actorStatus === "未収録")
+    && line.actorStatus !== actorStatus
+  ));
+  return dialogueLines.reduce((current, line) => patchRecordingLineProgress(
+    current,
+    line.id,
+    { actorStatus, updatedAt },
+    line
+  ), project);
+};
+
+export const patchRecordingCharacterReviewStatus = (
+  project = {},
+  reviewStatus = "OK",
+  updatedAt = new Date().toISOString(),
+  characterIds = []
+) => {
+  if (!DIRECTOR_REVIEW_STATUSES.includes(reviewStatus)) return project;
+  const targetCharacterIds = new Set(
+    (Array.isArray(characterIds) ? characterIds : [characterIds])
+      .map((characterId) => String(characterId || "").trim())
+      .filter(Boolean)
+  );
+  if (!targetCharacterIds.size) return project;
+  const dialogueLines = getRecordingDisplayProject(project).lines.filter((line) => (
+    line.kind !== "direction"
+    && targetCharacterIds.has(line.characterId)
+    && (reviewStatus !== "OK" || line.reviewStatus !== "リテイク")
+    && (reviewStatus !== "未確認" || line.reviewStatus === "OK")
+  ));
+  return dialogueLines.reduce((current, line) => patchRecordingLineProgress(
+    current,
+    line.id,
+    { reviewStatus, updatedAt },
+    line
+  ), project);
+};
+
+export const patchRecordingCharacterActorStatus = (
+  project = {},
+  actorStatus = "収録済み",
+  updatedAt = new Date().toISOString(),
+  characterIds = []
+) => {
+  if (!ACTOR_RECORDING_STATUSES.includes(actorStatus)) return project;
+  const targetCharacterIds = new Set(
+    (Array.isArray(characterIds) ? characterIds : [characterIds])
+      .map((characterId) => String(characterId || "").trim())
+      .filter(Boolean)
+  );
+  if (!targetCharacterIds.size) return project;
+  const dialogueLines = getRecordingDisplayProject(project).lines.filter((line) => (
+    line.kind !== "direction"
+    && targetCharacterIds.has(line.characterId)
+    && (actorStatus !== "収録済み" || line.actorStatus === "未収録")
+    && line.actorStatus !== actorStatus
+  ));
+  return dialogueLines.reduce((current, line) => patchRecordingLineProgress(
+    current,
+    line.id,
+    { actorStatus, updatedAt },
+    line
+  ), project);
+};
+
+const normalizeRequiredMaterialCueKey = (value = "") => String(value || "")
+  .normalize("NFKC")
+  .toLocaleLowerCase("ja")
+  .replace(/\s+/g, " ")
+  .replace(/[。．.]+$/u, "")
+  .trim();
+
+export const extractScriptRequiredMaterials = (project = {}) => {
+  const groups = new Map();
+  getRecordingDisplayProject(project).lines.forEach((line) => {
+    const locationKey = `${line.chapterId || line.chapterTitle}\u0000${line.sceneId || line.sceneTitle}`;
+    const location = {
+      chapterId: String(line.chapterId || ""),
+      chapterTitle: String(line.chapterTitle || "第一章"),
+      sceneId: String(line.sceneId || ""),
+      sceneTitle: String(line.sceneTitle || "Scene 1")
+    };
+    [...extractSeCueTitles(line.text), ...extractSeCueTitles(line.direction)].forEach((title) => {
+      const cueKey = normalizeRequiredMaterialCueKey(title);
+      if (!cueKey) return;
+      const current = groups.get(cueKey) || {
+        id: makeStableScopeId("required_se", cueKey),
+        source: "script",
+        cueKey,
+        category: "SE",
+        title,
+        searchQuery: title,
+        notes: "",
+        sourceSiteId: "",
+        candidateTitle: "",
+        candidatePageUrl: "",
+        previewUrl: "",
+        downloadUrl: "",
+        confirmedMaterialId: "",
+        commonSeName: "",
+        occurrenceCount: 0,
+        lineIds: [],
+        locations: [],
+        locationKeys: new Set(),
+        updatedAt: ""
+      };
+      current.occurrenceCount += 1;
+      if (!current.lineIds.includes(line.id)) current.lineIds.push(line.id);
+      if (!current.locationKeys.has(locationKey)) {
+        current.locationKeys.add(locationKey);
+        current.locations.push(location);
+      }
+      groups.set(cueKey, current);
+    });
+  });
+  return [...groups.values()].map(({ locationKeys, ...material }) => material);
+};
+
+const mergeRequiredMaterialOverride = (material, override) => ({
+  ...material,
+  ...(override || {}),
+  id: material.id,
+  source: "script",
+  cueKey: material.cueKey,
+  category: "SE",
+  occurrenceCount: material.occurrenceCount,
+  lineIds: material.lineIds,
+  locations: material.locations
+});
+
+export const getProductionRequiredMaterials = (project = {}) => {
+  const stored = Array.isArray(project.requiredMaterials) ? project.requiredMaterials : [];
+  const overrides = new Map(
+    stored
+      .filter((material) => material?.source === "script" && material.cueKey)
+      .map((material) => [String(material.cueKey), material])
+  );
+  const dismissed = new Set(Array.isArray(project.dismissedRequiredMaterialKeys) ? project.dismissedRequiredMaterialKeys : []);
+  const automatic = extractScriptRequiredMaterials(project)
+    .filter((material) => !dismissed.has(material.cueKey))
+    .map((material) => mergeRequiredMaterialOverride(material, overrides.get(material.cueKey)));
+  const manual = stored.filter((material) => material?.source !== "script").map((material) => ({
+    ...material,
+    source: "manual",
+    chapterId: String(material.chapterId || ""),
+    chapterTitle: String(material.chapterTitle || ""),
+    category: PRODUCTION_MATERIAL_CATEGORIES.includes(material.category) ? material.category : "SE",
+    occurrenceCount: 0,
+    lineIds: [],
+    locations: []
+  }));
+  return [...automatic, ...manual];
+};
+
+export const getProductionRequiredMaterialChapterGroups = (project = {}, materials = null) => {
+  const requiredMaterials = Array.isArray(materials) ? materials : getProductionRequiredMaterials(project);
+  const groups = [];
+  const groupById = new Map();
+  const groupByTitle = new Map();
+
+  const ensureChapter = (chapterId = "", chapterTitle = "") => {
+    const normalizedId = String(chapterId || "").trim();
+    const normalizedTitle = String(chapterTitle || "").trim() || "章未設定";
+    const titleKey = getScriptChapterKey(normalizedTitle);
+    const existing = (normalizedId && groupById.get(normalizedId)) || groupByTitle.get(titleKey);
+    if (existing) return existing;
+    const group = {
+      id: normalizedId || makeStableScopeId("required_material_chapter", titleKey),
+      title: normalizedTitle,
+      materials: [],
+      unassigned: false
+    };
+    groups.push(group);
+    groupById.set(group.id, group);
+    groupByTitle.set(titleKey, group);
+    return group;
+  };
+
+  getRecordingDisplayProject(project).lines.forEach((line) => {
+    ensureChapter(line.chapterId, line.chapterTitle);
+  });
+
+  let unassignedGroup = null;
+  requiredMaterials.forEach((material) => {
+    const materialGroups = [];
+    if (material.source === "script") {
+      (Array.isArray(material.locations) ? material.locations : []).forEach((location) => {
+        const group = ensureChapter(location.chapterId, location.chapterTitle);
+        if (!materialGroups.includes(group)) materialGroups.push(group);
+      });
+    } else if (material.chapterId || material.chapterTitle) {
+      materialGroups.push(ensureChapter(material.chapterId, material.chapterTitle));
+    }
+
+    if (!materialGroups.length) {
+      if (!unassignedGroup) {
+        unassignedGroup = {
+          id: "required_material_chapter_unassigned",
+          title: "章未設定",
+          materials: [],
+          unassigned: true
+        };
+        groups.push(unassignedGroup);
+      }
+      materialGroups.push(unassignedGroup);
+    }
+
+    materialGroups.forEach((group) => {
+      if (!group.materials.some((item) => item.id === material.id)) group.materials.push(material);
+    });
+  });
+
+  return groups;
+};
+
+export const getDismissedProductionRequiredMaterials = (project = {}) => {
+  const dismissed = new Set(Array.isArray(project.dismissedRequiredMaterialKeys) ? project.dismissedRequiredMaterialKeys : []);
+  return extractScriptRequiredMaterials(project).filter((material) => dismissed.has(material.cueKey));
+};
+
+export const buildMaterialSourceSearchUrl = (site = {}, query = "") => {
+  const template = String(site.searchUrlTemplate || site.homeUrl || "").trim();
+  if (!/^https?:\/\//i.test(template)) return "";
+  return template.includes("{query}")
+    ? template.replaceAll("{query}", encodeURIComponent(String(query || "").trim()))
+    : template;
 };
 
 const normalizeParsedTableRow = (row = {}) => {

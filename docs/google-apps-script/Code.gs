@@ -52,6 +52,9 @@ function doPost(e) {
       return handlePublishRecordingProject(payload);
     }
     if (action === "updateRecordingLine") return handleUpdateRecordingLine(payload);
+    if (action === "updateRecordingLines") return handleUpdateRecordingLines(payload);
+    if (action === "createRecordingQuestion") return handleRecordingQuestion(payload, false);
+    if (action === "resolveRecordingQuestion") return handleRecordingQuestion(payload, true);
     return jsonOutput({ ok: false, error: "未対応のactionです: " + action });
   } catch (error) {
     return jsonOutput({ ok: false, error: errorMessage(error) });
@@ -389,6 +392,7 @@ function writeRecordingProject(root, project) {
 }
 
 function findRecordingViewer(project, memberId, accessKey) {
+  if (!memberId || !accessKey) throw new Error("共有URLの認証情報がありません。");
   const members = Array.isArray(project.castMembers) ? project.castMembers : [];
   const viewer = members.filter(function (member) {
     return String(member.id || "") === String(memberId || "") &&
@@ -399,11 +403,22 @@ function findRecordingViewer(project, memberId, accessKey) {
 }
 
 function sanitizeRecordingProject(project) {
-  const copy = JSON.parse(JSON.stringify(project));
+  const copy = {};
+  ["id", "episodeId", "title", "description", "scriptVersion", "status", "recordingDeadline", "recordingDeadlineTime",
+    "releaseDate", "releaseTime", "editingStatus", "characters", "recordingFolderOrder", "castMembers", "lines",
+    "derivedLineProgress", "materials", "requiredMaterials", "dismissedRequiredMaterialKeys", "materialSourceSites",
+    "requiredMaterialFolderUrl", "requiredMaterialChapterFolders", "questions", "deletedQuestionIds", "tasks", "sharedLinks", "sharedLinkOrder",
+    "announcements", "scheduleItems", "deadlineItems", "studioConcept", "sharedAt", "updatedAt", "syncRevision"
+  ].forEach(function (key) {
+    if (Object.prototype.hasOwnProperty.call(project, key)) copy[key] = JSON.parse(JSON.stringify(project[key]));
+  });
   copy.castMembers = (copy.castMembers || []).map(function (member) {
     return {
       id: member.id || "",
       actorName: member.actorName || "",
+      contactName: member.contactName || "",
+      contactHonorific: member.contactHonorific || "さん",
+      socialUrl: member.socialUrl || "",
       characterIds: member.characterIds || []
     };
   });
@@ -455,7 +470,178 @@ function mergeExistingRecordingProgress(incoming, existing) {
   return incoming;
 }
 
+const VCS_PROGRESS_FIELDS = ["actorStatus", "reviewStatus", "recordingUrl", "recordingFileName", "actorNote", "directorNote", "retakeAnnotations"];
+
+function vcsWithRecordingLock(callback) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(25000)) throw new Error("別の保存処理が進行中です。少し待って再試行してください。");
+  try { return callback(); } finally { lock.releaseLock(); }
+}
+
+function vcsMergeProgress(incoming, existing) {
+  const result = Object.assign({}, incoming);
+  result.fieldUpdatedAt = Object.assign({}, incoming.fieldUpdatedAt || {});
+  VCS_PROGRESS_FIELDS.forEach(function (key) {
+    if (!Object.prototype.hasOwnProperty.call(existing, key)) return;
+    const incomingAt = (incoming.fieldUpdatedAt || {})[key] || incoming.updatedAt || "";
+    const existingAt = (existing.fieldUpdatedAt || {})[key] || existing.updatedAt || "";
+    if (Object.prototype.hasOwnProperty.call(incoming, key) && incomingAt > existingAt) return;
+    result[key] = existing[key];
+    result.fieldUpdatedAt[key] = existingAt;
+  });
+  result.updatedAt = [incoming.updatedAt || "", existing.updatedAt || ""].sort().pop();
+  return result;
+}
+
+function vcsMergePublishedProgress(incoming, existing) {
+  const oldLines = {};
+  (existing.lines || []).forEach(function (line) { oldLines[line.id] = line; });
+  incoming.lines = (incoming.lines || []).map(function (line) { return oldLines[line.id] ? vcsMergeProgress(line, oldLines[line.id]) : line; });
+  const progress = Object.assign({}, incoming.derivedLineProgress || {});
+  Object.keys(existing.derivedLineProgress || {}).forEach(function (id) {
+    if (!Object.prototype.hasOwnProperty.call(incoming.recordingLineIndex || {}, id)) return;
+    progress[id] = vcsMergeProgress(progress[id] || existing.derivedLineProgress[id], existing.derivedLineProgress[id]);
+  });
+  incoming.derivedLineProgress = progress;
+  const questions = {};
+  const deleted = {};
+  (incoming.deletedQuestionIds || []).concat(existing.deletedQuestionIds || []).forEach(function (id) { deleted[id] = true; });
+  (incoming.questions || []).forEach(function (question) { questions[question.id] = question; });
+  (existing.questions || []).forEach(function (question) {
+    if (!questions[question.id] || String(question.updatedAt || "") >= String(questions[question.id].updatedAt || "")) questions[question.id] = question;
+  });
+  incoming.questions = Object.keys(questions).filter(function (id) { return !deleted[id]; }).map(function (id) { return questions[id]; });
+  incoming.deletedQuestionIds = Object.keys(deleted);
+  return incoming;
+}
+
 function handlePublishRecordingProject(payload) {
+  requireToken(payload.token);
+  return vcsWithRecordingLock(function () {
+    const root = getRootFolder(payload.driveFolderUrl);
+    let project = normalizeRecordingProjectForStorage(payload.project);
+    if (project.recordingProtocol !== 2 || !project.recordingLineIndex) throw new Error("最新版のツールから共有を更新してください。");
+    const sourceIds = {};
+    project.lines.forEach(function (line) { if (line.manualBody) sourceIds[line.id] = true; });
+    const characterIds = project.characters.map(function (character) { return character.id; });
+    const index = {};
+    Object.keys(project.recordingLineIndex).forEach(function (id) {
+      const line = project.recordingLineIndex[id] || {};
+      if (id.indexOf("derived_line_") !== 0 || !sourceIds[line.sourceLineId]) throw new Error("章本文のセリフ対応表が不正です。台本を確認してください。");
+      if (line.characterId && characterIds.indexOf(line.characterId) < 0) throw new Error("セリフの担当役が見つかりません。");
+      index[id] = { id: id, sourceLineId: line.sourceLineId, characterId: line.characterId || "", kind: line.kind,
+        chapterId: line.chapterId, sceneId: line.sceneId, performanceType: line.performanceType, derivedFromManualBody: true };
+    });
+    project.recordingLineIndex = index;
+    // A missing file is a first publication; parsing/access errors must not overwrite existing data.
+    const directory = getOrCreateFolder(root, RECORDING_PROJECTS_DIR);
+    const files = directory.getFilesByName(sanitizeName(project.id, "") + ".json");
+    let existing = null;
+    if (files.hasNext()) existing = JSON.parse(files.next().getBlob().getDataAsString("UTF-8"));
+    if (existing) project = vcsMergePublishedProgress(project, existing);
+    project.syncRevision = Number(existing && existing.syncRevision || 0) + 1;
+    project.sharedAt = new Date().toISOString();
+    project.updatedAt = project.sharedAt;
+    writeRecordingProject(root, project);
+    return jsonOutput({ ok: true, protocolVersion: 2, projectId: project.id, project: sanitizeRecordingProject(project), now: project.sharedAt });
+  });
+}
+
+function vcsResolveStoredLine(project, lineId) {
+  const stored = (project.lines || []).filter(function (line) { return line.id === lineId; })[0];
+  if (stored && !stored.manualBody) return { line: stored, derived: false };
+  const index = project.recordingLineIndex || {};
+  if (!Object.prototype.hasOwnProperty.call(index, lineId)) throw new Error("セリフの共有情報がありません。制作オーナーが共有内容を更新してください。");
+  const context = index[lineId];
+  const line = Object.assign({ actorStatus: "未収録", reviewStatus: "未確認", actorNote: "", directorNote: "" },
+    (project.derivedLineProgress || {})[lineId] || {}, context);
+  return { line: line, derived: true };
+}
+
+function vcsRecordingIdentity(project, payload) {
+  if (payload.token) { requireToken(payload.token); return null; }
+  return findRecordingViewer(project, payload.memberId, payload.accessKey);
+}
+
+function vcsApplyRecordingPatch(project, resolved, patch, viewer, now) {
+  const line = resolved.line;
+  if (viewer && (viewer.characterIds || []).indexOf(line.characterId) < 0) throw new Error("このセリフは担当外のため変更できません。");
+  const allowed = viewer ? ["actorStatus", "recordingUrl", "recordingFileName", "actorNote"] : VCS_PROGRESS_FIELDS;
+  const times = {};
+  VCS_PROGRESS_FIELDS.forEach(function (key) { times[key] = (line.fieldUpdatedAt || {})[key] || line.updatedAt || ""; });
+  allowed.forEach(function (key) {
+    if (!Object.prototype.hasOwnProperty.call(patch, key)) return;
+    if (key === "actorStatus" && ["未収録", "収録済み", "再提出済み"].indexOf(patch[key]) < 0) throw new Error("収録状態が不正です。");
+    if (key === "reviewStatus" && ["未確認", "確認中", "OK", "リテイク", "保留"].indexOf(patch[key]) < 0) throw new Error("確認状態が不正です。");
+    line[key] = key === "retakeAnnotations" ? (Array.isArray(patch[key]) ? patch[key].slice(0, 20) : []) : String(patch[key] == null ? "" : patch[key]).slice(0, 12000);
+    times[key] = now;
+  });
+  line.fieldUpdatedAt = times;
+  line.updatedAt = now;
+  if (resolved.derived) {
+    project.derivedLineProgress = project.derivedLineProgress || {};
+    project.derivedLineProgress[line.id] = line;
+  }
+  return line;
+}
+
+function handleUpdateRecordingLine(payload) {
+  return handleUpdateRecordingLines(Object.assign({}, payload, { updates: [{ lineId: payload.lineId, patch: payload.patch || {} }] }));
+}
+
+function handleUpdateRecordingLines(payload) {
+  return vcsWithRecordingLock(function () {
+    const root = getRootFolder(payload.driveFolderUrl);
+    const project = readRecordingProject(root, payload.projectId);
+    const viewer = vcsRecordingIdentity(project, payload);
+    const updates = payload.updates;
+    if (!Array.isArray(updates) || !updates.length || updates.length > 2000) throw new Error("更新するセリフ数が不正です。");
+    const now = new Date().toISOString();
+    const lines = updates.map(function (update) {
+      return vcsApplyRecordingPatch(project, vcsResolveStoredLine(project, String(update.lineId || "")),
+        update.patch || { actorStatus: payload.actorStatus }, viewer, now);
+    });
+    project.syncRevision = Number(project.syncRevision || 0) + 1;
+    project.updatedAt = now;
+    writeRecordingProject(root, project);
+    return jsonOutput({ ok: true, protocolVersion: 2, line: lines[0], lines: lines, count: lines.length,
+      project: sanitizeRecordingProject(project), viewer: viewer ? sanitizeRecordingViewer(viewer) : null, now: now });
+  });
+}
+
+function handleRecordingQuestion(payload, resolve) {
+  return vcsWithRecordingLock(function () {
+    const root = getRootFolder(payload.driveFolderUrl);
+    const project = readRecordingProject(root, payload.projectId);
+    const viewer = vcsRecordingIdentity(project, payload);
+    if (!viewer) throw new Error("質問者の共有URLから操作してください。");
+    project.questions = Array.isArray(project.questions) ? project.questions : [];
+    const now = new Date().toISOString();
+    let question;
+    if (resolve) {
+      question = project.questions.filter(function (item) { return item.id === payload.questionId; })[0];
+      if (!question || question.castMemberId !== viewer.id || question.status !== "回答済み" || !String(question.answer || "").trim()) throw new Error("回答済みの質問は質問者だけが解決にできます。");
+      question.status = "解決済み";
+      question.updatedAt = now;
+    } else {
+      const body = String(payload.body || "").trim();
+      if (!body || body.length > 12000) throw new Error("質問は1〜12000文字で入力してください。");
+      const parent = payload.parentQuestionId ? project.questions.filter(function (item) { return item.id === payload.parentQuestionId; })[0] : null;
+      if (payload.parentQuestionId && (!parent || parent.castMemberId !== viewer.id)) throw new Error("元の質問が見つからないか質問者が異なります。");
+      const line = payload.lineId ? vcsResolveStoredLine(project, payload.lineId).line : null;
+      question = { id: "question_" + Utilities.getUuid(), body: body, authorName: viewer.actorName,
+        castMemberId: viewer.id, wpUserId: 0, lineId: line ? line.id : "", characterId: line ? line.characterId : "",
+        parentQuestionId: parent ? parent.id : "", answer: "", status: "未回答", createdAt: now, updatedAt: now };
+      project.questions.unshift(question);
+    }
+    project.syncRevision = Number(project.syncRevision || 0) + 1;
+    project.updatedAt = now;
+    writeRecordingProject(root, project);
+    return jsonOutput({ ok: true, protocolVersion: 2, question: question, project: sanitizeRecordingProject(project), viewer: sanitizeRecordingViewer(viewer), now: now });
+  });
+}
+
+function handleLegacyPublishRecordingProject(payload) {
   const root = getRootFolder(payload.driveFolderUrl);
   let project = normalizeRecordingProjectForStorage(payload.project);
   try {
@@ -480,6 +666,7 @@ function handleGetRecordingProject(params) {
   }
   return jsonOutput({
     ok: true,
+    protocolVersion: 2,
     project: sanitizeRecordingProject(project),
     viewer: viewer ? sanitizeRecordingViewer(viewer) : null,
     now: new Date().toISOString()
@@ -511,7 +698,7 @@ function saveRecordingAttachment(root, project, viewer, line, attachment) {
   return { url: file.getUrl(), fileName: fileName };
 }
 
-function handleUpdateRecordingLine(payload) {
+function handleLegacyUpdateRecordingLine(payload) {
   const root = getRootFolder(payload.driveFolderUrl);
   const project = readRecordingProject(root, payload.projectId);
   const lines = Array.isArray(project.lines) ? project.lines : [];
@@ -534,10 +721,29 @@ function handleUpdateRecordingLine(payload) {
 
   const patch = payload.patch || {};
   const allowedActorFields = ["actorStatus", "recordingUrl", "recordingFileName", "actorNote"];
-  const allowedAdminFields = allowedActorFields.concat(["reviewStatus", "directorNote"]);
+  const allowedAdminFields = allowedActorFields.concat(["reviewStatus", "directorNote", "retakeAnnotations"]);
   const allowed = isAdmin ? allowedAdminFields : allowedActorFields;
   allowed.forEach(function (key) {
-    if (Object.prototype.hasOwnProperty.call(patch, key)) line[key] = String(patch[key] || "");
+    if (!Object.prototype.hasOwnProperty.call(patch, key)) return;
+    if (key === "retakeAnnotations") {
+      line[key] = (Array.isArray(patch[key]) ? patch[key] : []).slice(0, 20).map(function (instruction, index) {
+        const item = instruction || {};
+        return {
+          id: String(item.id || "retake_instruction_" + (index + 1)),
+          quote: String(item.quote || "").slice(0, 500),
+          start: Number.isFinite(Number(item.start)) ? Number(item.start) : -1,
+          end: Number.isFinite(Number(item.end)) ? Number(item.end) : -1,
+          category: String(item.category || "その他").slice(0, 40),
+          instruction: String(item.instruction || "").slice(0, 2000),
+          reading: String(item.reading || "").slice(0, 160),
+          accentType: item.accentType === null ? null : Number(item.accentType || 0),
+          createdAt: String(item.createdAt || ""),
+          updatedAt: String(item.updatedAt || "")
+        };
+      });
+      return;
+    }
+    line[key] = String(patch[key] || "");
   });
 
   const validActorStatuses = ["未収録", "収録済み", "再提出済み"];

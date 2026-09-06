@@ -4,15 +4,32 @@ import test from "node:test";
 import { makeGoogleDrivePreviewUrl, makePlayableEmbedUrl, migrateData } from "../src/lib/core.js";
 
 import {
+  addProductionAuditionStartSchedule,
   addProductionCharacterFromScriptSpeaker,
+  applyRecordingProjectUpdate,
+  applyProductionContactDialogueCountNotice,
+  applyProductionSocialRoleSelection,
   archiveScriptVersion,
+  assignProductionAuditionApplicant,
   assignProductionActorName,
+  buildMaterialSourceSearchUrl,
+  buildProductionContactMessage,
+  buildProductionRetakeList,
+  buildProductionSocialMessage,
   buildProductionQuestionThreads,
   canResolveProductionQuestion,
   getCharacterDialogueCounts,
   getCharacterImageCropStyle,
   getCharacterScriptName,
+  getActorContactName,
+  getActorContactHonorific,
+  getDismissedProductionRequiredMaterials,
   getFilteredRecordingLines,
+  groupProductionAuditionApplicantsByRole,
+  getProductionRequiredMaterialChapterGroups,
+  getProductionRequiredMaterials,
+  getProductionCharacterAppearanceLabel,
+  getProductionCharacterRetakes,
   getRecordingDisplayProject,
   getRecordingProgress,
   getShareableRecordingProject,
@@ -20,21 +37,59 @@ import {
   getScriptImportPlan,
   getUnassignedProductionCharacters,
   getUnregisteredScriptSpeakers,
+  isOtherRoleRequestContactTemplate,
+  isRetakeRequestContactTemplate,
+  mergeMissingProductionRetakesIntoDraft,
+  mergeProductionAuditionApplicants,
+  extractScriptRequiredMaterials,
   normalizeRecordingProject,
+  normalizeXProfileUrl,
+  patchRecordingChapterActorStatus,
+  patchRecordingChapterReviewStatus,
+  patchRecordingCharacterActorStatus,
+  patchRecordingCharacterReviewStatus,
   patchRecordingLineProgress,
   parseGoogleDocsScript,
   parseManualChapterBody,
   partitionCharactersByScript,
   reorderProductionCharacters,
+  reorderProductionMaterialSourceSites,
   reorderProductionMaterials,
   reorderProductionRecordingFolders,
   reorderProductionSharedLinks,
+  reorderProductionTemplates,
   renameProductionCharacter,
   repairScriptHierarchy,
   restoreScriptSnapshot,
   sortProductionTasks,
   sortProductionScheduleItems
 } from "../src/lib/recording.js";
+
+test("updates recording fields without rebuilding unchanged project collections", () => {
+  const project = normalizeRecordingProject({
+    id: "project_fast_input",
+    title: "入力前",
+    characters: [{ id: "character_a", name: "役A" }],
+    lines: [{ id: "line_a", characterId: "character_a", text: "セリフ", kind: "dialogue" }],
+    contactMessageDrafts: []
+  });
+  const updated = applyRecordingProjectUpdate(project, (current) => ({
+    ...current,
+    contactMessageDrafts: [{
+      id: "draft_a",
+      templateId: "template_a",
+      characterId: "character_a",
+      body: "入力中"
+    }]
+  }), "2026-08-31T00:00:00.000Z");
+
+  assert.notStrictEqual(updated, project);
+  assert.strictEqual(updated.characters, project.characters);
+  assert.strictEqual(updated.lines, project.lines);
+  assert.equal(updated.contactMessageDrafts[0].body, "入力中");
+  assert.equal(updated.updatedAt, "2026-08-31T00:00:00.000Z");
+  assert.strictEqual(applyRecordingProjectUpdate(project, () => project), project);
+});
 
 test("keeps unassigned role tasks in sync with actor assignments", () => {
   const project = normalizeRecordingProject({
@@ -63,12 +118,26 @@ test("keeps unassigned role tasks in sync with actor assignments", () => {
   assert.deepEqual(assigned.auditionRoleProgress[0], {
     characterId: "role_b",
     formCreated: true,
+    formStructureVerified: false,
+    formValidation: {},
+    headerApplied: false,
+    uploadVerified: false,
     recruitmentStarted: true,
     formEditUrl: "",
     formResponderUrl: "",
     headerImageUrl: "",
     socialImageUrl: "",
     imageAudit: { passed: true },
+    auditionRoleSummary: "",
+    auditionAcceptsFemaleApplicants: true,
+    auditionAcceptsMaleApplicants: true,
+    auditionLines: "",
+    auditionDeadline: "",
+    socialPostText: "",
+    socialPostUpdatedAt: "",
+    pcFinishStatus: "",
+    pcFinishMessage: "",
+    pcFinishedAt: "",
     createdAt: "",
     updatedAt: ""
   });
@@ -92,19 +161,60 @@ test("normalizes and sorts manual production tasks", () => {
   });
 
   assert.equal(project.auditionFormsFolderUrl, "https://docs.google.com/forms/d/example/viewform");
+  assert.equal(project.auditionManagementSheetUrl, "https://docs.google.com/spreadsheets/d/19O9_lkivbomT5WiTRv-wsU5KKPLBx_lngZI4CclIXbY/edit?gid=1808011708#gid=1808011708");
   assert.deepEqual(project.auditionRoleProgress, [{
     characterId: "role_b",
     formCreated: true,
+    formStructureVerified: false,
+    formValidation: {},
+    headerApplied: false,
+    uploadVerified: false,
     recruitmentStarted: false,
     formEditUrl: "",
     formResponderUrl: "",
     headerImageUrl: "",
     socialImageUrl: "",
     imageAudit: {},
+    auditionRoleSummary: "",
+    auditionAcceptsFemaleApplicants: true,
+    auditionAcceptsMaleApplicants: true,
+    auditionLines: "",
+    auditionDeadline: "",
+    socialPostText: "",
+    socialPostUpdatedAt: "",
+    pcFinishStatus: "",
+    pcFinishMessage: "",
+    pcFinishedAt: "",
     createdAt: "",
     updatedAt: ""
   }]);
   assert.deepEqual(sortProductionTasks(project.tasks).map((task) => task.id), ["important", "later", "done"]);
+});
+
+test("infers a legacy applicant gender restriction from the saved role summary", () => {
+  const project = normalizeRecordingProject({
+    auditionRoleProgress: [{
+      characterId: "ordis",
+      auditionRoleSummary: "老齢の男性の役になります（女性の応募はご遠慮ください）。"
+    }]
+  });
+
+  assert.equal(project.auditionRoleProgress[0].auditionAcceptsFemaleApplicants, false);
+  assert.equal(project.auditionRoleProgress[0].auditionAcceptsMaleApplicants, true);
+});
+
+test("keeps an explicit applicant gender selection after reloading a project", () => {
+  const saved = normalizeRecordingProject({
+    auditionRoleProgress: [{
+      characterId: "female_role",
+      auditionAcceptsFemaleApplicants: true,
+      auditionAcceptsMaleApplicants: false
+    }]
+  });
+  const reloaded = normalizeRecordingProject(JSON.parse(JSON.stringify(saved)));
+
+  assert.equal(reloaded.auditionRoleProgress[0].auditionAcceptsFemaleApplicants, true);
+  assert.equal(reloaded.auditionRoleProgress[0].auditionAcceptsMaleApplicants, false);
 });
 
 test("offers only unregistered dialogue speakers from manually pasted script bodies", () => {
@@ -277,6 +387,35 @@ test("keeps detailed production deadlines in date and time order", () => {
   ]);
 });
 
+test("adds one schedule item when an audition starts", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "vargas", name: "バルガス・ロウ" }],
+    scheduleItems: []
+  });
+  const startedAt = new Date(2026, 7, 10, 14, 5);
+  const started = addProductionAuditionStartSchedule(project, "vargas", startedAt);
+  const repeated = addProductionAuditionStartSchedule(started, "vargas", startedAt);
+
+  assert.equal(started.scheduleItems.length, 1);
+  assert.deepEqual({
+    type: started.scheduleItems[0].type,
+    title: started.scheduleItems[0].title,
+    date: started.scheduleItems[0].date,
+    time: started.scheduleItems[0].time,
+    status: started.scheduleItems[0].status,
+    sourceKey: started.scheduleItems[0].sourceKey
+  }, {
+    type: "オーディション",
+    title: "「バルガス・ロウ」オーディション募集開始",
+    date: "2026-08-10",
+    time: "14:05",
+    status: "進行中",
+    sourceKey: "audition-recruitment-start:vargas"
+  });
+  assert.equal(repeated.scheduleItems.length, 1);
+  assert.equal(normalizeRecordingProject(started).scheduleItems[0].sourceKey, "audition-recruitment-start:vargas");
+});
+
 test("builds an embeddable Google Drive audio preview URL", () => {
   const sharedUrl = "https://drive.google.com/file/d/abc_DEF-123/view?usp=sharing";
   const previewUrl = "https://drive.google.com/file/d/abc_DEF-123/preview";
@@ -308,6 +447,167 @@ test("reorders production materials without changing their contents", () => {
   assert.deepEqual(reordered.map((material) => material.id), ["complete", "theme", "se"]);
   assert.equal(reordered[0], materials[2]);
   assert.deepEqual(materials.map((material) => material.id), ["theme", "se", "complete"]);
+});
+
+test("reorders SE distribution sites without changing their saved details", () => {
+  const sites = [
+    { id: "site_a", name: "サイトA", homeUrl: "https://a.example" },
+    { id: "site_b", name: "サイトB", homeUrl: "https://b.example" },
+    { id: "site_c", name: "サイトC", homeUrl: "https://c.example" }
+  ];
+  const reordered = reorderProductionMaterialSourceSites(sites, "site_c", "site_a");
+
+  assert.deepEqual(reordered.map((site) => site.id), ["site_c", "site_a", "site_b"]);
+  assert.equal(reordered[0], sites[2]);
+  assert.deepEqual(sites.map((site) => site.id), ["site_a", "site_b", "site_c"]);
+});
+
+test("reorders production templates without changing their contents", () => {
+  const templates = [
+    { id: "accepted", name: "合格連絡" },
+    { id: "other", name: "別役打診" },
+    { id: "rejected", name: "不合格連絡" }
+  ];
+  const reordered = reorderProductionTemplates(templates, "rejected", "accepted");
+
+  assert.deepEqual(reordered.map((template) => template.id), ["rejected", "accepted", "other"]);
+  assert.equal(reordered[0], templates[2]);
+  assert.deepEqual(templates.map((template) => template.id), ["accepted", "other", "rejected"]);
+});
+
+test("extracts required SE cues from script markers without treating ordinary SE text as a cue", () => {
+  const project = normalizeRecordingProject({
+    lines: [
+      { id: "rain_a", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", kind: "direction", text: "SE：激しい雨。" },
+      { id: "rain_b", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_2", sceneTitle: "Scene 2", kind: "direction", text: "（SE: 激しい雨。）" },
+      { id: "not_se", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_2", sceneTitle: "Scene 2", kind: "dialogue", text: "これはSE：という説明です。" },
+      { id: "music", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_2", sceneTitle: "Scene 2", kind: "direction", text: "BGM：主題歌。" }
+    ]
+  });
+  const required = extractScriptRequiredMaterials(project);
+
+  assert.equal(required.length, 1);
+  assert.equal(required[0].title, "激しい雨。");
+  assert.equal(required[0].occurrenceCount, 2);
+  assert.equal(required[0].locations.length, 2);
+});
+
+test("keeps manual required materials and remembers script cues dismissed by the owner", () => {
+  const base = normalizeRecordingProject({
+    lines: [{ id: "door", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", kind: "direction", text: "SE：重い扉が閉まる音" }],
+    requiredMaterials: [{ id: "manual_wind", source: "manual", category: "SE", title: "遠くの風音", searchQuery: "風音" }]
+  });
+  const automatic = extractScriptRequiredMaterials(base)[0];
+  const dismissed = normalizeRecordingProject({ ...base, dismissedRequiredMaterialKeys: [automatic.cueKey] });
+
+  assert.deepEqual(getProductionRequiredMaterials(dismissed).map((material) => material.id), ["manual_wind"]);
+  assert.deepEqual(getDismissedProductionRequiredMaterials(dismissed).map((material) => material.cueKey), [automatic.cueKey]);
+});
+
+test("groups automatic and manual required materials by script chapter", () => {
+  const project = normalizeRecordingProject({
+    lines: [
+      { id: "rain_1", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", kind: "direction", text: "SE：激しい雨" },
+      { id: "rain_2", chapterId: "chapter_2", chapterTitle: "第二章", sceneId: "scene_2", sceneTitle: "Scene 2", kind: "direction", text: "SE：激しい雨" },
+      { id: "bell_2", chapterId: "chapter_2", chapterTitle: "第二章", sceneId: "scene_3", sceneTitle: "Scene 3", kind: "direction", text: "SE：遠くの鐘" },
+      { id: "dialogue_3", chapterId: "chapter_3", chapterTitle: "第三章", sceneId: "scene_4", sceneTitle: "Scene 4", kind: "dialogue", text: "静かになったね" }
+    ],
+    requiredMaterials: [
+      { id: "manual_first", source: "manual", chapterId: "chapter_1", chapterTitle: "第一章", category: "SE", title: "足音" },
+      { id: "manual_unassigned", source: "manual", category: "SE", title: "予備の環境音" }
+    ]
+  });
+  const materials = getProductionRequiredMaterials(project);
+  const groups = getProductionRequiredMaterialChapterGroups(project, materials);
+
+  assert.deepEqual(groups.map((group) => [group.title, group.materials.length]), [
+    ["第一章", 2],
+    ["第二章", 2],
+    ["第三章", 0],
+    ["章未設定", 1]
+  ]);
+  assert.deepEqual(groups[0].materials.map((material) => material.title), ["激しい雨", "足音"]);
+  assert.deepEqual(groups[1].materials.map((material) => material.title), ["激しい雨", "遠くの鐘"]);
+  assert.equal(groups.at(-1).unassigned, true);
+  assert.equal(project.requiredMaterials[0].chapterId, "chapter_1");
+});
+
+test("keeps the parent and chapter folders used to store generated SE files", () => {
+  const project = normalizeRecordingProject({
+    requiredMaterialFolderUrl: "https://drive.google.com/drive/folders/parent",
+    requiredMaterialChapterFolders: [
+      {
+        chapterId: "chapter_1",
+        chapterTitle: "第一章",
+        folderUrl: "https://drive.google.com/drive/folders/chapter-1"
+      },
+      {
+        chapterId: "chapter_2",
+        chapterTitle: "第二章",
+        url: "https://drive.google.com/drive/folders/chapter-2"
+      }
+    ]
+  });
+
+  assert.equal(project.requiredMaterialFolderUrl, "https://drive.google.com/drive/folders/parent");
+  assert.deepEqual(project.requiredMaterialChapterFolders, [
+    {
+      chapterId: "chapter_1",
+      chapterTitle: "第一章",
+      url: "https://drive.google.com/drive/folders/chapter-1"
+    },
+    {
+      chapterId: "chapter_2",
+      chapterTitle: "第二章",
+      url: "https://drive.google.com/drive/folders/chapter-2"
+    }
+  ]);
+});
+
+test("builds a registered SE site search URL from its query template", () => {
+  assert.equal(
+    buildMaterialSourceSearchUrl({ searchUrlTemplate: "https://sounds.example/search?q={query}" }, "激しい 雨"),
+    "https://sounds.example/search?q=%E6%BF%80%E3%81%97%E3%81%84%20%E9%9B%A8"
+  );
+  assert.equal(buildMaterialSourceSearchUrl({ searchUrlTemplate: "" }, "雨"), "");
+});
+
+test("keeps saved SE prompt settings and edited outputs", () => {
+  const project = normalizeRecordingProject({
+    requiredMaterials: [{
+      id: "manual_thunder",
+      source: "manual",
+      title: "遠くの雷",
+      commonSeName: "雷鳴ベース",
+      sePrompt: {
+        mode: "one-shot",
+        durationSeconds: 6,
+        distance: "far",
+        space: "outdoor",
+        intensity: "strong",
+        style: "cinematic",
+        detail: "余韻を長めにする",
+        codexPrompt: "保存したCodex用プロンプト",
+        elevenLabsPrompt: "Saved ElevenLabs prompt",
+        fireflyPrompt: "Saved Adobe Firefly prompt"
+      }
+    }]
+  });
+
+  assert.equal(project.requiredMaterials[0].commonSeName, "雷鳴ベース");
+  assert.deepEqual(project.requiredMaterials[0].sePrompt, {
+    mode: "one-shot",
+    durationSeconds: 6,
+    promptInfluence: 0.3,
+    distance: "far",
+    space: "outdoor",
+    intensity: "strong",
+    style: "cinematic",
+    detail: "余韻を長めにする",
+    codexPrompt: "保存したCodex用プロンプト",
+    elevenLabsPrompt: "Saved ElevenLabs prompt",
+    fireflyPrompt: "Saved Adobe Firefly prompt"
+  });
 });
 
 test("reorders recording folders independently from character order", () => {
@@ -661,6 +961,40 @@ test("selecting a character includes every performance type for that character",
   assert.deepEqual(filtered.map((line) => line.performanceType), ["通常", "心の声", "イヤモニ"]);
 });
 
+test("includes only SE cues that mention the selected character", () => {
+  const project = normalizeRecordingProject({
+    characters: [
+      { id: "vel", name: "ヴェル13世", scriptName: "ヴェル" },
+      { id: "carla", name: "カーラ・マンソン", scriptName: "カーラ" }
+    ],
+    lines: [
+      { id: "vel_line", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 1, characterId: "vel", kind: "dialogue", text: "まだ眠くないよ。" },
+      { id: "vel_laugh", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 2, kind: "direction", text: "SE：ヴェルが小さく笑う。" },
+      { id: "both_laugh", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 3, kind: "direction", text: "SE：ヴェルとカーラの二人が小さく笑う。" },
+      { id: "thunder", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 4, kind: "direction", text: "SE：遠くで雷が鳴る。" },
+      { id: "ordinary_direction", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 5, kind: "direction", text: "ヴェルが立ち上がる。" },
+      { id: "carla_door", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 6, kind: "direction", text: "（SE: カーラが扉を閉める。）" },
+      { id: "carla_line", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 7, characterId: "carla", kind: "dialogue", text: "静かにして。" }
+    ]
+  });
+
+  const filtered = getFilteredRecordingLines({
+    project,
+    selectedCharacterIds: ["vel"],
+    includeContext: false
+  });
+
+  assert.deepEqual(filtered.map((line) => line.id), ["vel_line", "vel_laugh", "both_laugh"]);
+  assert.equal(filtered.find((line) => line.id === "vel_laugh").isContext, false);
+
+  const carlaFiltered = getFilteredRecordingLines({
+    project,
+    selectedCharacterIds: ["carla"],
+    includeContext: false
+  });
+  assert.deepEqual(carlaFiltered.map((line) => line.id), ["both_laugh", "carla_door", "carla_line"]);
+});
+
 test("shows the previous and next lines as context without crossing a scene boundary", () => {
   const project = normalizeRecordingProject({
     characters: [
@@ -685,6 +1019,40 @@ test("shows the previous and next lines as context without crossing a scene boun
     ["before", true],
     ["target", false],
     ["after", true]
+  ]);
+});
+
+test("shows ordinary stage directions that mention the selected character as context", () => {
+  const project = normalizeRecordingProject({
+    characters: [
+      { id: "vel", name: "ヴェル13世", scriptName: "ヴェル" },
+      { id: "carla", name: "カーラ・マンソン", scriptName: "カーラ" }
+    ],
+    lines: [
+      { id: "carla_024", chapterId: "chapter_6", chapterTitle: "第6章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 24, characterId: "carla", text: "昔から体力配分が下手だったもんね。" },
+      { id: "vel_025", chapterId: "chapter_6", chapterTitle: "第6章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 25, characterId: "vel", text: "うるせえ。" },
+      { id: "carla_direction_026", chapterId: "chapter_6", chapterTitle: "第6章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 26, kind: "direction", text: "カーラが小さく笑う。" },
+      { id: "audience_direction_027", chapterId: "chapter_6", chapterTitle: "第6章", sceneId: "scene_1", sceneTitle: "Scene 1", order: 27, kind: "direction", text: "観客の拍手がさらに広がる。" },
+      { id: "other_scene", chapterId: "chapter_6", chapterTitle: "第6章", sceneId: "scene_2", sceneTitle: "Scene 2", order: 28, kind: "direction", text: "カーラが舞台袖へ移動する。" }
+    ]
+  });
+
+  const withoutContext = getFilteredRecordingLines({
+    project,
+    selectedCharacterIds: ["carla"],
+    includeContext: false
+  });
+  assert.deepEqual(withoutContext.map((line) => line.id), ["carla_024"]);
+
+  const withContext = getFilteredRecordingLines({
+    project,
+    selectedCharacterIds: ["carla"],
+    includeContext: true
+  });
+  assert.deepEqual(withContext.map((line) => [line.id, line.isContext]), [
+    ["carla_024", false],
+    ["vel_025", true],
+    ["carla_direction_026", true]
   ]);
 });
 
@@ -724,6 +1092,159 @@ test("keeps derived recording progress when unrelated chapter text is edited", (
   assert.equal(preserved.actorStatus, "収録済み");
   assert.equal(getRecordingProgress(edited).recorded, 1);
   assert.equal(getRecordingProgress(edited).total, 3);
+});
+
+test("keeps retake markings separate from both stored and derived script text", () => {
+  const stored = normalizeRecordingProject({
+    characters: [{ id: "vel", name: "ヴェル" }],
+    lines: [{
+      id: "stored_line",
+      characterId: "vel",
+      kind: "dialogue",
+      text: "この泥雨を越える。",
+      reviewStatus: "リテイク",
+      retakeAnnotations: [{
+        id: "mark_stored",
+        quote: "泥雨",
+        start: 0,
+        end: 2,
+        category: "アクセント",
+        instruction: "二拍目の後で下げる",
+        reading: "どろあめ",
+        accentType: 2
+      }]
+    }]
+  });
+
+  assert.equal(stored.lines[0].text, "この泥雨を越える。");
+  assert.equal(stored.lines[0].retakeAnnotations[0].start, 2);
+  assert.equal(stored.lines[0].retakeAnnotations[0].accentType, 2);
+
+  const manual = normalizeRecordingProject({
+    characters: [{ id: "vel", name: "ヴェル" }],
+    lines: [{
+      id: "chapter_body",
+      chapterId: "chapter_1",
+      chapterTitle: "第一章",
+      sceneId: "scene_1",
+      sceneTitle: "章の本文",
+      kind: "direction",
+      manualBody: true,
+      text: "ヴェル「この泥雨を越える。」"
+    }]
+  });
+  const derivedLine = getRecordingDisplayProject(manual).lines.find((line) => line.kind === "dialogue");
+  const patched = patchRecordingLineProgress(manual, derivedLine.id, {
+    reviewStatus: "リテイク",
+    retakeAnnotations: [{
+      id: "mark_derived",
+      quote: "泥雨",
+      start: 2,
+      end: 4,
+      category: "読み方",
+      instruction: "濁音を明瞭に"
+    }]
+  }, derivedLine);
+  const displayedAgain = getRecordingDisplayProject(normalizeRecordingProject(patched))
+    .lines.find((line) => line.id === derivedLine.id);
+
+  assert.equal(displayedAgain.text, "この泥雨を越える。");
+  assert.equal(displayedAgain.reviewStatus, "リテイク");
+  assert.equal(displayedAgain.retakeAnnotations[0].quote, "泥雨");
+  assert.equal(displayedAgain.retakeAnnotations[0].instruction, "濁音を明瞭に");
+});
+
+test("marks only the selected character's non-retake dialogue in one chapter as reviewed", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "vel", name: "ヴェル" }, { id: "carla", name: "カーラ" }],
+    lines: [
+      { id: "stored", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", characterId: "vel", kind: "dialogue", text: "保存済みセリフ", actorStatus: "収録済み", reviewStatus: "未確認" },
+      { id: "retake", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", characterId: "vel", kind: "dialogue", text: "録り直すセリフ", actorStatus: "収録済み", reviewStatus: "リテイク", directorNote: "語尾を強く" },
+      { id: "carla", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", characterId: "carla", kind: "dialogue", text: "別人物のセリフ", actorStatus: "収録済み", reviewStatus: "未確認" },
+      { id: "manual", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_2", sceneTitle: "Scene 2", kind: "direction", manualBody: true, text: "ヴェル「本文内のセリフ」" },
+      { id: "direction", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_2", sceneTitle: "Scene 2", kind: "direction", text: "雨が降る。" },
+      { id: "other", chapterId: "chapter_2", chapterTitle: "第二章", sceneId: "scene_3", sceneTitle: "Scene 1", characterId: "vel", kind: "dialogue", text: "別の章", actorStatus: "未収録", reviewStatus: "未確認" }
+    ]
+  });
+  const before = getRecordingDisplayProject(project);
+  const targetChapterId = before.lines.find((line) => line.id === "stored").chapterId;
+  const updated = patchRecordingChapterReviewStatus(project, targetChapterId, "OK", "2026-08-09T12:00:00+09:00", ["vel"]);
+  const after = getRecordingDisplayProject(updated);
+  const targetDialogue = after.lines.filter((line) => line.chapterId === targetChapterId && line.characterId === "vel" && line.kind !== "direction" && line.id !== "retake");
+
+  assert.ok(targetDialogue.length >= 2);
+  assert.ok(targetDialogue.every((line) => line.reviewStatus === "OK"));
+  assert.equal(after.lines.find((line) => line.id === "retake").reviewStatus, "リテイク");
+  assert.equal(after.lines.find((line) => line.id === "retake").directorNote, "語尾を強く");
+  assert.equal(after.lines.find((line) => line.id === "stored").actorStatus, "収録済み");
+  assert.equal(after.lines.find((line) => line.id === "carla").reviewStatus, "未確認");
+  assert.equal(after.lines.find((line) => line.id === "other").reviewStatus, "未確認");
+  assert.equal(after.lines.find((line) => line.id === "direction").reviewStatus, "未確認");
+
+  const cleared = getRecordingDisplayProject(patchRecordingChapterReviewStatus(updated, targetChapterId, "未確認", "2026-08-09T12:05:00+09:00", ["vel"]));
+  assert.ok(cleared.lines.filter((line) => line.chapterId === targetChapterId && line.characterId === "vel" && line.kind !== "direction" && line.id !== "retake").every((line) => line.reviewStatus === "未確認"));
+  assert.equal(cleared.lines.find((line) => line.id === "retake").reviewStatus, "リテイク");
+});
+
+test("marks only the selected character's chapter dialogue as recorded and preserves resubmissions", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "vel", name: "ヴェル" }, { id: "carla", name: "カーラ" }],
+    lines: [
+      { id: "stored", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", characterId: "vel", kind: "dialogue", text: "保存済みセリフ", actorStatus: "未収録", reviewStatus: "OK" },
+      { id: "resubmitted", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", characterId: "vel", kind: "dialogue", text: "再提出したセリフ", actorStatus: "再提出済み", reviewStatus: "リテイク" },
+      { id: "carla", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", characterId: "carla", kind: "dialogue", text: "別人物のセリフ", actorStatus: "未収録", reviewStatus: "未確認" },
+      { id: "manual", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_2", sceneTitle: "Scene 2", kind: "direction", manualBody: true, text: "ヴェル「本文内のセリフ」" },
+      { id: "other", chapterId: "chapter_2", chapterTitle: "第二章", sceneId: "scene_3", sceneTitle: "Scene 1", characterId: "vel", kind: "dialogue", text: "別の章", actorStatus: "未収録", reviewStatus: "未確認" }
+    ]
+  });
+  const before = getRecordingDisplayProject(project);
+  const targetChapterId = before.lines.find((line) => line.id === "stored").chapterId;
+  const recorded = patchRecordingChapterActorStatus(project, targetChapterId, "収録済み", "2026-08-10T12:00:00+09:00", ["vel"]);
+  const afterRecorded = getRecordingDisplayProject(recorded);
+  const targetDialogue = afterRecorded.lines.filter((line) => line.chapterId === targetChapterId && line.characterId === "vel" && line.kind !== "direction");
+
+  assert.ok(targetDialogue.length >= 3);
+  assert.ok(targetDialogue.every((line) => line.actorStatus !== "未収録"));
+  assert.equal(afterRecorded.lines.find((line) => line.id === "resubmitted").actorStatus, "再提出済み");
+  assert.equal(afterRecorded.lines.find((line) => line.id === "stored").reviewStatus, "OK");
+  assert.equal(afterRecorded.lines.find((line) => line.id === "carla").actorStatus, "未収録");
+  assert.equal(afterRecorded.lines.find((line) => line.id === "other").actorStatus, "未収録");
+
+  const cleared = getRecordingDisplayProject(patchRecordingChapterActorStatus(recorded, targetChapterId, "未収録", "2026-08-10T12:10:00+09:00", ["vel"]));
+  assert.ok(cleared.lines.filter((line) => line.chapterId === targetChapterId && line.characterId === "vel" && line.kind !== "direction").every((line) => line.actorStatus === "未収録"));
+  assert.equal(cleared.lines.find((line) => line.id === "carla").actorStatus, "未収録");
+});
+
+test("updates the selected character across every chapter without changing retakes or other characters", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "vel", name: "ヴェル" }, { id: "carla", name: "カーラ" }],
+    lines: [
+      { id: "vel_1", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", characterId: "vel", kind: "dialogue", text: "第一章", actorStatus: "未収録", reviewStatus: "未確認" },
+      { id: "vel_2", chapterId: "chapter_2", chapterTitle: "第二章", sceneId: "scene_2", sceneTitle: "Scene 1", characterId: "vel", kind: "dialogue", text: "第二章", actorStatus: "未収録", reviewStatus: "未確認" },
+      { id: "vel_retake", chapterId: "chapter_3", chapterTitle: "第三章", sceneId: "scene_3", sceneTitle: "Scene 1", characterId: "vel", kind: "dialogue", text: "第三章", actorStatus: "再提出済み", reviewStatus: "リテイク" },
+      { id: "carla_1", chapterId: "chapter_1", chapterTitle: "第一章", sceneId: "scene_1", sceneTitle: "Scene 1", characterId: "carla", kind: "dialogue", text: "別人物", actorStatus: "未収録", reviewStatus: "未確認" },
+      { id: "direction", chapterId: "chapter_2", chapterTitle: "第二章", sceneId: "scene_2", sceneTitle: "Scene 1", kind: "direction", text: "ト書き" }
+    ]
+  });
+
+  const recorded = patchRecordingCharacterActorStatus(project, "収録済み", "2026-08-17T18:00:00+09:00", ["vel"]);
+  const reviewed = patchRecordingCharacterReviewStatus(recorded, "OK", "2026-08-17T18:05:00+09:00", ["vel"]);
+  const displayed = getRecordingDisplayProject(reviewed);
+
+  assert.equal(displayed.lines.find((line) => line.id === "vel_1").actorStatus, "収録済み");
+  assert.equal(displayed.lines.find((line) => line.id === "vel_2").actorStatus, "収録済み");
+  assert.equal(displayed.lines.find((line) => line.id === "vel_retake").actorStatus, "再提出済み");
+  assert.equal(displayed.lines.find((line) => line.id === "vel_1").reviewStatus, "OK");
+  assert.equal(displayed.lines.find((line) => line.id === "vel_2").reviewStatus, "OK");
+  assert.equal(displayed.lines.find((line) => line.id === "vel_retake").reviewStatus, "リテイク");
+  assert.equal(displayed.lines.find((line) => line.id === "carla_1").actorStatus, "未収録");
+  assert.equal(displayed.lines.find((line) => line.id === "carla_1").reviewStatus, "未確認");
+  assert.equal(displayed.lines.find((line) => line.id === "direction").reviewStatus, "未確認");
+
+  const clearedReview = getRecordingDisplayProject(patchRecordingCharacterReviewStatus(reviewed, "未確認", "2026-08-17T18:10:00+09:00", ["vel"]));
+  assert.equal(clearedReview.lines.find((line) => line.id === "vel_1").reviewStatus, "未確認");
+  assert.equal(clearedReview.lines.find((line) => line.id === "vel_2").reviewStatus, "未確認");
+  assert.equal(clearedReview.lines.find((line) => line.id === "vel_retake").reviewStatus, "リテイク");
 });
 
 test("splits a manually pasted chapter only at heading 2 markers", () => {
@@ -1075,6 +1596,16 @@ test("omits private production data from actor share payloads", () => {
     sourceScriptText: "非公開の取り込み原文",
     scriptSnapshots: [{ id: "private_version", lines: [{ id: "old_line", recordingUrl: "https://drive.google.com/file/d/private/view" }] }],
     auditionFormsFolderUrl: "https://drive.google.com/drive/folders/private",
+    auditionManagementSheetUrl: "https://docs.google.com/spreadsheets/d/private/edit",
+    auditionSocialTemplate: { introductionText: "非公開の募集文テンプレート" },
+    contactTemplateSheetUrl: "https://docs.google.com/spreadsheets/d/private-contact/edit",
+    contactTemplates: [{ id: "template_private", category: "合格連絡", name: "合格", body: "〇〇さん", enabled: true }],
+    contactMessageDrafts: [{ id: "draft_private", templateId: "template_private", characterId: "role_private", body: "非公開の個別文" }],
+    manualContactRecipients: [{ id: "recipient_private", actorName: "応募者", socialUrl: "https://x.com/private" }],
+    otherRoleContact: { contactName: "別役候補者", contactHonorific: "さん", socialUrl: "https://x.com/private-other" },
+    socialTemplates: [{ id: "social_private", category: "お知らせ", name: "非公開", body: "非公開投稿" }],
+    socialMessageDrafts: [{ id: "social_draft_private", templateId: "social_private", body: "書き換えた投稿" }],
+    auditionApplicants: [{ id: "applicant_private", responseId: "response_private", name: "応募者", socialUrl: "https://x.com/private" }],
     auditionRoleProgress: [{
       characterId: "role_private",
       formCreated: true,
@@ -1090,10 +1621,452 @@ test("omits private production data from actor share payloads", () => {
   assert.equal("sourceScriptText" in shared, false);
   assert.equal("scriptSnapshots" in shared, false);
   assert.equal("auditionFormsFolderUrl" in shared, false);
+  assert.equal("auditionManagementSheetUrl" in shared, false);
+  assert.equal("auditionSocialTemplate" in shared, false);
+  assert.equal("contactTemplateSheetUrl" in shared, false);
+  assert.equal("contactTemplates" in shared, false);
+  assert.equal("contactMessageDrafts" in shared, false);
+  assert.equal("manualContactRecipients" in shared, false);
+  assert.equal("otherRoleContact" in shared, false);
+  assert.equal("socialTemplates" in shared, false);
+  assert.equal("socialMessageDrafts" in shared, false);
+  assert.equal("auditionApplicants" in shared, false);
   assert.equal(shared.auditionRoleProgress[0].formCreated, true);
   assert.equal("formEditUrl" in shared.auditionRoleProgress[0], false);
   assert.equal("formResponderUrl" in shared.auditionRoleProgress[0], false);
   assert.equal("headerImageUrl" in shared.auditionRoleProgress[0], false);
   assert.equal("socialImageUrl" in shared.auditionRoleProgress[0], false);
   assert.equal(shared.lines[0].text, "現在の台本");
+});
+
+test("adds contact templates to older projects and preserves role-specific drafts", () => {
+  const olderProject = normalizeRecordingProject({ title: "旧作品" });
+  assert.match(olderProject.auditionSocialTemplate.introductionText, /\{\{作品名\}\}/u);
+  assert.equal(olderProject.contactTemplates.length, 8);
+  assert.equal(olderProject.contactTemplates.some((template) => template.name === "合格のお知らせ"), true);
+  assert.equal(olderProject.contactTemplates.some((template) => template.name === "リテイクのお願い"), true);
+
+  const project = normalizeRecordingProject({
+    contactTemplates: [{ id: "accepted", category: "合格連絡", name: "合格", body: "〇〇さん、△△役です。" }],
+    contactMessageDrafts: [{ templateId: "accepted", characterId: "character_a", body: "書き換えた個別文" }]
+  });
+  assert.equal(project.contactTemplates.length, 2);
+  assert.equal(project.contactTemplates.some((template) => template.id === "contact_template_retake"), true);
+  assert.equal(project.contactMessageDrafts[0].body, "書き換えた個別文");
+
+  const afterDeletingRetakeTemplate = normalizeRecordingProject({
+    contactTemplateSchemaVersion: 1,
+    contactTemplates: [{ id: "accepted", category: "合格連絡", name: "合格", body: "〇〇さん" }]
+  });
+  assert.equal(afterDeletingRetakeTemplate.contactTemplates.length, 1);
+});
+
+test("keeps manually entered contact recipients across project reloads", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "role_a", name: "応募役A" }],
+    manualContactRecipients: [{
+      id: "manual_a",
+      actorName: "青葉かなで",
+      contactName: "青葉",
+      contactHonorific: "さん",
+      socialUrl: "@aobakanade",
+      sourceCharacterId: "role_a",
+      sourceRoleName: "応募役A"
+    }]
+  });
+
+  assert.deepEqual(project.manualContactRecipients, [{
+    id: "manual_a",
+    actorName: "青葉かなで",
+    contactName: "青葉",
+    contactHonorific: "さん",
+    socialUrl: "https://x.com/aobakanade",
+    sourceCharacterId: "role_a",
+    sourceRoleName: "応募役A"
+  }]);
+});
+
+test("keeps another-role recipients separate from assigned cast members", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "role_original", name: "ヴェル13世" }],
+    castMembers: [{
+      id: "cast_vel",
+      actorName: "決定済み声優",
+      contactName: "決定済み声優",
+      characterIds: ["role_original"]
+    }],
+    otherRoleContact: {
+      contactName: "ざっきー",
+      contactHonorific: "さん",
+      socialUrl: "@zacky",
+      sourceCharacterId: "role_original",
+      sourceRoleName: "ヴェル13世"
+    }
+  });
+
+  assert.deepEqual(project.otherRoleContact, {
+    contactName: "ざっきー",
+    contactHonorific: "さん",
+    socialUrl: "https://x.com/zacky",
+    sourceCharacterId: "role_original",
+    sourceRoleName: "ヴェル13世"
+  });
+  assert.equal(project.castMembers[0].contactName, "決定済み声優");
+});
+
+test("migrates the recipient name from a legacy another-role draft", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "role_original", name: "ヴェル13世" }],
+    contactMessageDrafts: [{
+      templateId: "contact_template_other_role",
+      characterId: "role_original",
+      body: "ざっきーさん、初めてメッセージ送らせて頂きます＾＾\nべるぼと申します＾＾",
+      updatedAt: "2026-08-17T00:00:00.000Z"
+    }]
+  });
+
+  assert.equal(project.otherRoleContact.contactName, "ざっきー");
+  assert.equal(project.otherRoleContact.contactHonorific, "さん");
+  assert.equal(project.otherRoleContact.sourceCharacterId, "role_original");
+  assert.equal(project.otherRoleContact.sourceRoleName, "ヴェル13世");
+});
+
+test("builds a contact message from the actor contact name and character role", () => {
+  assert.equal(getActorContactName({ actorName: "山田太郎さん", contactName: "山田" }), "山田");
+  assert.equal(getActorContactName({ actorName: "山田太郎様" }), "山田太郎");
+
+  const message = buildProductionContactMessage({
+    body: "〇〇さん、【作品名／役名】の△△役をお願いします。{{声優名}}／{{役名}}／{{作品名}}"
+  }, {
+    actorName: "山田",
+    roleName: "ヴェル13世",
+    projectTitle: "雨を晴らせない男の復活劇"
+  });
+
+  assert.equal(
+    message,
+    "山田さん、【雨を晴らせない男の復活劇／ヴェル13世】のヴェル13世役をお願いします。山田／ヴェル13世／雨を晴らせない男の復活劇"
+  );
+});
+
+test("uses the special recipient form only for the other-role request template", () => {
+  assert.equal(isOtherRoleRequestContactTemplate({ id: "contact_template_other_role", name: "名称変更済み" }), true);
+  assert.equal(isOtherRoleRequestContactTemplate({ id: "custom", name: "別の役を依頼" }), true);
+  assert.equal(isOtherRoleRequestContactTemplate({ id: "custom", name: "別の役のご快諾への返信" }), false);
+  assert.equal(isOtherRoleRequestContactTemplate({ id: "contact_template_accepted", name: "合格のお知らせ" }), false);
+});
+
+test("builds a character-specific retake list for contact messages", () => {
+  let project = normalizeRecordingProject({
+    characters: [
+      { id: "vel", name: "ヴェル13世" },
+      { id: "carla", name: "カーラ・マンソン" }
+    ],
+    lines: [
+      {
+        id: "vel_retake",
+        order: 25,
+        chapterId: "chapter_1",
+        chapterTitle: "第一章",
+        sceneId: "scene_2",
+        sceneTitle: "SCENE 02 雨の路地",
+        characterId: "vel",
+        text: "｜二十年前《にじゅうねんまえ》、同じ夢を見ていた。",
+        reviewStatus: "リテイク",
+        directorNote: "全体を少し静かにお願いします。",
+        retakeAnnotations: [{
+          quote: "二十年前",
+          category: "アクセント",
+          instruction: "語頭を急がず、下がり目を明確にしてください。",
+          reading: "にじゅうねんまえ",
+          accentType: 4,
+          accentRiseAt: 2
+        }]
+      },
+      {
+        id: "carla_retake",
+        order: 26,
+        chapterId: "chapter_1",
+        chapterTitle: "第一章",
+        sceneId: "scene_2",
+        sceneTitle: "SCENE 02 雨の路地",
+        characterId: "carla",
+        text: "別人物のセリフ",
+        reviewStatus: "リテイク",
+        directorNote: "対象外"
+      },
+      {
+        id: "vel_manual_body",
+        order: 30,
+        chapterId: "chapter_1",
+        chapterTitle: "第一章",
+        sceneId: "scene_3",
+        sceneTitle: "SCENE 03 制御室",
+        kind: "direction",
+        manualBody: true,
+        text: "ヴェル「制御を戻せ！」"
+      }
+    ]
+  });
+
+  const derivedRetake = getRecordingDisplayProject(project).lines.find((line) => (
+    line.derivedFromManualBody && line.characterId === "vel"
+  ));
+  project = patchRecordingLineProgress(project, derivedRetake.id, {
+    reviewStatus: "リテイク",
+    retakeAnnotations: [{
+      quote: "制御を戻せ",
+      category: "読み方",
+      instruction: "言葉を明瞭にしてください。"
+    }]
+  }, derivedRetake);
+
+  const retakes = getProductionCharacterRetakes(project, "vel");
+  assert.equal(retakes.length, 2);
+  assert.equal(retakes[0].text, "二十年前、同じ夢を見ていた。");
+  assert.equal(retakes[1].text, "制御を戻せ！");
+
+  const retakeList = buildProductionRetakeList(project, "vel");
+  assert.match(retakeList, /^【1】セリフ番号：025\n\n/u);
+  assert.match(retakeList, /セリフ番号：025/u);
+  assert.match(retakeList, /・「二十年前」/u);
+  assert.match(retakeList, /アクセント：.*＼/u);
+  assert.match(retakeList, /・「二十年前」[\s\S]*\n\n語頭を急がず、下がり目を明確にしてください。/u);
+  assert.match(retakeList, /全体を少し静かにお願いします。/u);
+  assert.match(retakeList, /セリフ番号：030/u);
+  assert.match(retakeList, /・「制御を戻せ」/u);
+  assert.doesNotMatch(retakeList, /第一章|SCENE 02|SCENE 03/u);
+  assert.doesNotMatch(retakeList, /元のセリフ/u);
+  assert.doesNotMatch(retakeList, /［アクセント］|［読み方］/u);
+  assert.doesNotMatch(retakeList, /直してほしい箇所：|修正：|お願い：/u);
+  assert.doesNotMatch(retakeList, /別人物/u);
+
+  const savedCustomDraft = `手書きで直した挨拶です。\n\n${retakeList.split("\n\n")[0]}\n\nお手数をおかけしますが、よろしくお願いいたします。`;
+  const restoredDraft = mergeMissingProductionRetakesIntoDraft(savedCustomDraft, retakes);
+  assert.match(restoredDraft, /^手書きで直した挨拶です。/u);
+  assert.match(restoredDraft, /セリフ番号：030/u);
+  assert.match(restoredDraft, /・「制御を戻せ」/u);
+  assert.ok(restoredDraft.indexOf("セリフ番号：030") < restoredDraft.indexOf("お手数をおかけします"));
+  assert.equal(mergeMissingProductionRetakesIntoDraft(restoredDraft, retakes), restoredDraft);
+
+  const changedRetakes = retakes.map((retake) => retake.id === "vel_retake"
+    ? {
+      ...retake,
+      instructions: retake.instructions.map((instruction) => ({
+        ...instruction,
+        instruction: "再リテイクでは語尾まで明瞭にしてください。"
+      }))
+    }
+    : retake);
+  const refreshedDraft = mergeMissingProductionRetakesIntoDraft(restoredDraft, changedRetakes);
+  assert.match(refreshedDraft, /\n\n再リテイクでは語尾まで明瞭にしてください。/u);
+  assert.doesNotMatch(refreshedDraft, /語頭を急がず、下がり目を明確にしてください。/u);
+  assert.match(refreshedDraft, /^手書きで直した挨拶です。/u);
+  assert.match(refreshedDraft, /お手数をおかけしますが、よろしくお願いいたします。$/u);
+
+  const message = buildProductionContactMessage({
+    id: "contact_template_retake",
+    category: "確認依頼",
+    name: "リテイクのお願い",
+    body: "〇〇さん\n△△役です。\n\n{{リテイク一覧}}\n\n例：ファイル名_re1.wav\nさらにリテイクがある場合：ファイル名_re2.wav"
+  }, {
+    actorName: "青葉",
+    actorHonorific: "さん",
+    roleName: "ヴェル13世",
+    retakeList
+  });
+  assert.match(message, /^青葉さん\nヴェル13世役です。/u);
+  assert.match(message, /セリフ番号：025/u);
+  assert.doesNotMatch(message, /さらにリテイクがある場合：ファイル名_re2\.wav/u);
+  assert.equal(isRetakeRequestContactTemplate({ id: "contact_template_retake" }), true);
+  assert.equal(isRetakeRequestContactTemplate({ name: "リテイクのお願い" }), true);
+});
+
+test("keeps non-recipient placeholders intact in announcement and confirmation templates", () => {
+  const announcement = buildProductionContactMessage({
+    category: "募集告知",
+    body: "作品名：〇〇\n募集役：〇〇\n応募方法：〇〇"
+  }, {
+    actorName: "山田",
+    roleName: "ヴェル13世",
+    projectTitle: "雨を晴らせない男の復活劇"
+  });
+  assert.equal(announcement, "作品名：雨を晴らせない男の復活劇\n募集役：ヴェル13世\n応募方法：〇〇");
+
+  const confirmation = buildProductionContactMessage({
+    category: "確認依頼",
+    body: "〇〇さん\n・〇〇\n・〇〇"
+  }, { actorName: "山田", roleName: "ヴェル13世" });
+  assert.equal(confirmation, "山田さん\n・〇〇\n・〇〇");
+});
+
+test("normalizes mixed X handles and legacy Twitter URLs", () => {
+  assert.equal(normalizeXProfileUrl("@aobakanade"), "https://x.com/aobakanade");
+  assert.equal(normalizeXProfileUrl("twitter.com/aobakanade/status/123"), "https://x.com/aobakanade");
+  assert.equal(normalizeXProfileUrl("https://x.com/aobakanade/"), "https://x.com/aobakanade");
+});
+
+test("keeps a separate contact honorific and uses it in messages", () => {
+  assert.equal(getActorContactHonorific({ actorName: "山田太郎" }), "さん");
+  assert.equal(getActorContactHonorific({ actorName: "山田太郎", contactHonorific: "先生" }), "先生");
+  assert.equal(getActorContactName({ actorName: "ざっきー", contactName: "ざっきーさん" }), "ざっきー");
+  assert.equal(buildProductionContactMessage({ body: "〇〇さん、こんにちは。" }, {
+    actorName: "山田",
+    actorHonorific: "先生"
+  }), "山田先生、こんにちは。");
+});
+
+test("fills another-role placeholders in saved drafts and removes duplicate honorifics", () => {
+  const message = buildProductionContactMessage({
+    category: "その他",
+    body: "ざっきーさんさんへ。◆◆という役があります。◆◆は第■章で出てきます。◆◆の画像です。"
+  }, {
+    actorName: "ざっきー",
+    actorHonorific: "さん",
+    roleName: "ヴェル13世",
+    offeredRoleName: "バルガス・ロウ",
+    appearanceLabel: "第四章、第六章"
+  });
+
+  assert.equal(message, "ざっきーさんへ。バルガス・ロウという役があります。バルガス・ロウは第四章、第六章に登場します。バルガス・ロウの画像です。");
+});
+
+test("builds another-role messages with the offered role and automatic chapter label", () => {
+  const message = buildProductionContactMessage({
+    category: "その他",
+    body: "〇〇さんは△△役へ応募。◆◆をお願いします。◆◆は第■章で出てきます。"
+  }, {
+    actorName: "青葉",
+    actorHonorific: "さん",
+    roleName: "観客A",
+    offeredRoleName: "バルガス・ロウ",
+    appearanceLabel: "第一章、第三章"
+  });
+  assert.equal(message, "青葉さんは観客A役へ応募。バルガス・ロウをお願いします。バルガス・ロウは第一章、第三章に登場します。");
+});
+
+test("shows the low-dialogue notice only when the offered role has four lines or fewer", () => {
+  const body = "もしよかったらサンプルにあった「◇◇」のお声の感じで演じて頂けないかと思いました＾＾";
+  assert.equal(
+    applyProductionContactDialogueCountNotice(body, 4),
+    "こちらセリフ数は少ないのですが、もしよかったらサンプルにあった「◇◇」のお声の感じで演じて頂けないかと思いました＾＾"
+  );
+  assert.equal(
+    applyProductionContactDialogueCountNotice(`こちらセリフ数は少ないのですが、${body}`, 5),
+    body
+  );
+  assert.equal(
+    buildProductionContactMessage({ body: `◆◆：こちらセリフ数は少ないのですが、${body}` }, {
+      offeredRoleName: "モーリス・ペック",
+      offeredRoleDialogueCount: 7
+    }),
+    `モーリス・ペック：${body}`
+  );
+});
+
+test("reflects one or multiple selected roles in early-result social messages", () => {
+  const template = {
+    body: "『{{作品名}}』\n「〇〇」役\nをお願いさせていただく方へ、先行してご連絡しました。"
+  };
+  assert.equal(
+    buildProductionSocialMessage(template, {
+      projectTitle: "雨を晴らせない男の復活劇",
+      roleNames: ["ヴェル13世"]
+    }),
+    "『雨を晴らせない男の復活劇』\n「ヴェル13世」役\nをお願いさせていただく方へ、先行してご連絡しました。"
+  );
+  assert.equal(
+    buildProductionSocialMessage(template, {
+      projectTitle: "雨を晴らせない男の復活劇",
+      roleNames: ["ヴェル13世", "カーラ・マンソン"]
+    }),
+    "『雨を晴らせない男の復活劇』\n「ヴェル13世」役・「カーラ・マンソン」役\nをお願いさせていただく方へ、先行してご連絡しました。"
+  );
+  assert.equal(
+    applyProductionSocialRoleSelection(
+      "「ヴェル13世」役・「カーラ・マンソン」役\nをお願いさせていただく方へ、",
+      ["オルディス・グランベル"],
+      ["ヴェル13世", "カーラ・マンソン"]
+    ),
+    "「オルディス・グランベル」役\nをお願いさせていただく方へ、"
+  );
+});
+
+test("keeps selected social-template roles after reloading", () => {
+  const project = normalizeRecordingProject({
+    socialMessageDrafts: [{
+      templateId: "social_early_result",
+      characterIds: ["role_a", "role_a", "role_b", ""],
+      body: "先行結果"
+    }]
+  });
+  assert.deepEqual(project.socialMessageDrafts[0].characterIds, ["role_a", "role_b"]);
+});
+
+test("summarizes character appearances by chapter and recognizes all chapters", () => {
+  const project = normalizeRecordingProject({
+    characters: [{ id: "hero", name: "主人公" }, { id: "guest", name: "ゲスト" }],
+    lines: [
+      { id: "l1", chapterId: "c1", chapterTitle: "第一章 はじまり", sceneId: "s1", sceneTitle: "場面1", characterId: "hero", kind: "dialogue", text: "A" },
+      { id: "l2", chapterId: "c1", chapterTitle: "第一章 はじまり", sceneId: "s1", sceneTitle: "場面1", characterId: "guest", kind: "dialogue", text: "B" },
+      { id: "l3", chapterId: "c2", chapterTitle: "第二章 旅立ち", sceneId: "s2", sceneTitle: "場面2", characterId: "hero", kind: "dialogue", text: "C" }
+    ]
+  });
+  assert.equal(getProductionCharacterAppearanceLabel(project, "hero"), "全章にわたって");
+  assert.equal(getProductionCharacterAppearanceLabel(project, "guest"), "第一章");
+});
+
+test("imports applicants once and assigns the selected applicant to a character", () => {
+  const imported = mergeProductionAuditionApplicants([], [{
+    responseId: "response_1",
+    formId: "form_1",
+    sourceCharacterId: "role_a",
+    sourceRoleName: "役A",
+    name: "青葉かなで",
+    socialInput: "@aobakanade",
+    submittedAt: "2026-08-10T10:00:00.000Z"
+  }]);
+  const mergedAgain = mergeProductionAuditionApplicants(imported.map((item) => ({ ...item, status: "キープ" })), imported);
+  assert.equal(mergedAgain.length, 1);
+  assert.equal(mergedAgain[0].socialUrl, "https://x.com/aobakanade");
+  assert.equal(mergedAgain[0].status, "キープ");
+
+  const project = normalizeRecordingProject({
+    characters: [{ id: "role_a", name: "役A" }],
+    lines: [{ id: "line_a", chapterId: "c1", chapterTitle: "第一章", sceneId: "s1", sceneTitle: "場面1", characterId: "role_a", kind: "dialogue", text: "台詞" }],
+    auditionApplicants: mergedAgain
+  });
+  const assigned = assignProductionAuditionApplicant(project, mergedAgain[0].id, "role_a");
+  assert.equal(assigned.castMembers[0].actorName, "青葉かなで");
+  assert.equal(assigned.castMembers[0].contactName, "青葉かなで");
+  assert.equal(assigned.castMembers[0].contactHonorific, "さん");
+  assert.equal(assigned.castMembers[0].socialUrl, "https://x.com/aobakanade");
+  assert.equal(assigned.auditionApplicants[0].status, "合格");
+});
+
+test("groups audition applicants by recruitment role in character order", () => {
+  const project = {
+    characters: [
+      { id: "role_b", name: "役B", color: "#222222" },
+      { id: "role_a", name: "役A", color: "#111111" }
+    ],
+    auditionApplicants: [
+      { id: "a1", sourceCharacterId: "role_a", sourceRoleName: "旧役A", name: "応募者1" },
+      { id: "b1", sourceCharacterId: "role_b", sourceRoleName: "役B", name: "応募者2" },
+      { id: "a2", sourceRoleName: "役A", name: "応募者3" },
+      { id: "x1", sourceRoleName: "追加役", name: "応募者4" }
+    ]
+  };
+
+  const groups = groupProductionAuditionApplicantsByRole(project);
+  assert.deepEqual(groups.map((group) => [group.roleName, group.applicants.length]), [
+    ["役B", 1],
+    ["役A", 2],
+    ["追加役", 1]
+  ]);
+  assert.equal(groups[1].color, "#111111");
+});
+
+test("builds an editable project-wide SNS message", () => {
+  assert.equal(buildProductionSocialMessage({ body: "『{{作品名}}』公開＾＾" }, { projectTitle: "雨の街" }), "『雨の街』公開＾＾");
 });

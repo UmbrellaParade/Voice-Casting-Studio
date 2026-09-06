@@ -500,6 +500,8 @@
   background: #fff2f5;
   color: #6c3346;
   font-size: 12px !important;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .member-line-save,

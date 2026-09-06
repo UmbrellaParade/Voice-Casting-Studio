@@ -2260,7 +2260,8 @@ export const sampleData = {
     responseSyncToken: "",
     lastResponseSyncAt: "",
     recordingEndpointUrl: "",
-    recordingDriveFolderUrl: ""
+    recordingDriveFolderUrl: "",
+    productionBackupDriveFolderUrl: ""
   },
   imports: defaultImports,
   thumbnailStudio: defaultThumbnailStudio,
@@ -2586,6 +2587,7 @@ export function migrateData(input) {
   if (!("lastResponseSyncAt" in settings)) settings.lastResponseSyncAt = "";
   if (!("recordingEndpointUrl" in settings)) settings.recordingEndpointUrl = "";
   if (!("recordingDriveFolderUrl" in settings)) settings.recordingDriveFolderUrl = "";
+  if (!("productionBackupDriveFolderUrl" in settings)) settings.productionBackupDriveFolderUrl = "";
   if (!settings.responseDriveFolderUrl) settings.responseDriveFolderUrl = DEFAULT_RESPONSE_DRIVE_FOLDER_URL;
   const episodes = (input.episodes ?? sampleData.episodes).map((episode) => {
     const articleSlug = episode.articleSlug || extractSlugFromUrl(episode.articleUrl);

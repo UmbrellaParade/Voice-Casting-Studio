@@ -1,0 +1,8 @@
+{
+  "keys": 828627,
+  "license": "GPL-2.0 / LGPL-2.1 / BSD-3-Clause (distributed under BSD-3-Clause)",
+  "name": "UniDic accent dictionary subset",
+  "shards": 64,
+  "source": "https://clrd.ninjal.ac.jp/unidic/",
+  "version": "2.1.2"
+}

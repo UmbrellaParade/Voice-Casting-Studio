@@ -40,15 +40,21 @@ import { PersistentAudioProvider } from "./components/PersistentAudioPlayer.jsx"
 import { postToGasEndpoint, getFromGasEndpoint, loadAppConfig } from "./lib/gas.js";
 import {
   createWordPressAuditionForm,
-  createWordPressQuestion,
   getWordPressAuditionAutomationSettings,
-  getWordPressRuntime,
-  loadWordPressWorkspace,
-  resolveWordPressQuestion,
+  listWordPressAuditionApplicants,
   saveWordPressAuditionAutomationSettings,
-  saveWordPressWorkspace,
-  updateWordPressRecordingLine
+  verifyWordPressAuditionForm
 } from "./lib/wordpress.js";
+import {
+  getWorkspaceRuntime as getWordPressRuntime,
+  loadWorkspace as loadWordPressWorkspace,
+  saveWorkspace as saveWordPressWorkspace,
+  updateRecordingLine as updateWordPressRecordingLine,
+  updateRecordingLines as updateWordPressRecordingLines,
+  createQuestion as createWordPressQuestion,
+  resolveQuestion as resolveWordPressQuestion
+} from "./lib/workspace.js";
+import { useGasProjectSync } from "./components/useGasProjectSync.js";
 
 import {
   STORAGE_KEY,
@@ -272,15 +278,24 @@ import {
   ThumbnailComposer,
   Assets
 } from "./components/thumbnail.jsx";
-import { RecordingStudio, SharedRecordingBoard } from "./components/RecordingStudio.jsx";
+import { RecordingStudio } from "./components/RecordingStudio.jsx";
 import { ProductionWorkspace } from "./components/ProductionHub.jsx";
 import { ConceptView } from "./components/ConceptView.jsx";
 import { ManualView } from "./components/ManualView.jsx";
 import {
+  applyRecordingProjectUpdate,
   normalizeRecordingProject,
   patchRecordingLineProgress,
   readRecordingShareReference
 } from "./lib/recording.js";
+import {
+  PRODUCTION_BACKUP_DESTINATIONS,
+  canUseProductionBackupDirectories,
+  chooseProductionBackupDirectory,
+  loadProductionBackupDirectory,
+  saveProductionBackupCopies,
+  saveProductionBackupToDirectory
+} from "./lib/production-backup.js";
 
 const moveArrayItem = (items = [], fromIndex, toIndex) => {
   if (fromIndex < 0 || toIndex < 0 || fromIndex >= items.length || toIndex >= items.length || fromIndex === toIndex) return items;
@@ -294,6 +309,7 @@ const TRACK_FIELD_TYPE_LABELS = Object.fromEntries(TRACK_FIELD_TYPE_OPTIONS);
 
 const SHOW_AUDITION_WORKFLOW = false;
 const WORDPRESS_RUNTIME = getWordPressRuntime();
+const IS_GAS_MEMBER = WORDPRESS_RUNTIME?.mode === "gas";
 const APP_DISPLAY_NAME = WORDPRESS_RUNTIME?.siteName || (WORDPRESS_RUNTIME ? "Voice Cast Studio" : "Voice Casting Studio");
 const AUDITION_NAV_ITEMS = [
   ["dashboard", "概要", Radio],
@@ -448,11 +464,18 @@ const sanitizeAttachmentLimitInput = (value) => {
   return String(normalizeAttachmentLimitMb(text));
 };
 
+const normalizeWorkspaceForPersistence = (workspace = {}) => ({
+  ...workspace,
+  recordingProjects: (workspace.recordingProjects ?? []).map(normalizeRecordingProject)
+});
+
 function App() {
   const logoSrc = publicAsset("assets/umbrella-parade-logo.png");
   const [data, setData] = useState(() => WORDPRESS_RUNTIME ? sampleData : loadData());
   const [initialUiState] = useState(readUiState);
-  const [active, setActive] = useState("recording");
+  const [active, setActive] = useState(() =>
+    MAIN_NAV_KEYS.has(initialUiState.active) ? initialUiState.active : "recording"
+  );
   const [selectedEpisodeId, setSelectedEpisodeId] = useState(() =>
     data.episodes.some((episode) => episode.id === initialUiState.selectedEpisodeId)
       ? initialUiState.selectedEpisodeId
@@ -478,7 +501,7 @@ function App() {
   const [storageWarning, setStorageWarning] = useState("");
   const [wordpressState, setWordpressState] = useState(() => ({
     status: WORDPRESS_RUNTIME ? "loading" : "local",
-    message: WORDPRESS_RUNTIME ? "WordPressから作品データを読み込んでいます…" : "",
+    message: WORDPRESS_RUNTIME ? `${IS_GAS_MEMBER ? "Google Drive" : "WordPress"}から作品データを読み込んでいます…` : "",
     users: [],
     version: 0,
     canEditScript: WORDPRESS_RUNTIME ? Boolean(WORDPRESS_RUNTIME.canEditScript) : true,
@@ -496,6 +519,7 @@ function App() {
   const wordpressLoadedRef = useRef(false);
   const wordpressSaveQueueRef = useRef(Promise.resolve());
   const wordpressSaveRevisionRef = useRef(0);
+  const gasSyncState = useGasProjectSync({ data, setData, enabled: !WORDPRESS_RUNTIME && !sharedPayload && !restorePayload });
 
   const setCollapsibleOpen = (key, open) => {
     setCollapsibleState((current) => (current[key] === open ? current : { ...current, [key]: open }));
@@ -507,7 +531,7 @@ function App() {
     wordpressLoadedRef.current = true;
     setWordpressState({
       status: "ready",
-      message: result.data ? "WordPressと同期しています。" : "新しい制作ワークスペースを準備しました。",
+      message: result.data ? `${IS_GAS_MEMBER ? "Google Drive" : "WordPress"}と同期しています。` : "新しい制作ワークスペースを準備しました。",
       users: Array.isArray(result.users) ? result.users : [],
       version: Number(result.version) || 0,
       canEditScript: Boolean(result.canEditScript ?? WORDPRESS_RUNTIME?.canEditScript),
@@ -534,6 +558,24 @@ function App() {
       recordingProjects: current.recordingProjects.map((project) => project.id === projectId
         ? patchRecordingLineProgress(project, lineId, result.line || patch, lineContext)
         : project)
+    }));
+    return result;
+  };
+
+  const updateMemberRecordingLines = async (projectId, updates, actorStatus, updatedAt) => {
+    const result = await updateWordPressRecordingLines({ projectId, updates, actorStatus, updatedAt });
+    const resultLines = new Map((result.lines || []).map((line) => [line.id, line]));
+    setData((current) => ({
+      ...current,
+      recordingProjects: current.recordingProjects.map((project) => {
+        if (project.id !== projectId) return project;
+        return updates.reduce((nextProject, update) => patchRecordingLineProgress(
+          nextProject,
+          update.lineId,
+          resultLines.get(update.lineId) || { actorStatus, updatedAt },
+          update.lineContext
+        ), project);
+      })
     }));
     return result;
   };
@@ -579,10 +621,89 @@ function App() {
   };
 
   const createAuditionForm = async (projectId, characterId, options = {}) => {
-    const result = await createWordPressAuditionForm({
+    const storeProgress = (stepProgress) => {
+      if (!stepProgress) return;
+      setData((current) => ({
+        ...current,
+        recordingProjects: current.recordingProjects.map((project) => {
+          if (project.id !== projectId) return project;
+          const progressItems = project.auditionRoleProgress || [];
+          const exists = progressItems.some((progress) => progress.characterId === characterId);
+          return {
+            ...project,
+            auditionRoleProgress: exists
+              ? progressItems.map((progress) => progress.characterId === characterId ? stepProgress : progress)
+              : [...progressItems, stepProgress]
+          };
+        })
+      }));
+    };
+    const reportProgress = (message, action = "") => options.onProgress?.(message, action);
+    const runStep = async (step, attempt = 1, feedback = "") => {
+      const stepResult = await createWordPressAuditionForm({
+        projectId,
+        characterId,
+        step,
+        attempt,
+        feedback,
+        auditionDeadline: options.auditionDeadline || ""
+      });
+      storeProgress(stepResult.progress);
+      return stepResult;
+    };
+
+    reportProgress("Googleフォームを先に作成・検査しています…", "create");
+    let result = await runStep("form");
+
+    for (const asset of ["header", "social"]) {
+      const label = asset === "header" ? "Googleフォーム用ヘッダー" : "SNS用16:9画像";
+      let feedback = "";
+      let completed = false;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        reportProgress(`${label}を生成・監査しています（${attempt}/3）…`, "images");
+        try {
+          result = await runStep(asset, attempt, feedback);
+          completed = true;
+          break;
+        } catch (error) {
+          if (error.status === 504) {
+            const recovered = await runStep("form");
+            const imageUrl = recovered.progress?.[asset === "header" ? "headerImageUrl" : "socialImageUrl"];
+            if (imageUrl) {
+              result = recovered;
+              completed = true;
+              break;
+            }
+          }
+          const audit = error.data?.audit;
+          if (error.code !== "vcs_audition_image_audit_failed" || !audit || attempt >= 3) throw error;
+          feedback = [
+            ...(Array.isArray(audit.issues) ? audit.issues : []),
+            audit.correction || ""
+          ].filter(Boolean).join(" / ");
+        }
+      }
+      if (!completed) throw new Error(`${label}を3回監査しましたが、合格画像を作成できませんでした。`);
+    }
+
+    const completedProgress = result?.progress || {};
+    if (!completedProgress.formStructureVerified
+      || !completedProgress.formEditUrl
+      || !completedProgress.formResponderUrl
+      || !completedProgress.headerImageUrl
+      || !completedProgress.socialImageUrl
+      || !completedProgress.imageAudit?.passed) {
+      throw new Error("フォームまたは監査済み画像が揃っていないため、作成完了にはしていません。もう一度実行してください。");
+    }
+    reportProgress("フォームと画像2枚の作成が完了しました。PCで最終設定を行います…", "finish");
+    return result;
+  };
+
+  const verifyAuditionForm = async (projectId, characterId, options = {}) => {
+    const result = await verifyWordPressAuditionForm({
       projectId,
       characterId,
-      replaceImages: Boolean(options.replaceImages)
+      auditionDeadline: options.auditionDeadline || ""
     });
     if (result.progress) {
       setData((current) => ({
@@ -601,6 +722,15 @@ function App() {
       }));
     }
     return result;
+  };
+
+  const importAuditionApplicants = async (projectId) => {
+    const result = await listWordPressAuditionApplicants({ projectId });
+    return {
+      ...result,
+      applicants: Array.isArray(result.applicants) ? result.applicants : [],
+      roleSummaries: Array.isArray(result.roleSummaries) ? result.roleSummaries : []
+    };
   };
 
   useEffect(() => {
@@ -643,6 +773,16 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!IS_GAS_MEMBER) return undefined;
+    const timer = window.setInterval(() => {
+      loadWordPressWorkspace().then(applyWordPressWorkspace).catch((error) => {
+        setWordpressState((current) => ({ ...current, status: "error", message: error.message }));
+      });
+    }, 20000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     if (sharedPayload || restorePayload) return;
     saveUiState({ active, selectedEpisodeId, selectedRecordingProjectId, collapsibles: collapsibleState });
   }, [active, selectedEpisodeId, selectedRecordingProjectId, collapsibleState, sharedPayload, restorePayload]);
@@ -664,8 +804,8 @@ function App() {
     setSelectedRecordingProjectId(projects[0]?.id ?? "");
   }, [data.recordingProjects, selectedRecordingProjectId]);
 
-  // ブラウザ保存はLZ圧縮が重く、スライダー操作のたびに実行するとUIがカクつくため
-  // 350msデバウンスする。タブを閉じる/離れる時はpagehideで即時保存する。
+  // 入力中は作品全体の正規化とLZ圧縮を行わず、操作が止まってからまとめて保存する。
+  // タブを閉じる/離れる時はpagehideで即時保存する。
   useEffect(() => {
     if (WORDPRESS_RUNTIME) return undefined;
     if (sharedPayload || restorePayload) {
@@ -675,7 +815,7 @@ function App() {
     const persist = () => {
       pendingSaveRef.current = null;
       try {
-        saveStoredData(data);
+        saveStoredData(normalizeWorkspaceForPersistence(data));
         setStorageWarning("");
       } catch (error) {
         setStorageWarning("ブラウザ保存に失敗しました。再読み込みすると直前の変更が戻る可能性があります。設定からJSONを書き出してください。");
@@ -683,18 +823,19 @@ function App() {
       }
     };
     pendingSaveRef.current = persist;
-    const timer = window.setTimeout(persist, 350);
+    const timer = window.setTimeout(persist, 900);
     return () => window.clearTimeout(timer);
   }, [data, sharedPayload, restorePayload]);
 
   useEffect(() => {
     if (!WORDPRESS_RUNTIME?.canManage || !wordpressLoadedRef.current || sharedPayload || restorePayload) return undefined;
     const saveRevision = ++wordpressSaveRevisionRef.current;
-    setWordpressState((current) => ({ ...current, status: "saving", message: "WordPressへ保存しています…" }));
     const timer = window.setTimeout(() => {
+      setWordpressState((current) => ({ ...current, status: "saving", message: "WordPressへ保存しています…" }));
+      const normalizedData = normalizeWorkspaceForPersistence(data);
       wordpressSaveQueueRef.current = wordpressSaveQueueRef.current
         .catch(() => undefined)
-        .then(() => saveWordPressWorkspace(data))
+        .then(() => saveWordPressWorkspace(normalizedData))
         .then((result) => {
           if (saveRevision !== wordpressSaveRevisionRef.current) return;
           setWordpressState((current) => ({
@@ -726,6 +867,10 @@ function App() {
 
   useEffect(() => {
     const onHashChange = () => {
+      if (IS_GAS_MEMBER || readRecordingShareReference()) {
+        window.location.reload();
+        return;
+      }
       setSharedPayload(readSharedFormPayload());
       setRestorePayload(readRestorePayload());
       setRecordingShareReference(readRecordingShareReference());
@@ -933,8 +1078,7 @@ function App() {
   const updateRecordingProject = (projectId, updater) => {
     updateData("recordingProjects", (projects = []) => projects.map((project) => {
       if (project.id !== projectId) return project;
-      const next = typeof updater === "function" ? updater(project) : { ...project, ...updater };
-      return normalizeRecordingProject({ ...next, updatedAt: new Date().toISOString() });
+      return applyRecordingProjectUpdate(project, updater);
     }));
   };
 
@@ -1920,8 +2064,12 @@ ${socialRows || "-"}
     return <RestoreDataView logoSrc={logoSrc} payload={restorePayload} restoreData={restoreData} appTitle={APP_DISPLAY_NAME} />;
   }
 
-  if (recordingShareReference) {
-    return <SharedRecordingBoard logoSrc={logoSrc} reference={recordingShareReference} appName={APP_DISPLAY_NAME} />;
+  if (IS_GAS_MEMBER && !wordpressLoadedRef.current) {
+    return <main className="app-shell"><Header logoSrc={logoSrc} title={APP_DISPLAY_NAME} />
+      <section className="panel" role={wordpressState.status === "error" ? "alert" : "status"}>
+        <p>{wordpressState.message}</p>
+        {wordpressState.status === "error" && <button className="secondary" onClick={() => refreshWordPressData().catch(() => undefined)}>再読み込み</button>}
+      </section></main>;
   }
 
   if (sharedPayload) {
@@ -1948,6 +2096,9 @@ ${socialRows || "-"}
           {storageWarning}
         </div>
       )}
+      {gasSyncState.message && <div className={`wordpress-sync-banner ${gasSyncState.status}`} role={gasSyncState.status === "error" ? "alert" : "status"}>
+        <Database size={16} /><span>{gasSyncState.message}</span>
+      </div>}
       {WORDPRESS_RUNTIME && (
         <div className={`wordpress-sync-banner ${wordpressState.status}`} role={wordpressState.status === "error" ? "alert" : "status"}>
           <Database size={16} />
@@ -2005,7 +2156,11 @@ ${socialRows || "-"}
               setActive={setActive}
               canEditScript={canEditScript}
               onUpdateLine={WORDPRESS_RUNTIME && !canEditScript ? updateMemberRecordingLine : null}
+              onUpdateLines={WORDPRESS_RUNTIME && !canEditScript ? updateMemberRecordingLines : null}
               onRefresh={WORDPRESS_RUNTIME ? refreshWordPressData : null}
+              editableCharacterIds={IS_GAS_MEMBER ? WORDPRESS_RUNTIME.editableCharacterIds : null}
+              studioConcept={data.studioConcept}
+              managedGasSync={!WORDPRESS_RUNTIME}
             />
           )}
           {PRODUCTION_HUB_KEYS.has(active) && (
@@ -2021,6 +2176,8 @@ ${socialRows || "-"}
               currentUser={wordpressState.currentUser || WORDPRESS_RUNTIME?.currentUser || {}}
               onSaveAuditionAutomationSettings={canEditScript && WORDPRESS_RUNTIME ? saveAuditionAutomationSettings : null}
               onCreateAuditionForm={canEditScript && WORDPRESS_RUNTIME ? createAuditionForm : null}
+              onVerifyAuditionForm={canEditScript && WORDPRESS_RUNTIME ? verifyAuditionForm : null}
+              onImportAuditionApplicants={canEditScript && WORDPRESS_RUNTIME ? importAuditionApplicants : null}
               onCreateQuestion={WORDPRESS_RUNTIME && !canEditScript ? addMemberQuestion : null}
               onResolveQuestion={WORDPRESS_RUNTIME && !canEditScript ? resolveMemberQuestion : null}
               setActive={setActive}
@@ -2142,6 +2299,7 @@ ${socialRows || "-"}
           {active === "settings" && (
             <SettingsPanel
               settings={data.settings}
+              backupData={data}
               updateSettings={updateSettings}
               recordingProjects={data.recordingProjects ?? []}
               updateRecordingProjects={(updater) => updateData("recordingProjects", updater)}
@@ -2160,6 +2318,7 @@ ${socialRows || "-"}
               viewerRole={canEditScript ? "owner" : "actor"}
               allowAudienceSwitch
               onNavigate={setActive}
+              defaultProjectName={(data.recordingProjects ?? []).find((project) => project.id === selectedRecordingProjectId)?.title || ""}
             />
           )}
         </section>
@@ -3979,6 +4138,7 @@ function CodexPack({
 
 function SettingsPanel({
   settings,
+  backupData,
   updateSettings,
   recordingProjects,
   updateRecordingProjects,
@@ -3992,6 +4152,10 @@ function SettingsPanel({
   canEditScript = true
 }) {
   const [folderMessage, setFolderMessage] = useState("");
+  const [backupDirectories, setBackupDirectories] = useState({ pc: null, drive: null });
+  const [backupDirectoriesLoaded, setBackupDirectoriesLoaded] = useState(false);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMessage, setBackupMessage] = useState("");
   const [colorProjectId, setColorProjectId] = useState(() => recordingProjects[0]?.id || "");
   const additionalXAccounts = Array.isArray(settings.additionalXAccounts) ? settings.additionalXAccounts : [];
   const colorProject = recordingProjects.find((project) => project.id === colorProjectId) || recordingProjects[0];
@@ -4000,6 +4164,21 @@ function SettingsPanel({
     if (recordingProjects.some((project) => project.id === colorProjectId)) return;
     setColorProjectId(recordingProjects[0]?.id || "");
   }, [recordingProjects, colorProjectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      loadProductionBackupDirectory(PRODUCTION_BACKUP_DESTINATIONS.pc),
+      loadProductionBackupDirectory(PRODUCTION_BACKUP_DESTINATIONS.drive)
+    ]).then(([pc, drive]) => {
+      if (cancelled) return;
+      setBackupDirectories({ pc, drive });
+      setBackupDirectoriesLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const updateCharacterColor = (characterId, color) => {
     if (!canEditScript || !colorProject) return;
@@ -4021,6 +4200,73 @@ function SettingsPanel({
       setFolderMessage(`${handle.name} を選択しました。ブラウザの仕様で絶対パスは取得できないため、Codex用のパス欄は必要に応じて確認してください。`);
     } catch {
       setFolderMessage("フォルダー選択をキャンセルしました。");
+    }
+  };
+
+  const chooseBackupDirectory = async (destination) => {
+    if (!canEditScript) return;
+    if (!canUseProductionBackupDirectories()) {
+      setBackupMessage("フォルダーへの直接保存はPC版のChromeまたはEdgeで利用できます。");
+      return;
+    }
+    setBackupBusy(true);
+    setBackupMessage("");
+    try {
+      const handle = await chooseProductionBackupDirectory(destination, backupDirectories[destination]);
+      setBackupDirectories((current) => ({ ...current, [destination]: handle }));
+      setBackupMessage(`${handle.name} を${destination === PRODUCTION_BACKUP_DESTINATIONS.pc ? "PC" : "Google Drive"}のバックアップ先に設定しました。`);
+    } catch (error) {
+      if (error?.name !== "AbortError") setBackupMessage(String(error?.message || error));
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const saveBackupToBothDirectories = async () => {
+    if (!canEditScript) return;
+    if (!backupDirectories.pc || !backupDirectories.drive) {
+      setBackupMessage("先にPCとGoogle Driveの保存先を一度ずつ選択してください。");
+      return;
+    }
+    setBackupBusy(true);
+    setBackupMessage("PCとGoogle Driveへバックアップしています…");
+    try {
+      const result = await saveProductionBackupCopies({
+        data: backupData,
+        pcHandle: backupDirectories.pc,
+        driveHandle: backupDirectories.drive
+      });
+      if (result.ok) {
+        setBackupMessage(`${result.fileName} をPCとGoogle Driveの両方へ保存しました。`);
+      } else {
+        const failures = result.results.filter((item) => !item.ok).map((item) => `${item.label}: ${item.error}`).join(" / ");
+        const saved = result.results.filter((item) => item.ok).map((item) => item.label).join("、");
+        setBackupMessage(`${saved ? `${saved}には保存しました。` : "保存できませんでした。"}${failures ? ` ${failures}` : ""}`);
+      }
+    } catch (error) {
+      setBackupMessage(`バックアップに失敗しました: ${String(error?.message || error)}`);
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const saveBackupToDirectory = async (destination) => {
+    if (!canEditScript) return;
+    const handle = backupDirectories[destination];
+    const label = destination === PRODUCTION_BACKUP_DESTINATIONS.pc ? "PC" : "Google Drive";
+    if (!handle) {
+      setBackupMessage(`${label}の直接保存先を先に選択してください。`);
+      return;
+    }
+    setBackupBusy(true);
+    setBackupMessage(`${label}へバックアップしています…`);
+    try {
+      const result = await saveProductionBackupToDirectory({ data: backupData, handle });
+      setBackupMessage(`${result.fileName} を「${result.folderName}」へ直接保存しました。`);
+    } catch (error) {
+      setBackupMessage(`${label}への保存に失敗しました: ${String(error?.message || error)}`);
+    } finally {
+      setBackupBusy(false);
     }
   };
 
@@ -4223,10 +4469,114 @@ function SettingsPanel({
           </div>
           {folderMessage && <p className="hint-text">{folderMessage}</p>}
         </>}
-        {WORDPRESS_RUNTIME && <div className="record-head"><div><h2>制作データのバックアップ</h2><p className="muted">{canEditScript ? "台本内の保存版に加えて、制作データ全体を手元へJSONで書き出せます。" : "バックアップ操作は制作オーナーだけが実行できます。"}</p></div></div>}
+        <div className="record-head">
+          <div>
+            <h2>制作データのバックアップ</h2>
+            <p className="muted">{canEditScript ? "PCとGoogle Driveへ同じ制作データをまとめて保存します。" : "バックアップ操作は制作オーナーだけが実行できます。"}</p>
+          </div>
+        </div>
+        {canEditScript && (
+          <div className="production-backup-settings">
+            <section className="production-backup-destination">
+              <div className="production-backup-destination-heading">
+                <Database size={19} />
+                <span><b>パソコンの保存先</b><small>このPCだけに安全に記憶します</small></span>
+              </div>
+              <div className={`production-backup-folder-state${backupDirectories.pc ? " configured" : ""}`}>
+                <FolderOpen size={17} />
+                <span>{backupDirectoriesLoaded ? (backupDirectories.pc?.name || "保存先が未設定です") : "保存先を確認しています…"}</span>
+              </div>
+              <div className="production-backup-destination-actions pc-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={backupBusy}
+                  onClick={() => chooseBackupDirectory(PRODUCTION_BACKUP_DESTINATIONS.pc)}
+                >
+                  <FolderOpen size={16} />{backupDirectories.pc ? "保存先を確認・変更" : "保存先を選ぶ"}
+                </button>
+                <button
+                  type="button"
+                  className="secondary backup-save-button"
+                  disabled={backupBusy || !backupDirectories.pc}
+                  onClick={() => saveBackupToDirectory(PRODUCTION_BACKUP_DESTINATIONS.pc)}
+                >
+                  <Save size={16} />PC保存
+                </button>
+              </div>
+            </section>
+            <section className="production-backup-destination drive">
+              <div className="production-backup-destination-heading">
+                <Database size={19} />
+                <span><b>Google Driveの保存先</b><small>Drive for desktopの同期フォルダーへ保存します</small></span>
+              </div>
+              <label className="production-backup-drive-url">
+                <span>オンラインフォルダーURL</span>
+                <input
+                  value={settings.productionBackupDriveFolderUrl || ""}
+                  onChange={(event) => updateSettings({ productionBackupDriveFolderUrl: event.target.value })}
+                  placeholder="https://drive.google.com/drive/folders/..."
+                />
+              </label>
+              <p className={`production-backup-url-state${isWebUrl(settings.productionBackupDriveFolderUrl) ? " configured" : ""}`}>
+                {isWebUrl(settings.productionBackupDriveFolderUrl)
+                  ? "オンラインDrive URLは登録済みです。"
+                  : "オンラインDrive URLは未登録です。"}
+              </p>
+              <div className={`production-backup-folder-state${backupDirectories.drive ? " configured" : ""}`}>
+                <FolderOpen size={17} />
+                <span>{backupDirectoriesLoaded ? (backupDirectories.drive?.name || "直接保存する同期フォルダーは未設定です") : "保存先を確認しています…"}</span>
+              </div>
+              <div className="production-backup-destination-actions">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={backupBusy}
+                  onClick={() => chooseBackupDirectory(PRODUCTION_BACKUP_DESTINATIONS.drive)}
+                >
+                  <FolderOpen size={16} />{backupDirectories.drive ? "同期先を確認・変更" : "同期先を選ぶ"}
+                </button>
+                {isWebUrl(settings.productionBackupDriveFolderUrl) ? (
+                  <a className="secondary" href={settings.productionBackupDriveFolderUrl} target="_blank" rel="noreferrer">
+                    <Link size={16} />Driveを開く
+                  </a>
+                ) : (
+                  <button type="button" className="secondary" disabled><Link size={16} />Driveを開く</button>
+                )}
+                <button
+                  type="button"
+                  className="secondary backup-save-button"
+                  disabled={backupBusy || !backupDirectories.drive}
+                  onClick={() => saveBackupToDirectory(PRODUCTION_BACKUP_DESTINATIONS.drive)}
+                >
+                  <Save size={16} />Driveへ保存
+                </button>
+              </div>
+              <p className="production-backup-help">
+                URLはオンラインDriveを開くための登録です。直接保存するには、Google Drive for desktopの「Google Drive」内にある同じフォルダーを「同期先を選ぶ」から一度選択してください。
+              </p>
+            </section>
+            <div className="production-backup-run">
+              <button
+                type="button"
+                className="primary"
+                onClick={saveBackupToBothDirectories}
+                disabled={backupBusy || !backupDirectories.pc || !backupDirectories.drive}
+              >
+                <Save size={17} />{backupBusy ? "バックアップ中…" : "PCとGoogle Driveの両方へ保存"}
+              </button>
+              <p>
+                {backupDirectories.pc && !backupDirectories.drive
+                  ? "PC保存先は設定済みです。両方へ保存するにはGoogle Driveの同期先も選択してください。"
+                  : "台本・進捗・キャラクター・素材・質問・予定などを一つのJSONへまとめます。録音ファイル本体は含めず、Google Drive URLを保存します。"}
+              </p>
+            </div>
+            {backupMessage && <p className="production-backup-message" role="status">{backupMessage}</p>}
+          </div>
+        )}
         {(!WORDPRESS_RUNTIME || canEditScript) && <div className="button-row">
           {!WORDPRESS_RUNTIME && <button className="secondary" onClick={copyTransferLink}><ClipboardCopy size={16} />{transferCopied ? "コピー済み" : "引き継ぎリンクをコピー"}</button>}
-          <button className="secondary" onClick={exportJson}><Download size={16} />JSONを書き出し</button>
+          <button className="secondary" onClick={exportJson} title="このボタンはブラウザのダウンロードフォルダーへ保存します"><Download size={16} />通常ダウンロード</button>
           {canEditScript && <>
             <label className="secondary file-button">
               <Upload size={16} />JSONを読み込み

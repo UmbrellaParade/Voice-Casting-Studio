@@ -12,8 +12,10 @@ import {
   FileAudio,
   FileText,
   FilePlus2,
+  FolderOpen,
   History,
   Heading2,
+  Highlighter,
   KeyRound,
   Link,
   ListFilter,
@@ -34,6 +36,7 @@ import {
   Users
 } from "lucide-react";
 import { getFromGasEndpoint, loadAppConfig, postToGasEndpoint } from "../lib/gas.js";
+import { makeGasPublishedProject } from "../lib/gas-workspace.js";
 import {
   AUDIO_FILE_ACCEPT,
   getGoogleDriveFileId,
@@ -45,6 +48,7 @@ import {
 import {
   DIRECTOR_REVIEW_STATUSES,
   LINE_PERFORMANCE_TYPES,
+  applyRecordingProjectUpdate,
   archiveScriptVersion,
   createRecordingAccessKey,
   createRecordingProject,
@@ -70,6 +74,10 @@ import {
   parseManualChapterBody,
   parseRubyText,
   parseScriptTable,
+  patchRecordingChapterActorStatus,
+  patchRecordingChapterReviewStatus,
+  patchRecordingCharacterActorStatus,
+  patchRecordingCharacterReviewStatus,
   patchRecordingLineProgress,
   repairScriptHierarchy,
   hasRubyNotation,
@@ -78,8 +86,22 @@ import {
   restoreScriptSnapshot,
   stripRubyNotation
 } from "../lib/recording.js";
+import {
+  normalizeRecordingBoardUiState,
+  readRecordingBoardUiState,
+  readRecordingStudioTab,
+  saveRecordingBoardUiState,
+  saveRecordingStudioTab
+} from "../lib/recording-ui.js";
 import { Field, SectionTitle, TextArea } from "./ui.jsx";
+import { AccentDictionarySearch } from "./AccentDictionarySearch.jsx";
 import { getScriptSceneAnchorId, ScriptSceneToc } from "./ScriptSceneToc.jsx";
+import {
+  RETAKE_INSTRUCTION_CATEGORIES,
+  buildManualAccentPattern,
+  normalizeRetakeInstructions,
+  parseManualAccentNotation
+} from "../lib/retake.js";
 
 const MAX_RECORDING_UPLOAD_BYTES = 25 * 1024 * 1024;
 const COLLABORATIVE_LINE_FIELDS = new Set([
@@ -88,7 +110,8 @@ const COLLABORATIVE_LINE_FIELDS = new Set([
   "recordingUrl",
   "recordingFileName",
   "actorNote",
-  "directorNote"
+  "directorNote",
+  "retakeAnnotations"
 ]);
 const BOARD_STATUS_FILTERS = ["すべて", "未収録", "収録済み", "未確認", "OK", "リテイク", "保留"];
 
@@ -167,6 +190,395 @@ function RubyText({ text = "" }) {
         )
       )}
     </>
+  );
+}
+
+const createEmptyRetakeDraft = () => ({
+  id: "",
+  quote: "",
+  start: -1,
+  end: -1,
+  category: "アクセント",
+  instruction: "",
+  reading: "",
+  accentType: 0,
+  accentRiseAt: 2,
+  createdAt: ""
+});
+
+function RetakeMarkedText({ text = "", instructions = [] }) {
+  const plainText = stripRubyNotation(text);
+  const normalized = normalizeRetakeInstructions(instructions, plainText)
+    .filter((instruction) => instruction.start >= 0 && instruction.end > instruction.start);
+  let cursor = 0;
+
+  const renderTextPart = (value, globalStart, keyPrefix) => {
+    const globalEnd = globalStart + value.length;
+    const overlapping = normalized.filter((instruction) => (
+      instruction.start < globalEnd && instruction.end > globalStart
+    ));
+    if (!overlapping.length) return <React.Fragment key={keyPrefix}>{value}</React.Fragment>;
+    const boundaries = new Set([0, value.length]);
+    overlapping.forEach((instruction) => {
+      boundaries.add(Math.max(0, instruction.start - globalStart));
+      boundaries.add(Math.min(value.length, instruction.end - globalStart));
+    });
+    const points = [...boundaries].sort((left, right) => left - right);
+    return points.slice(0, -1).map((start, index) => {
+      const end = points[index + 1];
+      const part = value.slice(start, end);
+      const marked = overlapping.some((instruction) => (
+        instruction.start < globalStart + end && instruction.end > globalStart + start
+      ));
+      return marked
+        ? <mark className="retake-text-mark" key={`${keyPrefix}-${start}-${end}`}>{part}</mark>
+        : <React.Fragment key={`${keyPrefix}-${start}-${end}`}>{part}</React.Fragment>;
+    });
+  };
+
+  return (
+    <>
+      {parseRubyText(text).map((segment, index) => {
+        const visibleText = segment.type === "ruby" ? segment.base : segment.text;
+        const start = cursor;
+        const end = start + visibleText.length;
+        cursor = end;
+        if (segment.type === "ruby") {
+          const ruby = (
+            <ruby>
+              {segment.base}
+              <rp>（</rp>
+              <rt>{segment.reading}</rt>
+              <rp>）</rp>
+            </ruby>
+          );
+          const marked = normalized.some((instruction) => instruction.start < end && instruction.end > start);
+          return marked
+            ? <mark className="retake-text-mark" key={`retake-ruby-${index}`}>{ruby}</mark>
+            : <React.Fragment key={`retake-ruby-${index}`}>{ruby}</React.Fragment>;
+        }
+        return renderTextPart(segment.text, start, `retake-text-${index}`);
+      })}
+    </>
+  );
+}
+
+function ManualAccentPattern({
+  reading = "",
+  accentType = 0,
+  accentRiseAt = null,
+  editable = false,
+  onAccentTypeChange = () => {},
+  onAccentRiseAtChange = () => {}
+}) {
+  const pattern = buildManualAccentPattern(reading, accentType, accentRiseAt);
+  if (!pattern.morae.length) return null;
+  return (
+    <div className={`manual-accent-pattern${editable ? " editable" : ""}`}>
+      {editable && (
+        <div className="manual-accent-options" aria-label="音が上がる拍">
+          <strong>上がる拍</strong>
+          {pattern.morae.map((mora, index) => (
+            <button
+              type="button"
+              className={pattern.riseAt === index + 1 ? "active rise" : ""}
+              key={`rise-${mora}-${index}`}
+              onClick={() => onAccentRiseAtChange(index + 1)}
+              title={`${index + 1}拍目「${mora}」で上がる`}
+            >
+              {index + 1}<small>{mora}</small>
+            </button>
+          ))}
+        </div>
+      )}
+      {editable && (
+        <div className="manual-accent-options" aria-label="音が下がる位置">
+          <strong>下がる位置</strong>
+          <button type="button" className={pattern.accentType === 0 ? "active" : ""} onClick={() => onAccentTypeChange(0)}>平板</button>
+          {pattern.morae.map((mora, index) => (
+            <button
+              type="button"
+              className={pattern.accentType === index + 1 ? "active" : ""}
+              key={`${mora}-${index}`}
+              onClick={() => onAccentTypeChange(index + 1)}
+              title={`${index + 1}拍目「${mora}」の後で下がる`}
+            >
+              {index + 1}<small>{mora}</small>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="manual-accent-graph" role="img" aria-label={`${reading}：${pattern.instruction}`}>
+        {pattern.morae.map((mora, index) => (
+          <span
+            className={`manual-accent-mora ${pattern.levels[index]}${pattern.dropAfter === index ? " drop-after" : ""}`}
+            key={`${mora}-${index}`}
+          >
+            <i />
+            <b>{mora}</b>
+          </span>
+        ))}
+      </div>
+      <small>
+        <span>{pattern.instruction}</span>
+        <code>{pattern.notation}{pattern.accentType === 0 ? "（平板）" : ""}</code>
+      </small>
+    </div>
+  );
+}
+
+function RetakeInstructionList({ text = "", instructions = [], onEdit = null, onRemove = null }) {
+  const normalized = normalizeRetakeInstructions(instructions, stripRubyNotation(text));
+  if (!normalized.length) return null;
+  return (
+    <section className="retake-instruction-list" aria-label="リテイク指示">
+      <div className="retake-instruction-heading">
+        <span><Highlighter size={16} />リテイク箇所</span>
+        <small>{normalized.length}件</small>
+      </div>
+      <div className="retake-instruction-items">
+        {normalized.map((instruction) => (
+          <article className="retake-instruction-item" key={instruction.id}>
+            <div className="retake-instruction-summary">
+              <span>{instruction.category}</span>
+              <mark>{instruction.quote || "対象箇所未設定"}</mark>
+              {instruction.start < 0 && <em>台本変更後の位置を確認してください</em>}
+            </div>
+            {instruction.instruction && <p>{instruction.instruction}</p>}
+            {instruction.reading && (
+              <div className="retake-accent-display">
+                <b>読み：{instruction.reading}</b>
+                <ManualAccentPattern
+                  reading={instruction.reading}
+                  accentType={instruction.accentType}
+                  accentRiseAt={instruction.accentRiseAt}
+                />
+              </div>
+            )}
+            {(onEdit || onRemove) && (
+              <div className="retake-instruction-actions">
+                {onEdit && <button type="button" className="secondary compact" onClick={() => onEdit(instruction)}>修正</button>}
+                {onRemove && (
+                  <button type="button" className="danger compact" onClick={() => onRemove(instruction.id)}>
+                    <Trash2 size={14} />削除
+                  </button>
+                )}
+              </div>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RetakeInstructionEditor({ line, patchLine, onClose }) {
+  const plainText = stripRubyNotation(line.text || "");
+  const selectionSourceRef = useRef(null);
+  const [draft, setDraft] = useState(createEmptyRetakeDraft);
+  const [message, setMessage] = useState("台本の対象箇所をドラッグで選び、選択箇所を取り込んでください。");
+  const instructions = normalizeRetakeInstructions(line.retakeAnnotations, plainText);
+
+  const resetDraft = () => {
+    setDraft(createEmptyRetakeDraft());
+    setMessage("台本の対象箇所をドラッグで選び、選択箇所を取り込んでください。");
+  };
+
+  const captureSelection = () => {
+    const source = selectionSourceRef.current;
+    const selection = globalThis.getSelection?.();
+    if (!source || !selection?.rangeCount) {
+      setMessage("対象箇所をドラッグで選択してください。");
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    if (!source.contains(range.commonAncestorContainer)) {
+      setMessage("上の台本文から対象箇所を選択してください。");
+      return;
+    }
+    const quote = range.toString().trim();
+    if (!quote) {
+      setMessage("対象箇所をドラッグで選択してください。");
+      return;
+    }
+    const preRange = range.cloneRange();
+    preRange.selectNodeContents(source);
+    preRange.setEnd(range.startContainer, range.startOffset);
+    const leadingWhitespace = range.toString().length - range.toString().trimStart().length;
+    const start = preRange.toString().length + leadingWhitespace;
+    setDraft((current) => ({ ...current, quote, start, end: start + quote.length }));
+    setMessage(`「${quote}」を対象箇所にしました。`);
+    selection.removeAllRanges();
+  };
+
+  const updateQuote = (quote) => {
+    const foundStart = plainText.indexOf(quote);
+    setDraft((current) => ({
+      ...current,
+      quote,
+      start: foundStart,
+      end: foundStart >= 0 ? foundStart + quote.length : -1
+    }));
+  };
+
+  const editInstruction = (instruction) => {
+    setDraft({ ...createEmptyRetakeDraft(), ...instruction, accentType: instruction.accentType ?? 0 });
+    setMessage(`「${instruction.quote}」の指示を修正しています。`);
+  };
+
+  const removeInstruction = (instructionId) => {
+    if (!confirm("このリテイク指示を削除しますか？台本文は変更されません。")) return;
+    patchLine(line.id, {
+      retakeAnnotations: instructions.filter((instruction) => instruction.id !== instructionId)
+    });
+    if (draft.id === instructionId) resetDraft();
+  };
+
+  const saveInstruction = () => {
+    const quote = draft.quote.trim();
+    const start = draft.start >= 0 && plainText.slice(draft.start, draft.end) === quote
+      ? draft.start
+      : plainText.indexOf(quote);
+    if (!quote || start < 0) {
+      setMessage("対象箇所が台本文に見つかりません。上の台本文から選び直してください。");
+      return;
+    }
+    if (!draft.instruction.trim() && !draft.reading.trim()) {
+      setMessage("指示内容か手動アクセントの読みを入力してください。");
+      return;
+    }
+    const now = new Date().toISOString();
+    const nextInstruction = {
+      ...draft,
+      id: draft.id || newId("retake_instruction"),
+      quote,
+      start,
+      end: start + quote.length,
+      instruction: draft.instruction.trim(),
+      reading: draft.reading.trim(),
+      accentType: draft.reading.trim() ? Number(draft.accentType) || 0 : null,
+      createdAt: draft.createdAt || now,
+      updatedAt: now
+    };
+    const nextInstructions = draft.id
+      ? instructions.map((instruction) => instruction.id === draft.id ? nextInstruction : instruction)
+      : [...instructions, nextInstruction];
+    patchLine(line.id, {
+      retakeAnnotations: nextInstructions,
+      reviewStatus: "リテイク",
+      actorStatus: line.actorStatus === "再提出済み" ? "収録済み" : line.actorStatus
+    });
+    resetDraft();
+    setMessage("リテイク指示を保存しました。声優さんの画面にも同じ内容が表示されます。");
+  };
+
+  return (
+    <section className="retake-instruction-editor">
+      <div className="retake-editor-head">
+        <div>
+          <strong><Highlighter size={17} />リテイク箇所を指定</strong>
+          <small>台本文そのものは変更しません。指示だけを重ねて表示します。</small>
+        </div>
+        <button type="button" className="secondary compact" onClick={onClose}>閉じる</button>
+      </div>
+      <div className="retake-selection-box">
+        <span>1. 直す箇所をドラッグで選択</span>
+        <p ref={selectionSourceRef}>{plainText}</p>
+        <button type="button" className="secondary compact" onClick={captureSelection}>
+          <Highlighter size={15} />選択箇所を取り込む
+        </button>
+      </div>
+      <div className="retake-editor-fields">
+        <label>
+          <span>対象箇所</span>
+          <input value={draft.quote} onChange={(event) => updateQuote(event.target.value)} placeholder="例：泥雨の中に" />
+        </label>
+        <label>
+          <span>指示の種類</span>
+          <select value={draft.category} onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value }))}>
+            {RETAKE_INSTRUCTION_CATEGORIES.map((category) => <option key={category}>{category}</option>)}
+          </select>
+        </label>
+        <label className="wide">
+          <span>リテイク指示</span>
+          <textarea
+            value={draft.instruction}
+            onChange={(event) => setDraft((current) => ({ ...current, instruction: event.target.value }))}
+            placeholder="例：「泥雨」は『ど』を高くしすぎず、自然に下げてください。"
+          />
+        </label>
+      </div>
+      <div className="retake-accent-editor">
+        <div>
+          <strong>手動アクセント</strong>
+          <small>辞典にない語も、読み・上がる拍・下がる位置を指定できます。</small>
+        </div>
+        <label>
+          <span>読み</span>
+          <input
+            value={draft.reading}
+            onChange={(event) => {
+              const reading = event.target.value;
+              const pattern = buildManualAccentPattern(reading, 0);
+              setDraft((current) => ({ ...current, reading, accentType: 0, accentRiseAt: pattern.riseAt }));
+            }}
+            placeholder="例：どろあめ"
+          />
+        </label>
+        <label>
+          <span>辞典記号表記（＼・補助）</span>
+          <input
+            value={buildManualAccentPattern(draft.reading, draft.accentType, draft.accentRiseAt).notation}
+            onChange={(event) => {
+              const parsed = parseManualAccentNotation(event.target.value);
+              const pattern = buildManualAccentPattern(parsed.reading, parsed.accentType);
+              setDraft((current) => ({
+                ...current,
+                reading: parsed.reading,
+                accentType: parsed.accentType,
+                accentRiseAt: pattern.riseAt
+              }));
+            }}
+            placeholder="例：どろ＼あめ"
+            aria-describedby={`manual-accent-help-${line.id}`}
+          />
+          <small id={`manual-accent-help-${line.id}`}>音が下がる拍の直後に「＼」を入れます。記号なしは平板です。</small>
+        </label>
+        <ManualAccentPattern
+          reading={draft.reading}
+          accentType={draft.accentType}
+          accentRiseAt={draft.accentRiseAt}
+          editable
+          onAccentTypeChange={(accentType) => setDraft((current) => ({
+            ...current,
+            accentType,
+            accentRiseAt: accentType > 0 && current.accentRiseAt > accentType
+              ? accentType
+              : current.accentRiseAt
+          }))}
+          onAccentRiseAtChange={(accentRiseAt) => setDraft((current) => ({
+            ...current,
+            accentRiseAt,
+            accentType: current.accentType > 0 && current.accentType < accentRiseAt
+              ? accentRiseAt
+              : current.accentType
+          }))}
+        />
+      </div>
+      <div className="retake-editor-actions">
+        <span>{message}</span>
+        {draft.id && <button type="button" className="secondary" onClick={resetDraft}>新規入力に戻す</button>}
+        <button type="button" className="primary" onClick={saveInstruction}>
+          <Save size={15} />{draft.id ? "指示を更新" : "指示を追加"}
+        </button>
+      </div>
+      <RetakeInstructionList
+        text={line.text}
+        instructions={instructions}
+        onEdit={editInstruction}
+        onRemove={removeInstruction}
+      />
+    </section>
   );
 }
 
@@ -420,6 +832,9 @@ function CharacterFilters({
   setStatusFilter,
   allLabel = "全文"
 }) {
+  const selectedRecordingFolders = selectedCharacterIds
+    .map((characterId) => project.characters.find((character) => character.id === characterId))
+    .filter((character) => character?.recordingFolderUrl);
   const toggleCharacter = (characterId) => {
     setSelectedCharacterIds((current) =>
       current.includes(characterId)
@@ -454,6 +869,26 @@ function CharacterFilters({
               </button>
             ))}
         </div>
+        {selectedRecordingFolders.length > 0 && (
+          <div className="recording-folder-shortcuts" aria-label="選択中キャラクターの収録フォルダー">
+            <span><FolderOpen size={15} />収録フォルダー</span>
+            <div>
+              {selectedRecordingFolders.map((character) => (
+                <a
+                  key={character.id}
+                  href={character.recordingFolderUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ "--character-color": character.color }}
+                >
+                  <span className="character-dot" />
+                  {getCharacterScriptName(character)}
+                  <ExternalLink size={14} />
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div className="recording-filter-options">
         <div className="segmented-control" aria-label="セリフ抽出方法">
@@ -518,7 +953,13 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript, ca
   const isManualBody = isDirection && line.manualBody;
   const isDerivedFromManualBody = Boolean(line.derivedFromManualBody);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [retakeEditorOpen, setRetakeEditorOpen] = useState(false);
   const characterColor = character?.color || "#5f6d7a";
+  const retakeInstructions = normalizeRetakeInstructions(line.retakeAnnotations, stripRubyNotation(line.text || ""));
+  const isRetake = line.reviewStatus === "リテイク";
+  const recordingChecked = isRetake
+    ? line.actorStatus === "再提出済み"
+    : line.actorStatus !== "未収録";
 
   return (
     <article
@@ -538,7 +979,7 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript, ca
           </b>
         </div>
         <div className="script-line-copy">
-          <p><RubyText text={line.text || (isManualBody ? "本文未入力" : "セリフ未入力")} /></p>
+          <p><RetakeMarkedText text={line.text || (isManualBody ? "本文未入力" : "セリフ未入力")} instructions={retakeInstructions} /></p>
           {line.direction && <small><MessageSquareText size={14} />{line.direction}</small>}
           {line.fileName && <code>{line.fileName}</code>}
         </div>
@@ -549,27 +990,39 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript, ca
           </div>
         )}
       </div>
+      {!retakeEditorOpen && <RetakeInstructionList text={line.text} instructions={retakeInstructions} />}
       {!line.isContext && !isDirection && (
         <>
           <div className={`line-operation-row${line.recordingUrl ? " has-recording" : ""}`}>
             <RecordingPlayer url={line.recordingUrl} fileName={line.recordingFileName} />
             <div className="line-status-selects">
-              <label className={`line-recorded-check${line.actorStatus !== "未収録" ? " checked" : ""}`}>
+              <label className={`line-recorded-check${recordingChecked ? " checked" : ""}`}>
                 <input
                   type="checkbox"
-                  checked={line.actorStatus !== "未収録"}
+                  checked={recordingChecked}
                   disabled={!canUpdateActorStatus || lineUpdateBusy}
                   onChange={(event) => patchLine(line.id, {
                     actorStatus: event.target.checked
-                      ? (line.reviewStatus === "リテイク" ? "再提出済み" : "収録済み")
-                      : "未収録"
+                      ? (isRetake ? "再提出済み" : "収録済み")
+                      : (isRetake ? "収録済み" : "未収録")
                   })}
                 />
-                <span>収録済み</span>
+                <span>{isRetake ? "再収録済み" : "収録済み"}</span>
               </label>
               <label>
                 <span>確認</span>
-                <select value={line.reviewStatus} disabled={!canEditScript || lineUpdateBusy} onChange={(event) => patchLine(line.id, { reviewStatus: event.target.value })}>
+                <select
+                  value={line.reviewStatus}
+                  disabled={!canEditScript || lineUpdateBusy}
+                  onChange={(event) => {
+                    const reviewStatus = event.target.value;
+                    if (reviewStatus === "リテイク") setRetakeEditorOpen(true);
+                    patchLine(line.id, {
+                      reviewStatus,
+                      ...(reviewStatus === "リテイク" && line.actorStatus === "再提出済み" ? { actorStatus: "収録済み" } : {})
+                    });
+                  }}
+                >
                   {DIRECTOR_REVIEW_STATUSES.map((status) => <option key={status}>{status}</option>)}
                 </select>
               </label>
@@ -581,9 +1034,17 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript, ca
               {line.directorNote && <p className="director-note"><Eye size={14} /><b>確認メモ</b><span>{line.directorNote}</span></p>}
             </div>
           )}
+          {retakeEditorOpen && canEditScript && (
+            <RetakeInstructionEditor line={line} patchLine={patchLine} onClose={() => setRetakeEditorOpen(false)} />
+          )}
           <div className="line-card-footer">
             <span>{isDerivedFromManualBody ? "章本文から表示" : <><Clock3 size={14} />{formatUpdatedAt(line.updatedAt)}</>}</span>
             <div>
+              {canEditScript && (
+                <button type="button" className="secondary compact" onClick={() => setRetakeEditorOpen((current) => !current)}>
+                  <Highlighter size={15} />リテイク指示{retakeInstructions.length ? ` ${retakeInstructions.length}件` : ""}
+                </button>
+              )}
               <button type="button" className="secondary compact" onClick={() => setDetailsOpen((current) => !current)}>
                 {detailsOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}{canEditScript && !isDerivedFromManualBody ? "詳細編集" : "録音・確認メモ"}
               </button>
@@ -655,16 +1116,38 @@ function AdminLineCard({ project, line, patchLine, removeLine, canEditScript, ca
   );
 }
 
-function RecordingBoardView({ project, patchLine, removeLine, canEditScript, canUpdateActorStatus, lineUpdateBusy }) {
+function RecordingBoardView({ project, patchLine, removeLine, canEditScript, canUpdateActorStatus, lineUpdateBusy, confirmChapterRecording, confirmChapterReview, editableCharacterIds = null }) {
   const displayProject = useMemo(() => getRecordingDisplayProject(project), [project]);
   const allChapters = useMemo(() => getChapterGroups(displayProject.lines), [displayProject.lines]);
-  const [selectedChapterId, setSelectedChapterId] = useState("");
-  const [selectedSceneId, setSelectedSceneId] = useState("");
-  const [selectedCharacterIds, setSelectedCharacterIds] = useState([]);
-  const [mode, setMode] = useState("assignment");
-  const [includeContext, setIncludeContext] = useState(true);
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("すべて");
+  const [boardUiState, setBoardUiState] = useState(() => readRecordingBoardUiState(project.id));
+  const {
+    selectedChapterId,
+    selectedSceneId,
+    selectedCharacterIds,
+    mode,
+    includeContext,
+    query,
+    statusFilter
+  } = boardUiState;
+  const updateBoardUiState = (patchOrUpdater) => {
+    setBoardUiState((current) => {
+      const patch = typeof patchOrUpdater === "function" ? patchOrUpdater(current) : patchOrUpdater;
+      const next = normalizeRecordingBoardUiState({ ...current, ...patch });
+      saveRecordingBoardUiState(project.id, next);
+      return next;
+    });
+  };
+  const setSelectedChapterId = (value) => updateBoardUiState({ selectedChapterId: value });
+  const setSelectedSceneId = (value) => updateBoardUiState({ selectedSceneId: value });
+  const setSelectedCharacterIds = (valueOrUpdater) => updateBoardUiState((current) => ({
+    selectedCharacterIds: typeof valueOrUpdater === "function"
+      ? valueOrUpdater(current.selectedCharacterIds)
+      : valueOrUpdater
+  }));
+  const setMode = (value) => updateBoardUiState({ mode: value });
+  const setIncludeContext = (value) => updateBoardUiState({ includeContext: value });
+  const setQuery = (value) => updateBoardUiState({ query: value });
+  const setStatusFilter = (value) => updateBoardUiState({ statusFilter: value });
   const [openSceneIds, setOpenSceneIds] = useState(() => new Set(project.lines[0]?.sceneId ? [project.lines[0].sceneId] : []));
   const [openChapterIds, setOpenChapterIds] = useState(() => new Set(project.lines[0]?.chapterId ? [project.lines[0].chapterId] : []));
   const scopedProject = useMemo(() => ({
@@ -691,7 +1174,7 @@ function RecordingBoardView({ project, patchLine, removeLine, canEditScript, can
   }, [selectedChapterId, selectedSceneId, chapterSignature]);
 
   useEffect(() => {
-    const available = new Set(scopedProject.lines.filter((line) => line.kind !== "direction").map((line) => line.characterId));
+    const available = new Set(displayProject.characters.map((character) => character.id));
     setSelectedCharacterIds((current) => {
       const next = current.filter((id) => available.has(id));
       return next.length === current.length ? current : next;
@@ -722,6 +1205,32 @@ function RecordingBoardView({ project, patchLine, removeLine, canEditScript, can
   const tocChapter = selectedChapterId && !selectedSceneId
     ? chapters.find((chapter) => chapter.chapterId === selectedChapterId)
     : null;
+  const selectedChapter = selectedChapterId
+    ? allChapters.find((chapter) => chapter.chapterId === selectedChapterId)
+    : null;
+  const bulkScopeTitle = selectedChapter?.title || "全章";
+  const bulkScopeUnitLabel = selectedChapter ? "章内" : "全章";
+  const chapterReviewLines = selectedChapter?.lines.filter((line) => line.kind !== "direction")
+    || displayProject.lines.filter((line) => line.kind !== "direction");
+  const selectedCharacterIdSet = new Set(selectedCharacterIds);
+  const selectedCharacterNames = selectedCharacterIds
+    .map((characterId) => displayProject.characters.find((character) => character.id === characterId))
+    .filter(Boolean)
+    .map((character) => getCharacterScriptName(character));
+  const selectedCharacterLabel = selectedCharacterNames.length === 1
+    ? `「${selectedCharacterNames[0]}」`
+    : selectedCharacterNames.length > 1
+      ? `選択中${selectedCharacterNames.length}名`
+      : "";
+  const chapterCharacterLines = selectedCharacterIds.length
+    ? chapterReviewLines.filter((line) => selectedCharacterIdSet.has(line.characterId) && (!editableCharacterIds || editableCharacterIds.includes(line.characterId)))
+    : [];
+  const chapterRecordedCount = chapterCharacterLines.filter((line) => line.actorStatus !== "未収録").length;
+  const chapterRecordingComplete = chapterCharacterLines.length > 0 && chapterRecordedCount === chapterCharacterLines.length;
+  const chapterRetakeCount = chapterCharacterLines.filter((line) => line.reviewStatus === "リテイク").length;
+  const chapterBulkReviewLines = chapterCharacterLines.filter((line) => line.reviewStatus !== "リテイク");
+  const chapterReviewOkCount = chapterBulkReviewLines.filter((line) => line.reviewStatus === "OK").length;
+  const chapterReviewComplete = chapterBulkReviewLines.length > 0 && chapterReviewOkCount === chapterBulkReviewLines.length;
   const tocScopeId = `admin-${project.id}-${selectedChapterId || "all"}`;
 
   const toggleScene = (sceneId) => {
@@ -743,11 +1252,9 @@ function RecordingBoardView({ project, patchLine, removeLine, canEditScript, can
   const selectChapter = (chapterId) => {
     setSelectedChapterId(chapterId);
     setSelectedSceneId("");
-    setSelectedCharacterIds([]);
   };
   const selectScene = (sceneId) => {
     setSelectedSceneId(sceneId);
-    setSelectedCharacterIds([]);
   };
 
   return (
@@ -774,6 +1281,71 @@ function RecordingBoardView({ project, patchLine, removeLine, canEditScript, can
         setStatusFilter={setStatusFilter}
         allLabel={selectedSceneId ? "シーン全文" : selectedChapterId ? "章の全文" : "全文"}
       />
+      {chapterReviewLines.length > 0 && (canUpdateActorStatus || canEditScript) && (
+        <section className="chapter-bulk-panel" aria-label={`${bulkScopeTitle}のまとめ操作`}>
+          <header>
+            <div>
+              <CheckCircle2 size={19} />
+              <span>
+                <b>{bulkScopeTitle}をまとめて更新</b>
+                <small>{selectedCharacterLabel ? `${selectedCharacterLabel}・${bulkScopeUnitLabel}${chapterCharacterLines.length}セリフ` : "先に登場人物を選択してください"}</small>
+              </span>
+            </div>
+            {selectedSceneId && selectedCharacterLabel && <small>現在はシーン表示中ですが、選択した人物の章内全セリフを更新します。</small>}
+          </header>
+          <div className="chapter-bulk-actions">
+            {canUpdateActorStatus && (
+              <label className={`chapter-recording-bulk-check${chapterRecordingComplete ? " checked" : ""}${chapterCharacterLines.length ? "" : " disabled"}`}>
+                <input
+                  type="checkbox"
+                  checked={chapterRecordingComplete}
+                  disabled={lineUpdateBusy || chapterCharacterLines.length === 0}
+                  onChange={(event) => confirmChapterRecording({
+                    chapterId: selectedChapter?.chapterId || "",
+                    chapterTitle: bulkScopeTitle,
+                    characterIds: selectedCharacterIds,
+                    characterLabel: selectedCharacterLabel,
+                    lines: chapterCharacterLines,
+                    actorStatus: event.target.checked ? "収録済み" : "未収録"
+                  })}
+                />
+                <span>
+                  <CheckCircle2 size={17} />
+                  <b>{selectedCharacterLabel ? `${selectedCharacterLabel}の${bulkScopeUnitLabel}すべて収録済み` : `人物を選んで${bulkScopeUnitLabel}収録済み`}</b>
+                  <small>{chapterRecordedCount} / {chapterCharacterLines.length}</small>
+                </span>
+              </label>
+            )}
+            {canEditScript && (
+              <button
+                type="button"
+                className={chapterReviewComplete ? "secondary" : "primary"}
+                disabled={lineUpdateBusy || chapterBulkReviewLines.length === 0}
+                onClick={() => confirmChapterReview({
+                  chapterId: selectedChapter?.chapterId || "",
+                  chapterTitle: bulkScopeTitle,
+                  characterIds: selectedCharacterIds,
+                  characterLabel: selectedCharacterLabel,
+                  total: chapterBulkReviewLines.length,
+                  excludedRetakes: chapterRetakeCount,
+                  reviewStatus: chapterReviewComplete ? "未確認" : "OK"
+                })}
+              >
+                {chapterReviewComplete ? <RotateCcw size={16} /> : <CheckCircle2 size={16} />}
+                {!selectedCharacterLabel
+                  ? `人物を選んで${bulkScopeUnitLabel}確認OK`
+                  : chapterBulkReviewLines.length === 0
+                    ? `${selectedCharacterLabel}は確認OKの対象なし`
+                    : chapterReviewComplete
+                      ? `${selectedCharacterLabel}の${bulkScopeUnitLabel}確認OKを解除`
+                      : `${selectedCharacterLabel}の${bulkScopeUnitLabel}すべて確認OK`}
+                <small>{chapterReviewOkCount} / {chapterBulkReviewLines.length}{chapterRetakeCount ? ` ・ リテイク${chapterRetakeCount}件は対象外` : ""}</small>
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+      <AccentDictionarySearch />
       <div className={`script-board-layout${tocChapter?.scenes.length > 1 ? " has-scene-toc" : ""}`}>
         <ScriptSceneToc scenes={tocChapter?.scenes || []} scopeId={tocScopeId} />
         <div className="script-chapters">
@@ -797,7 +1369,7 @@ function RecordingBoardView({ project, patchLine, removeLine, canEditScript, can
                           patchLine={patchLine}
                           removeLine={removeLine}
                           canEditScript={canEditScript}
-                          canUpdateActorStatus={canUpdateActorStatus}
+                          canUpdateActorStatus={canUpdateActorStatus && (!editableCharacterIds || editableCharacterIds.includes(line.characterId))}
                           lineUpdateBusy={lineUpdateBusy}
                         />
                       ))}
@@ -1662,14 +2234,26 @@ export function RecordingStudio({
   setActive,
   canEditScript = true,
   onUpdateLine = null,
-  onRefresh = null
+  onUpdateLines = null,
+  onRefresh = null,
+  editableCharacterIds = null,
+  studioConcept = null,
+  managedGasSync = false
 }) {
   const episodeProjects = projects.filter((project) => !selectedEpisodeId || project.episodeId === selectedEpisodeId);
   const [internalSelectedProjectId, setInternalSelectedProjectId] = useState(() => episodeProjects[0]?.id || projects[0]?.id || "");
   const selectedProjectId = selectedRecordingProjectId ?? internalSelectedProjectId;
   const selectProjectId = setSelectedRecordingProjectId ?? setInternalSelectedProjectId;
-  const [tab, setTab] = useState("board");
+  const [tab, setTab] = useState(readRecordingStudioTab);
   const [syncState, setSyncState] = useState({ busy: false, message: "", error: false });
+
+  useEffect(() => {
+    saveRecordingStudioTab(tab);
+  }, [tab]);
+
+  useEffect(() => {
+    if (!canEditScript && tab === "script") setTab("board");
+  }, [canEditScript, tab]);
 
   useEffect(() => {
     if (projects.some((item) => item.id === selectedProjectId)) return;
@@ -1689,8 +2273,7 @@ export function RecordingStudio({
     updateProjects((current) =>
       current.map((item) => {
         if (item.id !== projectId) return item;
-        const next = typeof updater === "function" ? updater(item) : { ...item, ...updater };
-        return normalizeRecordingProject({ ...next, updatedAt: new Date().toISOString() });
+        return applyRecordingProjectUpdate(item, updater);
       })
     );
   };
@@ -1719,7 +2302,7 @@ export function RecordingStudio({
       return;
     }
     updateProject(project.id, (current) => patchRecordingLineProgress(current, lineId, timestampedPatch, displayLine));
-    const shouldSync = !displayLine?.derivedFromManualBody && project.sharedAt && Object.keys(permittedPatch).some((key) => COLLABORATIVE_LINE_FIELDS.has(key));
+    const shouldSync = !managedGasSync && project.sharedAt && Object.keys(permittedPatch).some((key) => COLLABORATIVE_LINE_FIELDS.has(key));
     if (!shouldSync || !endpointUrl || !token) return;
     setSyncState({ busy: true, message: "変更を共有しています…", error: false });
     try {
@@ -1729,12 +2312,68 @@ export function RecordingStudio({
         driveFolderUrl,
         projectId: project.id,
         lineId,
+        lineContext: displayLine,
         patch: timestampedPatch
       });
       setSyncState({ busy: false, message: `共有済み ${formatUpdatedAt(result.now)}`, error: false });
     } catch (error) {
       setSyncState({ busy: false, message: `共有できませんでした: ${error.message}`, error: true });
     }
+  };
+
+  const confirmChapterReview = ({ chapterId, chapterTitle, characterIds = [], characterLabel = "", total, excludedRetakes = 0, reviewStatus = "OK" }) => {
+    if (!project || !canEditScript || !characterIds.length || !total) return;
+    const scopeLabel = chapterId ? `「${chapterTitle}」` : "全章";
+    const isClearing = reviewStatus === "未確認";
+    const lineTargetLabel = excludedRetakes ? `リテイクを除く${total}セリフ` : `全${total}セリフ`;
+    const targetLabel = `${characterLabel || "選択した人物"}の${lineTargetLabel}`;
+    const confirmMessage = isClearing
+      ? `${scopeLabel}の${targetLabel}から確認OKを外しますか？`
+      : `${scopeLabel}の${targetLabel}を確認OKにしますか？`;
+    const retakeNotice = excludedRetakes ? `\nリテイク${excludedRetakes}件は変更しません。` : "";
+    if (!confirm(`${confirmMessage}${retakeNotice}\n収録済みの状態や確認メモは変更しません。`)) return;
+    const updatedAt = new Date().toISOString();
+    updateProject(project.id, (current) => chapterId
+      ? patchRecordingChapterReviewStatus(current, chapterId, reviewStatus, updatedAt, characterIds)
+      : patchRecordingCharacterReviewStatus(current, reviewStatus, updatedAt, characterIds));
+    setSyncState({
+      busy: false,
+      message: isClearing
+        ? `${scopeLabel}の${targetLabel}から確認OKを外しました。${excludedRetakes ? ` リテイク${excludedRetakes}件は変更していません。` : ""}`
+        : `${scopeLabel}の${targetLabel}を確認OKにしました。${excludedRetakes ? ` リテイク${excludedRetakes}件は変更していません。` : ""}`,
+      error: false
+    });
+  };
+
+  const confirmChapterRecording = async ({ chapterId, chapterTitle, characterIds = [], characterLabel = "", lines = [], actorStatus = "収録済み" }) => {
+    if (!project || !characterIds.length || !lines.length || !["未収録", "収録済み"].includes(actorStatus)) return;
+    const scopeLabel = chapterId ? `「${chapterTitle}」` : "全章";
+    const targetLines = lines.filter((line) => line.kind !== "direction" && (
+      actorStatus === "未収録"
+        ? line.actorStatus !== "未収録"
+        : line.actorStatus === "未収録"
+    ));
+    if (!targetLines.length) return;
+    const isClearing = actorStatus === "未収録";
+    const actionLabel = isClearing ? "収録済みチェックを外す" : "収録済みにする";
+    const targetLabel = `${characterLabel || "選択した人物"}の${targetLines.length}セリフ`;
+    if (!confirm(`${scopeLabel}の${targetLabel}をまとめて${actionLabel}操作を行いますか？\nセリフ本文や制作側の確認状況は変更しません。`)) return;
+    const updatedAt = new Date().toISOString();
+    if (!canEditScript && onUpdateLines) {
+      setSyncState({ busy: true, message: `${scopeLabel}の${targetLabel}を保存しています…`, error: false });
+      try {
+        await onUpdateLines(project.id, targetLines.map((line) => ({ lineId: line.id, lineContext: line })), actorStatus, updatedAt);
+        setSyncState({ busy: false, message: `${scopeLabel}の${targetLabel}を${actionLabel}にしました。`, error: false });
+      } catch (error) {
+        setSyncState({ busy: false, message: `まとめて保存できませんでした: ${error.message}`, error: true });
+      }
+      return;
+    }
+    if (!canEditScript) return;
+    updateProject(project.id, (current) => chapterId
+      ? patchRecordingChapterActorStatus(current, chapterId, actorStatus, updatedAt, characterIds)
+      : patchRecordingCharacterActorStatus(current, actorStatus, updatedAt, characterIds));
+    setSyncState({ busy: false, message: `${scopeLabel}の${targetLabel}を${actionLabel}にしました。`, error: false });
   };
 
   const addProject = () => {
@@ -2081,7 +2720,7 @@ export function RecordingStudio({
     if (!project || !endpointUrl || !token) return;
     setSyncState({ busy: true, message: "共有データを更新しています…", error: false });
     try {
-      const sharedProject = getShareableRecordingProject(project);
+      const sharedProject = makeGasPublishedProject(project, studioConcept);
       const result = await postToGasEndpoint(endpointUrl, {
         action: "publishRecordingProject",
         token,
@@ -2089,7 +2728,7 @@ export function RecordingStudio({
         project: sharedProject
       });
       const sharedAt = result.now || new Date().toISOString();
-      updateProject(project.id, { ...project, sharedAt });
+      updateProject(project.id, (current) => ({ ...(result.project ? mergeRemoteRecordingProject(current, result.project) : current), sharedAt }));
       setSyncState({ busy: false, message: "声優さん用の共有データを更新しました。", error: false });
     } catch (error) {
       setSyncState({ busy: false, message: `共有できませんでした: ${error.message}`, error: true });
@@ -2128,7 +2767,7 @@ export function RecordingStudio({
   };
 
   useEffect(() => {
-    if (!canEditScript) return undefined;
+    if (!canEditScript || managedGasSync) return undefined;
     if (!project?.sharedAt || !endpointUrl || !token) return undefined;
     const timer = window.setInterval(() => pullProject({ silent: true }), 30000);
     return () => window.clearInterval(timer);
@@ -2211,12 +2850,16 @@ export function RecordingStudio({
       )}
       {tab === "board" && (
         <RecordingBoardView
+          key={project.id}
           project={project}
           patchLine={patchLine}
           removeLine={removeLine}
           canEditScript={canEditScript}
-          canUpdateActorStatus={canEditScript || Boolean(onUpdateLine)}
+          canUpdateActorStatus={canEditScript || Boolean(onUpdateLine) || Boolean(onUpdateLines)}
           lineUpdateBusy={syncState.busy}
+          confirmChapterRecording={confirmChapterRecording}
+          confirmChapterReview={confirmChapterReview}
+          editableCharacterIds={editableCharacterIds}
         />
       )}
       {tab === "script" && canEditScript && (
@@ -2261,6 +2904,11 @@ function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, 
   const isManualBody = isDirection && line.manualBody;
   const [editorOpen, setEditorOpen] = useState(false);
   const characterColor = character?.color || "#5f6d7a";
+  const retakeInstructions = normalizeRetakeInstructions(line.retakeAnnotations, stripRubyNotation(line.text || ""));
+  const isRetake = line.reviewStatus === "リテイク";
+  const recordingChecked = isRetake
+    ? line.actorStatus === "再提出済み"
+    : line.actorStatus !== "未収録";
   return (
     <article
       className={`script-line-card shared${line.isContext ? " context-line" : ""}${isDirection ? " stage-direction-line" : ""}`}
@@ -2275,7 +2923,7 @@ function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, 
           <b><i />{isManualBody ? "本文" : isDirection ? "ト書き" : character?.name || "話者未設定"}</b>
         </div>
         <div className="script-line-copy">
-          <p><RubyText text={line.text} /></p>
+          <p><RetakeMarkedText text={line.text} instructions={retakeInstructions} /></p>
           {line.direction && <small><MessageSquareText size={14} />{line.direction}</small>}
           {line.fileName && <code>{line.fileName}</code>}
         </div>
@@ -2286,6 +2934,7 @@ function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, 
           </div>
         )}
       </div>
+      <RetakeInstructionList text={line.text} instructions={retakeInstructions} />
       {!line.isContext && !isDirection && (
         <>
           <RecordingPlayer url={line.recordingUrl} fileName={line.recordingFileName} />
@@ -2299,11 +2948,17 @@ function SharedLineCard({ project, line, canEdit, draft, setDraft, submitPatch, 
             <div className="shared-line-actions">
               <button
                 type="button"
-                className={line.actorStatus !== "未収録" ? "record-complete active" : "record-complete"}
-                onClick={() => submitPatch(line.id, { actorStatus: line.actorStatus !== "未収録" ? "未収録" : "収録済み" })}
+                className={recordingChecked ? "record-complete active" : "record-complete"}
+                onClick={() => submitPatch(line.id, {
+                  actorStatus: recordingChecked
+                    ? (isRetake ? "収録済み" : "未収録")
+                    : (isRetake ? "再提出済み" : "収録済み")
+                })}
                 disabled={busy}
               >
-                <CheckCircle2 size={18} />{line.actorStatus !== "未収録" ? line.actorStatus : "収録完了にする"}
+                <CheckCircle2 size={18} />{isRetake
+                  ? (recordingChecked ? "再収録済み" : "再収録済みにする")
+                  : (recordingChecked ? line.actorStatus : "収録完了にする")}
               </button>
               <button type="button" className="secondary" onClick={() => setEditorOpen((current) => !current)}>
                 <Upload size={16} />録音を提出
@@ -2624,6 +3279,7 @@ export function SharedRecordingBoard({ logoSrc, reference, appName = "Voice Cast
         setStatusFilter={setStatusFilter}
         allLabel={selectedSceneId ? "シーン全文" : selectedChapterId ? "章の全文" : "全文"}
       />
+      <AccentDictionarySearch />
       <div className={`script-board-layout shared-scenes${tocChapter?.scenes.length > 1 ? " has-scene-toc" : ""}`}>
         <ScriptSceneToc scenes={tocChapter?.scenes || []} scopeId={tocScopeId} />
         <div className="script-chapters">

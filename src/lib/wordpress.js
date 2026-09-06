@@ -56,6 +56,20 @@ const wordpressRequest = async (path, options = {}) => {
       };
     }
     if (path === "line") return { ok: true, line: { ...body.patch, updatedAt: new Date().toISOString() } };
+    if (path === "line/bulk") {
+      const updatedAt = new Date().toISOString();
+      return {
+        ok: true,
+        count: body.updates?.length || 0,
+        lines: (body.updates || []).map((update) => ({
+          ...(update.lineContext || {}),
+          id: update.lineId,
+          actorStatus: body.actorStatus,
+          updatedAt
+        })),
+        updatedAt
+      };
+    }
     if (path === "question") {
       const now = new Date().toISOString();
       return { ok: true, question: { id: `question_preview_${Date.now()}`, lineId: body.lineId || "", characterId: "", authorName: runtime.currentUser.name, wpUserId: runtime.currentUser.id, castMemberId: "", parentQuestionId: body.parentQuestionId || "", body: body.body, answer: "", status: "未回答", createdAt: now, updatedAt: now } };
@@ -69,6 +83,53 @@ const wordpressRequest = async (path, options = {}) => {
     }
     if (path === "audition-automation/create") {
       throw new Error("プレビューではオーディションフォームを作成できません。");
+    }
+    if (path === "audition-automation/verify") {
+      throw new Error("プレビューではオーディションフォームを検査できません。");
+    }
+    if (path === "audition-automation/applicants") {
+      return { ok: true, applicants: [], roleSummaries: [], importedAt: new Date().toISOString() };
+    }
+    if (path === "accent-research") {
+      return {
+        ok: true,
+        result: {
+          query: body.query || "雨",
+          found: true,
+          summary: "複数の公開情報を照合したWeb検索のプレビューです。文脈によってアクセントが分かれる場合があります。",
+          confidence: "medium",
+          candidates: [{
+            label: "一般名詞の例",
+            reading: "アメ",
+            notation: "ア＼メ",
+            accentType: "頭高型（1型）",
+            usage: "標準語の一般的な発音として確認された候補です。"
+          }],
+          sources: [{ title: "アクセント情報の参考資料", url: "https://www.gavo.t.u-tokyo.ac.jp/ojad/" }],
+          note: "固有名詞や作品独自語は、演出側で読み方を決める必要があります。"
+        },
+        searchedAt: new Date().toISOString()
+      };
+    }
+    if (path === "elevenlabs/settings") {
+      const cleared = Boolean(body.clearApiKey);
+      const connected = !cleared && (Boolean(body.apiKey) || options.method !== "POST");
+      return {
+        hasApiKey: connected,
+        connected,
+        tier: connected ? "starter" : "",
+        subscriptionStatus: connected ? "active" : "",
+        creditsUsed: connected ? 4200 : 0,
+        creditLimit: connected ? 30000 : 0,
+        nextResetAt: connected ? new Date(Date.now() + 14 * 86400000).toISOString() : "",
+        toolGenerationCount: connected ? 12 : 0,
+        toolCreditsSpent: connected ? 1200 : 0,
+        connectionWarning: "",
+        updatedAt: new Date().toISOString()
+      };
+    }
+    if (path === "elevenlabs/generate") {
+      throw new Error("プレビューではElevenLabsの音声を生成できません。");
     }
   }
   const shareHeaders = runtime.shareAccess?.accessKey ? {
@@ -108,7 +169,11 @@ const wordpressRequest = async (path, options = {}) => {
     const message = plainMessage.includes("重大なエラー")
       ? "WordPressの保存処理でサーバーエラーが発生しました。ページを再読み込みしてもう一度お試しください。"
       : plainMessage || `WordPressへの接続に失敗しました（${response.status}）。`;
-    throw new Error(message);
+    const requestError = new Error(message);
+    requestError.code = String(payload?.code || "");
+    requestError.data = payload?.data && typeof payload.data === "object" ? payload.data : {};
+    requestError.status = response.status;
+    throw requestError;
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new Error("WordPressから正しい形式の応答を受け取れませんでした。");
@@ -139,6 +204,11 @@ export const updateWordPressRecordingLine = ({ projectId, lineId, patch, lineCon
   body: JSON.stringify({ projectId, lineId, patch, lineContext })
 });
 
+export const updateWordPressRecordingLines = ({ projectId, updates = [], actorStatus, updatedAt = "" }) => wordpressRequest("line/bulk", {
+  method: "POST",
+  body: JSON.stringify({ projectId, updates, actorStatus, updatedAt })
+});
+
 export const createWordPressQuestion = ({ projectId, lineId = "", body, parentQuestionId = "", authorName = "" }) => wordpressRequest("question", {
   method: "POST",
   body: JSON.stringify({ projectId, lineId, body, parentQuestionId, authorName })
@@ -165,7 +235,37 @@ export const saveWordPressAuditionAutomationSettings = (settings) => wordpressRe
   { method: "POST", body: JSON.stringify(settings) }
 );
 
-export const createWordPressAuditionForm = ({ projectId, characterId, replaceImages = false }) => wordpressRequest(
+export const createWordPressAuditionForm = ({ projectId, characterId, step = "form", attempt = 1, feedback = "", auditionDeadline = "" }) => wordpressRequest(
   "audition-automation/create",
-  { method: "POST", body: JSON.stringify({ projectId, characterId, replaceImages }) }
+  { method: "POST", body: JSON.stringify({ projectId, characterId, step, attempt, feedback, auditionDeadline }) }
+);
+
+export const verifyWordPressAuditionForm = ({ projectId, characterId, auditionDeadline = "" }) => wordpressRequest(
+  "audition-automation/verify",
+  { method: "POST", body: JSON.stringify({ projectId, characterId, auditionDeadline }) }
+);
+
+export const listWordPressAuditionApplicants = ({ projectId }) => wordpressRequest(
+  "audition-automation/applicants",
+  { method: "POST", body: JSON.stringify({ projectId }) }
+);
+
+export const researchWordPressAccent = ({ query }) => wordpressRequest(
+  "accent-research",
+  { method: "POST", body: JSON.stringify({ query }) }
+);
+
+export const getWordPressElevenLabsSettings = () => wordpressRequest(
+  "elevenlabs/settings",
+  { method: "GET" }
+);
+
+export const saveWordPressElevenLabsSettings = (settings) => wordpressRequest(
+  "elevenlabs/settings",
+  { method: "POST", body: JSON.stringify(settings) }
+);
+
+export const generateWordPressElevenLabsSound = (options) => wordpressRequest(
+  "elevenlabs/generate",
+  { method: "POST", body: JSON.stringify(options) }
 );

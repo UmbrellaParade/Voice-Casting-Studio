@@ -31,8 +31,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build
+      - name: Test and build WordPress and GAS from the same source
+        run: npm run build:all
+
+      - name: Keep the matching WordPress and GAS backend package
+        uses: actions/upload-artifact@v4
+        with:
+          name: voice-cast-studio-paired-build
+          path: artifacts/paired-build
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

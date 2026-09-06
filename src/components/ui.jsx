@@ -1,5 +1,5 @@
 // 共有UI部品
-import React from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   CalendarDays,
   ChevronDown,
@@ -255,10 +255,87 @@ export function Field({ label, value, onChange = () => {}, type = "text", placeh
         placeholder={placeholder}
         readOnly={readOnly}
         onChange={handleInput}
-        onInput={handleInput}
       />
     </label>
   );
+}
+
+const BUFFERED_TEXT_COMMIT_DELAY_MS = 1500;
+
+export function BufferedTextarea({
+  value,
+  onCommit = () => {},
+  onDraftChange = null,
+  commitDelay = BUFFERED_TEXT_COMMIT_DELAY_MS,
+  onBlur = null,
+  ...props
+}) {
+  const normalizedValue = String(value ?? "");
+  const [draft, setDraft] = useState(normalizedValue);
+  const draftRef = useRef(normalizedValue);
+  const committedValueRef = useRef(normalizedValue);
+  const dirtyRef = useRef(false);
+  const timerRef = useRef(null);
+  const onCommitRef = useRef(onCommit);
+  const onDraftChangeRef = useRef(onDraftChange);
+
+  useEffect(() => {
+    onCommitRef.current = onCommit;
+    onDraftChangeRef.current = onDraftChange;
+  }, [onCommit, onDraftChange]);
+
+  const clearCommitTimer = useCallback(() => {
+    if (timerRef.current === null) return;
+    globalThis.clearTimeout(timerRef.current);
+    timerRef.current = null;
+  }, []);
+
+  const commitDraft = useCallback(() => {
+    clearCommitTimer();
+    const nextValue = draftRef.current;
+    if (!dirtyRef.current || nextValue === committedValueRef.current) {
+      dirtyRef.current = false;
+      return;
+    }
+    committedValueRef.current = nextValue;
+    dirtyRef.current = false;
+    onCommitRef.current(nextValue);
+  }, [clearCommitTimer]);
+
+  useEffect(() => {
+    committedValueRef.current = normalizedValue;
+    if (dirtyRef.current && normalizedValue !== draftRef.current) return;
+    dirtyRef.current = false;
+    draftRef.current = normalizedValue;
+    setDraft((current) => current === normalizedValue ? current : normalizedValue);
+    onDraftChangeRef.current?.(normalizedValue);
+  }, [normalizedValue]);
+
+  useEffect(() => () => {
+    clearCommitTimer();
+    if (!dirtyRef.current || draftRef.current === committedValueRef.current) return;
+    committedValueRef.current = draftRef.current;
+    dirtyRef.current = false;
+    onCommitRef.current(draftRef.current);
+  }, [clearCommitTimer]);
+
+  const handleChange = (event) => {
+    const nextValue = event.target.value;
+    draftRef.current = nextValue;
+    dirtyRef.current = nextValue !== committedValueRef.current;
+    setDraft(nextValue);
+    onDraftChangeRef.current?.(nextValue);
+    clearCommitTimer();
+    if (!dirtyRef.current) return;
+    timerRef.current = globalThis.setTimeout(commitDraft, Math.max(0, Number(commitDelay) || 0));
+  };
+
+  const handleBlur = (event) => {
+    commitDraft();
+    onBlur?.(event);
+  };
+
+  return <textarea {...props} value={draft} onChange={handleChange} onBlur={handleBlur} />;
 }
 
 export function TextArea({ label, value, onChange = () => {}, readOnly = false }) {

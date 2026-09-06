@@ -25,6 +25,7 @@ import { PersistentAudioButton } from "./PersistentAudioPlayer.jsx";
 import { ConceptView } from "./ConceptView.jsx";
 import { ManualView } from "./ManualView.jsx";
 import { Header, SectionTitle } from "./ui.jsx";
+import { AccentDictionarySearch } from "./AccentDictionarySearch.jsx";
 import { getScriptSceneAnchorId, ScriptSceneToc } from "./ScriptSceneToc.jsx";
 
 const MEMBER_NAV = [
@@ -264,6 +265,7 @@ function MemberScript({ project, assignedCharacterIds, onUpdateLine, canUpdateLi
         <input type="checkbox" checked={includeContext} disabled={!characterIds.length} onChange={(event) => setIncludeContext(event.target.checked)} />
         <span><b>前後のセリフも表示</b><small>人物を選ぶと、そのセリフの直前・直後も一緒に表示します。</small></span>
       </label>
+      <AccentDictionarySearch />
       <div className={`script-board-layout${tocChapter?.scenes.length > 1 ? " has-scene-toc" : ""}`}>
         <ScriptSceneToc scenes={tocChapter?.scenes || []} scopeId={tocScopeId} />
         <div className="script-chapters">

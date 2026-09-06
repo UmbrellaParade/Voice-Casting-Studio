@@ -1,40 +1,54 @@
 import { defineConfig } from "vite";
-import { copyFileSync, mkdirSync, rmSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = dirname(fileURLToPath(import.meta.url));
 const wordpressAssetsDir = resolve(repositoryRoot, "wordpress-theme/voice-casting-studio/assets");
 
-const copyWordPressBrandAsset = () => ({
+const wordpressBrandAssets = [
+  "umbrella-parade-logo.png",
+  "umbrella-parade-concept-logo.png",
+  "umbrella-parade-audition-logo.png",
+  "voice-cast-studio-icon-32.png",
+  "voice-cast-studio-icon-180.png",
+  "voice-cast-studio-icon-192.png",
+  "voice-cast-studio-icon-512.png"
+];
+
+const copyWordPressBrandAsset = (outputDir) => ({
   name: "copy-wordpress-brand-asset",
   closeBundle() {
-    rmSync(resolve(wordpressAssetsDir, "index.html"), { force: true });
-    const destinationDir = resolve(wordpressAssetsDir, "assets");
+    rmSync(resolve(outputDir, "index.html"), { force: true });
+    const destinationDir = resolve(outputDir, "assets");
     mkdirSync(destinationDir, { recursive: true });
-    copyFileSync(
-      resolve(repositoryRoot, "public/assets/umbrella-parade-logo.png"),
-      resolve(destinationDir, "umbrella-parade-logo.png")
-    );
-    copyFileSync(
-      resolve(repositoryRoot, "public/assets/umbrella-parade-concept-logo.png"),
-      resolve(destinationDir, "umbrella-parade-concept-logo.png")
-    );
-    copyFileSync(
-      resolve(repositoryRoot, "public/assets/umbrella-parade-audition-logo.png"),
-      resolve(destinationDir, "umbrella-parade-audition-logo.png")
-    );
+    wordpressBrandAssets.forEach((fileName) => {
+      copyFileSync(
+        resolve(repositoryRoot, `public/assets/${fileName}`),
+        resolve(destinationDir, fileName)
+      );
+    });
+    const accentDictionarySource = resolve(repositoryRoot, "public/accent-dictionary");
+    if (existsSync(accentDictionarySource)) {
+      cpSync(
+        accentDictionarySource,
+        resolve(outputDir, "accent-dictionary"),
+        { recursive: true }
+      );
+    }
   }
 });
 
 export default defineConfig(({ mode }) => {
   const wordpress = mode === "wordpress";
+  const outputDir = process.env.VCS_BUILD_OUTPUT ? resolve(repositoryRoot, process.env.VCS_BUILD_OUTPUT) : wordpressAssetsDir;
+  if (wordpress && !outputDir.startsWith(repositoryRoot + (process.platform === "win32" ? "\\" : "/"))) throw new Error("Build output must stay inside the repository.");
   return {
     base: wordpress ? "./" : "/Voice-Casting-Studio/",
     publicDir: wordpress ? false : "public",
-    plugins: wordpress ? [copyWordPressBrandAsset()] : [],
+    plugins: wordpress ? [copyWordPressBrandAsset(outputDir)] : [],
     build: wordpress ? {
-      outDir: wordpressAssetsDir,
+      outDir: outputDir,
       emptyOutDir: true,
       rollupOptions: {
         output: {

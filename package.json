@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "build:wordpress": "vite build --mode wordpress",
+    "build:gas": "vite build --mode gas",
+    "build:all": "node tools/build-both.mjs",
     "preview": "vite preview",
+    "audition:helper": "node tools/audition-finisher/server.mjs",
     "test": "node --test"
   },
   "dependencies": {
@@ -17,6 +20,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "^5.5.0",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "playwright-core": "^1.54.1"
   }
 }
