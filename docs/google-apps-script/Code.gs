@@ -38,6 +38,10 @@ function doPost(e) {
   try {
     const payload = JSON.parse(e.postData.contents);
     const action = payload.action || (payload.response ? "submitResponse" : payload.type === "thumbnail_bundle" ? "saveThumbnails" : "");
+    if (action === "ownerRequest" && typeof vcsHandleOwnerRequest === "function") {
+      requireToken(payload.token);
+      return jsonOutput(vcsHandleOwnerRequest(payload));
+    }
     if (action === "submitResponse") return handleSubmitResponse(payload);
     if (action === "publishForm") {
       requireToken(payload.token);
@@ -57,7 +61,7 @@ function doPost(e) {
     if (action === "resolveRecordingQuestion") return handleRecordingQuestion(payload, true);
     return jsonOutput({ ok: false, error: "未対応のactionです: " + action });
   } catch (error) {
-    return jsonOutput({ ok: false, error: errorMessage(error) });
+    return jsonOutput({ ok: false, error: errorMessage(error), code: error.code || "", data: error.data || null });
   }
 }
 

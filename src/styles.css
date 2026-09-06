@@ -14275,3 +14275,7 @@ textarea {
     display: grid;
   }
 }
+.gas-owner-settings h3 { display: flex; align-items: center; gap: 8px; }
+.gas-owner-settings label { display: flex; flex-direction: column; min-width: 0; gap: 6px; }
+.gas-owner-settings input { width: 100%; min-width: 0; }
+.gas-owner-settings .form-grid { margin: 12px 0; }

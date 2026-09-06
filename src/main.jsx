@@ -44,8 +44,10 @@ import {
   listWordPressAuditionApplicants,
   saveWordPressAuditionAutomationSettings,
   verifyWordPressAuditionForm
-} from "./lib/wordpress.js";
+} from "./lib/services.js";
 import {
+  initializeGasOwnerWorkspace,
+  getGasOwnerConnection,
   getWorkspaceRuntime as getWordPressRuntime,
   loadWorkspace as loadWordPressWorkspace,
   saveWorkspace as saveWordPressWorkspace,
@@ -54,6 +56,7 @@ import {
   createQuestion as createWordPressQuestion,
   resolveQuestion as resolveWordPressQuestion
 } from "./lib/workspace.js";
+import { GasOwnerConnectionPanel } from "./components/GasOwnerSettings.jsx";
 import { useGasProjectSync } from "./components/useGasProjectSync.js";
 
 import {
@@ -286,6 +289,7 @@ import {
   applyRecordingProjectUpdate,
   normalizeRecordingProject,
   patchRecordingLineProgress,
+  mergeRemoteRecordingProject,
   readRecordingShareReference
 } from "./lib/recording.js";
 import {
@@ -308,8 +312,11 @@ const moveArrayItem = (items = [], fromIndex, toIndex) => {
 const TRACK_FIELD_TYPE_LABELS = Object.fromEntries(TRACK_FIELD_TYPE_OPTIONS);
 
 const SHOW_AUDITION_WORKFLOW = false;
+initializeGasOwnerWorkspace(loadData().settings, loadData);
 const WORDPRESS_RUNTIME = getWordPressRuntime();
-const IS_GAS_MEMBER = WORDPRESS_RUNTIME?.mode === "gas";
+const IS_GAS = WORDPRESS_RUNTIME?.mode === "gas";
+const IS_GAS_MEMBER = IS_GAS && !WORDPRESS_RUNTIME?.canManage;
+const STORAGE_PROVIDER = IS_GAS ? "Google Drive" : "WordPress";
 const APP_DISPLAY_NAME = WORDPRESS_RUNTIME?.siteName || (WORDPRESS_RUNTIME ? "Voice Cast Studio" : "Voice Casting Studio");
 const AUDITION_NAV_ITEMS = [
   ["dashboard", "概要", Radio],
@@ -501,7 +508,7 @@ function App() {
   const [storageWarning, setStorageWarning] = useState("");
   const [wordpressState, setWordpressState] = useState(() => ({
     status: WORDPRESS_RUNTIME ? "loading" : "local",
-    message: WORDPRESS_RUNTIME ? `${IS_GAS_MEMBER ? "Google Drive" : "WordPress"}から作品データを読み込んでいます…` : "",
+    message: WORDPRESS_RUNTIME ? `${STORAGE_PROVIDER}から作品データを読み込んでいます…` : "",
     users: [],
     version: 0,
     canEditScript: WORDPRESS_RUNTIME ? Boolean(WORDPRESS_RUNTIME.canEditScript) : true,
@@ -519,6 +526,8 @@ function App() {
   const wordpressLoadedRef = useRef(false);
   const wordpressSaveQueueRef = useRef(Promise.resolve());
   const wordpressSaveRevisionRef = useRef(0);
+  const pendingCloudSaveRef = useRef(null);
+  const cloudDirtyRef = useRef(false);
   const gasSyncState = useGasProjectSync({ data, setData, enabled: !WORDPRESS_RUNTIME && !sharedPayload && !restorePayload });
 
   const setCollapsibleOpen = (key, open) => {
@@ -531,7 +540,7 @@ function App() {
     wordpressLoadedRef.current = true;
     setWordpressState({
       status: "ready",
-      message: result.data ? `${IS_GAS_MEMBER ? "Google Drive" : "WordPress"}と同期しています。` : "新しい制作ワークスペースを準備しました。",
+      message: result.data ? `${STORAGE_PROVIDER}と同期しています。` : "新しい制作ワークスペースを準備しました。",
       users: Array.isArray(result.users) ? result.users : [],
       version: Number(result.version) || 0,
       canEditScript: Boolean(result.canEditScript ?? WORDPRESS_RUNTIME?.canEditScript),
@@ -540,6 +549,7 @@ function App() {
   };
 
   const refreshWordPressData = async () => {
+    if (IS_GAS && cloudDirtyRef.current && !window.confirm("未保存の変更があります。設定からJSONを書き出して保管できます。最新データを読み直しますか？")) return null;
     setWordpressState((current) => ({ ...current, status: "loading", message: "最新状況を読み込んでいます…" }));
     try {
       const result = await loadWordPressWorkspace();
@@ -621,6 +631,7 @@ function App() {
   };
 
   const createAuditionForm = async (projectId, characterId, options = {}) => {
+    if (IS_GAS) await (pendingCloudSaveRef.current?.() || wordpressSaveQueueRef.current);
     const storeProgress = (stepProgress) => {
       if (!stepProgress) return;
       setData((current) => ({
@@ -700,6 +711,7 @@ function App() {
   };
 
   const verifyAuditionForm = async (projectId, characterId, options = {}) => {
+    if (IS_GAS) await (pendingCloudSaveRef.current?.() || wordpressSaveQueueRef.current);
     const result = await verifyWordPressAuditionForm({
       projectId,
       characterId,
@@ -725,6 +737,7 @@ function App() {
   };
 
   const importAuditionApplicants = async (projectId) => {
+    if (IS_GAS) await (pendingCloudSaveRef.current?.() || wordpressSaveQueueRef.current);
     const result = await listWordPressAuditionApplicants({ projectId });
     return {
       ...result,
@@ -783,6 +796,20 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const owner = getGasOwnerConnection();
+    if (!owner) return undefined;
+    const timer = window.setInterval(() => {
+      if (!wordpressLoadedRef.current) return;
+      owner.pollProgress().then((result) => setData((current) => {
+        const projects = new Map((result.projects || []).map((project) => [project.id, project]));
+        const recordingProjects = current.recordingProjects.map((project) => projects.has(project.id) ? mergeRemoteRecordingProject(project, projects.get(project.id)) : project);
+        return JSON.stringify(recordingProjects) === JSON.stringify(current.recordingProjects) ? current : { ...current, recordingProjects };
+      })).catch((error) => setWordpressState((current) => ({ ...current, status: "error", message: error.message })));
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     if (sharedPayload || restorePayload) return;
     saveUiState({ active, selectedEpisodeId, selectedRecordingProjectId, collapsibles: collapsibleState });
   }, [active, selectedEpisodeId, selectedRecordingProjectId, collapsibleState, sharedPayload, restorePayload]);
@@ -830,28 +857,52 @@ function App() {
   useEffect(() => {
     if (!WORDPRESS_RUNTIME?.canManage || !wordpressLoadedRef.current || sharedPayload || restorePayload) return undefined;
     const saveRevision = ++wordpressSaveRevisionRef.current;
-    const timer = window.setTimeout(() => {
-      setWordpressState((current) => ({ ...current, status: "saving", message: "WordPressへ保存しています…" }));
+    cloudDirtyRef.current = true;
+    let started = false;
+    const persist = () => {
+      if (started) return wordpressSaveQueueRef.current;
+      started = true;
+      pendingCloudSaveRef.current = null;
+      setWordpressState((current) => ({ ...current, status: "saving", message: `${STORAGE_PROVIDER}へ保存しています…` }));
       const normalizedData = normalizeWorkspaceForPersistence(data);
       wordpressSaveQueueRef.current = wordpressSaveQueueRef.current
         .catch(() => undefined)
         .then(() => saveWordPressWorkspace(normalizedData))
         .then((result) => {
           if (saveRevision !== wordpressSaveRevisionRef.current) return;
+          cloudDirtyRef.current = false;
           setWordpressState((current) => ({
             ...current,
             status: "ready",
-            message: "WordPressへ保存済み",
+            message: `${STORAGE_PROVIDER}へ保存済み`,
             version: Number(result.version) || current.version
           }));
         })
         .catch((error) => {
           if (saveRevision !== wordpressSaveRevisionRef.current) return;
           setWordpressState((current) => ({ ...current, status: "error", message: error.message }));
+          throw error;
         });
-    }, 850);
-    return () => window.clearTimeout(timer);
+      return wordpressSaveQueueRef.current;
+    };
+    pendingCloudSaveRef.current = persist;
+    const timer = window.setTimeout(() => { persist().catch(() => undefined); }, 850);
+    return () => {
+      window.clearTimeout(timer);
+      if (pendingCloudSaveRef.current === persist) pendingCloudSaveRef.current = null;
+    };
   }, [data, sharedPayload, restorePayload]);
+
+  useEffect(() => {
+    if (!IS_GAS || !WORDPRESS_RUNTIME?.canManage) return undefined;
+    const warnIfUnsaved = (event) => {
+      if (!cloudDirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnIfUnsaved);
+    return () => window.removeEventListener("beforeunload", warnIfUnsaved);
+  }, []);
 
   useEffect(() => {
     const flushPendingSave = () => {
@@ -2064,11 +2115,12 @@ ${socialRows || "-"}
     return <RestoreDataView logoSrc={logoSrc} payload={restorePayload} restoreData={restoreData} appTitle={APP_DISPLAY_NAME} />;
   }
 
-  if (IS_GAS_MEMBER && !wordpressLoadedRef.current) {
+  if (IS_GAS && !wordpressLoadedRef.current) {
     return <main className="app-shell"><Header logoSrc={logoSrc} title={APP_DISPLAY_NAME} />
       <section className="panel" role={wordpressState.status === "error" ? "alert" : "status"}>
         <p>{wordpressState.message}</p>
         {wordpressState.status === "error" && <button className="secondary" onClick={() => refreshWordPressData().catch(() => undefined)}>再読み込み</button>}
+        {wordpressState.status === "error" && WORDPRESS_RUNTIME.canManage && <GasOwnerConnectionPanel settings={loadData().settings} />}
       </section></main>;
   }
 
@@ -2100,9 +2152,10 @@ ${socialRows || "-"}
         <Database size={16} /><span>{gasSyncState.message}</span>
       </div>}
       {WORDPRESS_RUNTIME && (
-        <div className={`wordpress-sync-banner ${wordpressState.status}`} role={wordpressState.status === "error" ? "alert" : "status"}>
+      <div className={`wordpress-sync-banner ${wordpressState.status}`} role={wordpressState.status === "error" ? "alert" : "status"}>
           <Database size={16} />
           <span>{wordpressState.message}</span>
+          {IS_GAS && wordpressState.status === "error" && <button type="button" className="secondary" onClick={() => refreshWordPressData().catch(() => undefined)}><RotateCcw size={16} />最新データを読み直す</button>}
           <small>
             {wordpressState.currentUser?.name || WORDPRESS_RUNTIME.currentUser?.name || "全メンバー共通"}
             {wordpressState.canEditScript ? " / 制作オーナー" : WORDPRESS_RUNTIME.canManage ? " / 制作管理者" : " / 共同メンバー"}
@@ -2160,7 +2213,7 @@ ${socialRows || "-"}
               onRefresh={WORDPRESS_RUNTIME ? refreshWordPressData : null}
               editableCharacterIds={IS_GAS_MEMBER ? WORDPRESS_RUNTIME.editableCharacterIds : null}
               studioConcept={data.studioConcept}
-              managedGasSync={!WORDPRESS_RUNTIME}
+              managedGasSync={!WORDPRESS_RUNTIME || IS_GAS}
             />
           )}
           {PRODUCTION_HUB_KEYS.has(active) && (
@@ -4306,7 +4359,7 @@ function SettingsPanel({
         title="設定/バックアップ"
         subtitle={WORDPRESS_RUNTIME
           ? canEditScript
-            ? "人物色とWordPress上の制作データのバックアップを管理します。"
+            ? `人物色と${STORAGE_PROVIDER}上の制作データのバックアップを管理します。`
             : "制作オーナーと同じ設定内容を確認できます。変更とバックアップは制作オーナー専用です。"
           : "ブラウザ内保存のエクスポート、インポート、主要パスを管理します。"}
       />
@@ -4316,7 +4369,7 @@ function SettingsPanel({
             <Database size={20} />
             <div>
               <h3>共有と保存</h3>
-              <p>作品データと進捗はWordPress、声優さんの録音と音声素材はGoogle Drive、キャラクター画像とサムネイルだけはWordPressメディアで管理します。</p>
+              <p>{IS_GAS ? "制作データはオーナーの非公開Driveファイル、声優さんには共有用データを配信します。APIキーはGAS側で別に保管します。" : "作品データと進捗はWordPress、声優さんの録音と音声素材はGoogle Drive、キャラクター画像とサムネイルだけはWordPressメディアで管理します。"}</p>
             </div>
           </div>
           <div className="sync-status-grid">
@@ -4348,6 +4401,7 @@ function SettingsPanel({
         </div>
         </article>
       )}
+      {canEditScript && (!WORDPRESS_RUNTIME || IS_GAS) && <GasOwnerConnectionPanel settings={settings} />}
       <article className="panel character-color-settings">
         <div className="record-head">
           <div>

@@ -11,7 +11,11 @@ const parseGasResult = async (response) => {
     throw new Error("受信口の応答を読み取れませんでした。Apps Scriptのデプロイ設定（全員がアクセス可）を確認してください。");
   }
   if (!response.ok || !result || result.ok !== true) {
-    throw new Error(result?.error || `受信口がエラーを返しました（HTTP ${response.status}）。`);
+    const error = new Error(result?.error || `受信口がエラーを返しました（HTTP ${response.status}）。`);
+    error.code = result?.code || "";
+    error.data = result?.data || {};
+    error.status = error.data.status || response.status;
+    throw error;
   }
   return result;
 };

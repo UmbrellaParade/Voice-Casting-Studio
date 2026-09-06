@@ -114,7 +114,8 @@ import {
   makeWordPressMemberShareUrl,
   saveWordPressElevenLabsSettings,
   uploadWordPressImage
-} from "../lib/wordpress.js";
+} from "../lib/services.js";
+import { GasAuditionIntegrationSettings } from "./GasOwnerSettings.jsx";
 import {
   finishAuditionFormOnPc,
   getAuditionFinisherStatus,
@@ -1611,7 +1612,7 @@ function ElevenLabsConnectionPanel({ settings, loading, error, onSave, onClear, 
     try {
       await onSave(value);
       setApiKey("");
-      setNotice("このオーナーのElevenLabs APIキーを暗号化して保存しました。");
+      setNotice("このオーナーのElevenLabs APIキーを安全に保存しました。");
     } catch (saveError) {
       setNotice(saveError.message || "APIキーを保存できませんでした。");
     } finally {
@@ -1641,7 +1642,7 @@ function ElevenLabsConnectionPanel({ settings, loading, error, onSave, onClear, 
         <div><em className={connected ? "connected" : "disconnected"}>{loading ? "確認中" : connected ? `${tierLabel} 接続済み` : hasApiKey ? "再確認が必要" : "未接続"}</em><ChevronDown size={18} /></div>
       </summary>
       <div className="elevenlabs-connection-body">
-        <div className="elevenlabs-privacy-note"><ShieldCheck size={18} /><span><b>APIキーはログイン中のオーナーごとに暗号化保存</b><small>声優さんには表示されず、生成した音声もWordPressへ保存しません。</small></span></div>
+        <div className="elevenlabs-privacy-note"><ShieldCheck size={18} /><span><b>APIキーは制作オーナー専用の保存先で管理</b><small>声優さんには表示されず、配布データにも含めません。</small></span></div>
 
         {hasApiKey && (
           <div className="elevenlabs-usage">
@@ -2910,7 +2911,7 @@ function AuditionSocialTemplateSettings({ project, updateProject }) {
   </details>;
 }
 
-function AuditionSocialPostEditor({ character, project, lineCandidates = [], roleProgress = {}, onSave }) {
+function AuditionSocialPostEditor({ character, project, lineCandidates = [], roleProgress = {}, imageFolderUrl = "", onSave }) {
   const initialLines = () => lineCandidates.slice(0, 2).map((candidate) => candidate.text).join("\n");
   const initialRoleSummary = () => roleProgress.auditionRoleSummary || getAuditionRoleDescription(character.name);
   const [draft, setDraft] = useState({
@@ -3180,7 +3181,7 @@ function AuditionSocialPostEditor({ character, project, lineCandidates = [], rol
                   : "Google Driveで正しいSNS画像を開き、共有URLを貼り付けてください。")}
               />
               <div>
-                <a href={AUDITION_IMAGE_FOLDER_URL} target="_blank" rel="noreferrer"><FolderOpen size={14} />画像フォルダー</a>
+                {imageFolderUrl && <a href={imageFolderUrl} target="_blank" rel="noreferrer"><FolderOpen size={14} />画像フォルダー</a>}
                 {socialImageFileId && <a href={socialImageUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} />現在の画像</a>}
               </div>
             </div>
@@ -4459,7 +4460,8 @@ function TasksView({
                   APIキーを保存
                 </button>
               </div>
-              {!automationSettings.appsScriptConfigured && <details className="audition-google-setup">
+              {getWordPressRuntime()?.mode === "gas" && <GasAuditionIntegrationSettings settings={automationSettings} onSave={onSaveAuditionAutomationSettings} busy={auditionAutomation.status === "saving"} />}
+              {getWordPressRuntime()?.mode !== "gas" && !automationSettings.appsScriptConfigured && <details className="audition-google-setup">
                 <summary>初回のGoogle連携設定</summary>
                 <p>設置時に一度だけ使う制作オーナー専用設定です。</p>
                 <div>
@@ -4496,7 +4498,7 @@ function TasksView({
                 <span><FolderOpen size={15} />生成画像はGoogle Driveの専用フォルダーへ自動保存します。PCの保存画面は開きません。</span>
                 <span><CheckCircle2 size={15} />PC仕上げが、アップロード先の復元・ヘッダー設定・応募画面の音声提出欄まで検査します。</span>
                 <span><ShieldCheck size={15} />初回だけ、PC仕上げ用Chromeでフォーム所有者のGoogleアカウントを選びます。次回からログイン状態を引き継ぎます。</span>
-                <a href={AUDITION_IMAGE_FOLDER_URL} target="_blank" rel="noreferrer"><ExternalLink size={15} />生成画像フォルダーを開く</a>
+                {(automationSettings.imageFolderUrl || getWordPressRuntime()?.mode !== "gas") && <a href={automationSettings.imageFolderUrl || AUDITION_IMAGE_FOLDER_URL} target="_blank" rel="noreferrer"><ExternalLink size={15} />生成画像フォルダーを開く</a>}
                 <button type="button" className="text-button" onClick={refreshFinisherStatus}>{finisherStatus.checking ? <LoaderCircle className="spin" size={15} /> : <RotateCcw size={15} />}PC接続を再確認</button>
               </div>
               {(automationMessage || auditionAutomation.message) && <p className={`audition-automation-message${auditionAutomation.status === "error" ? " error" : ""}`} role="status">{automationMessage || auditionAutomation.message}</p>}
@@ -4593,6 +4595,7 @@ function TasksView({
                     project={project}
                     lineCandidates={auditionLineCandidatesByCharacterId.get(character.id) || []}
                     roleProgress={roleProgress}
+                    imageFolderUrl={automationSettings.imageFolderUrl || (getWordPressRuntime()?.mode !== "gas" ? AUDITION_IMAGE_FOLDER_URL : "")}
                     onSave={(patch) => patchAuditionRoleProgress(character.id, patch)}
                   />}
                 </article>
