@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   Link,
   ListTodo,
+  LogIn,
   MessageSquareText,
   Mic2,
   Music,
@@ -2156,10 +2157,15 @@ ${socialRows || "-"}
           <Database size={16} />
           <span>{wordpressState.message}</span>
           {IS_GAS && wordpressState.status === "error" && <button type="button" className="secondary" onClick={() => refreshWordPressData().catch(() => undefined)}><RotateCcw size={16} />最新データを読み直す</button>}
-          <small>
-            {wordpressState.currentUser?.name || WORDPRESS_RUNTIME.currentUser?.name || "全メンバー共通"}
-            {wordpressState.canEditScript ? " / 制作オーナー" : WORDPRESS_RUNTIME.canManage ? " / 制作管理者" : " / 共同メンバー"}
-          </small>
+          <div className="wordpress-sync-account-actions">
+            <small>
+              {wordpressState.currentUser?.name || WORDPRESS_RUNTIME.currentUser?.name || "全メンバー共通"}
+              {wordpressState.canEditScript ? " / 制作オーナー" : WORDPRESS_RUNTIME.canManage ? " / 制作管理者" : " / 共同メンバー"}
+            </small>
+            {WORDPRESS_RUNTIME.mode === "wordpress" && !Number(wordpressState.currentUser?.id || WORDPRESS_RUNTIME.currentUser?.id) && WORDPRESS_RUNTIME.loginUrl && (
+              <a className="wordpress-owner-login" href={WORDPRESS_RUNTIME.loginUrl}><LogIn size={15} />制作オーナーとしてログイン</a>
+            )}
+          </div>
         </div>
       )}
 

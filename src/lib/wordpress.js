@@ -18,6 +18,7 @@ export const getWordPressRuntime = () => {
           id: 0,
           name: previewRole === "manager" ? "Umbrella Parade 制作担当" : previewRole === "director" ? "制作進行担当" : "ヴェル役 声優さん"
         },
+        loginUrl: "",
         logoutUrl: ""
       };
     }

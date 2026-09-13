@@ -160,6 +160,7 @@ function vcs_enqueue_application(): void
         'nonce' => is_user_logged_in() ? wp_create_nonce('wp_rest') : '',
         'publicNonce' => !is_user_logged_in() ? wp_create_nonce('vcs_public_collaboration') : '',
         'siteName' => get_bloginfo('name') ?: 'Voice Cast Studio',
+        'loginUrl' => !is_user_logged_in() ? wp_login_url(home_url('/')) : '',
         'logoutUrl' => is_user_logged_in() ? wp_logout_url(home_url('/')) : '',
         'shareAccess' => !is_user_logged_in() ? [
             'projectId' => sanitize_text_field((string) wp_unslash($_GET['vcs_project'] ?? '')),
