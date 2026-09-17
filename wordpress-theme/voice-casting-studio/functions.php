@@ -241,6 +241,10 @@ function vcs_workspace_recording_urls_are_drive(mixed $value): bool
         return true;
     }
     foreach ($value as $key => $child) {
+        // These values are field clocks, not recording URLs.
+        if ('fieldUpdatedAt' === $key) {
+            continue;
+        }
         if ('recordingUrl' === $key && is_string($child) && !vcs_is_google_drive_url(trim($child))) {
             return false;
         }
@@ -263,7 +267,7 @@ function vcs_write_workspace(array $data): WP_REST_Response|WP_Error
         return new WP_Error('vcs_embedded_audio_rejected', 'Audio must be stored in Google Drive and referenced by URL.', ['status' => 400]);
     }
     if (!vcs_workspace_recording_urls_are_drive($data)) {
-        return new WP_Error('vcs_recording_url_rejected', 'Recording URLs must point to Google Drive.', ['status' => 400]);
+        return new WP_Error('vcs_recording_url_rejected', '録音URLにはGoogle Driveの共有URLを入力してください。制作データはまだ保存されていません。Google Driveへの音声アップロード権限とは別の確認です。', ['status' => 400]);
     }
     $encoded = wp_json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if (!is_string($encoded) || strlen($encoded) > 10 * MB_IN_BYTES) {
@@ -1416,7 +1420,10 @@ function vcs_rest_update_line(WP_REST_Request $request): WP_REST_Response|WP_Err
         : (!empty($is_public_guest)
             ? ['actorStatus']
             : ['actorStatus', 'recordingUrl', 'recordingFileName', 'actorNote']);
-    $controlled_fields = ['actorStatus', 'reviewStatus', 'recordingUrl', 'recordingFileName', 'actorNote', 'directorNote'];
+    if (current_user_can(VCS_SCRIPT_CAPABILITY)) {
+        $allowed[] = 'retakeAnnotations';
+    }
+    $controlled_fields = ['actorStatus', 'reviewStatus', 'recordingUrl', 'recordingFileName', 'actorNote', 'directorNote', 'retakeAnnotations'];
     $requested_controlled_fields = array_values(array_intersect(array_keys($patch), $controlled_fields));
     $forbidden_fields = array_values(array_diff($requested_controlled_fields, $allowed));
     if ($forbidden_fields) {
@@ -1430,10 +1437,15 @@ function vcs_rest_update_line(WP_REST_Request $request): WP_REST_Response|WP_Err
         if (!array_key_exists($key, $patch)) {
             continue;
         }
-        if ('recordingUrl' === $key) {
+        if ('retakeAnnotations' === $key) {
+            if (!is_array($patch[$key])) {
+                return new WP_Error('vcs_retake_annotations_invalid', 'リテイク指示の形式を確認してください。', ['status' => 400]);
+            }
+            $line[$key] = vcs_sanitize_retake_annotations($patch[$key]);
+        } elseif ('recordingUrl' === $key) {
             $url = esc_url_raw((string) $patch[$key]);
             if (!vcs_is_google_drive_url($url)) {
-                return new WP_Error('vcs_drive_url_required', 'Recording URLs must point to Google Drive.', ['status' => 400]);
+                return new WP_Error('vcs_drive_url_required', '録音URLにはGoogle Driveの共有URLを入力してください。変更はまだ保存されていません。', ['status' => 400]);
             }
             $line[$key] = $url;
         } elseif ('actorStatus' === $key) {
@@ -1467,6 +1479,29 @@ function vcs_rest_update_line(WP_REST_Request $request): WP_REST_Response|WP_Err
         return $write;
     }
     return rest_ensure_response(['ok' => true, 'line' => $line, 'derived' => $is_derived]);
+}
+
+function vcs_sanitize_retake_annotations(array $annotations): array
+{
+    $result = [];
+    foreach (array_slice(array_values($annotations), 0, 20) as $index => $annotation) {
+        if (!is_array($annotation)) continue;
+        $item = [
+            'id' => sanitize_text_field((string) ($annotation['id'] ?? 'retake_instruction_' . ($index + 1))),
+            'quote' => sanitize_textarea_field((string) ($annotation['quote'] ?? $annotation['targetText'] ?? '')),
+            'start' => max(-1, (int) ($annotation['start'] ?? -1)),
+            'end' => max(-1, (int) ($annotation['end'] ?? -1)),
+            'category' => sanitize_text_field((string) ($annotation['category'] ?? 'その他')),
+            'instruction' => sanitize_textarea_field((string) ($annotation['instruction'] ?? $annotation['note'] ?? '')),
+            'reading' => sanitize_text_field((string) ($annotation['reading'] ?? '')),
+            'accentType' => isset($annotation['accentType']) ? max(0, (int) $annotation['accentType']) : null,
+            'accentRiseAt' => isset($annotation['accentRiseAt']) ? max(1, (int) $annotation['accentRiseAt']) : null,
+            'createdAt' => sanitize_text_field((string) ($annotation['createdAt'] ?? '')),
+            'updatedAt' => sanitize_text_field((string) ($annotation['updatedAt'] ?? '')),
+        ];
+        if ('' !== $item['quote'] || '' !== $item['instruction'] || '' !== $item['reading']) $result[] = $item;
+    }
+    return $result;
 }
 
 function vcs_rest_update_lines_bulk(WP_REST_Request $request): WP_REST_Response|WP_Error

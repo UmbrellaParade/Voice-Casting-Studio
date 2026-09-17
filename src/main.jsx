@@ -895,7 +895,7 @@ function App() {
   }, [data, sharedPayload, restorePayload]);
 
   useEffect(() => {
-    if (!IS_GAS || !WORDPRESS_RUNTIME?.canManage) return undefined;
+    if (!WORDPRESS_RUNTIME?.canManage) return undefined;
     const warnIfUnsaved = (event) => {
       if (!cloudDirtyRef.current) return;
       event.preventDefault();
@@ -908,6 +908,7 @@ function App() {
   useEffect(() => {
     const flushPendingSave = () => {
       pendingSaveRef.current?.();
+      if (document.visibilityState === "hidden") pendingCloudSaveRef.current?.().catch(() => undefined);
     };
     window.addEventListener("pagehide", flushPendingSave);
     document.addEventListener("visibilitychange", flushPendingSave);

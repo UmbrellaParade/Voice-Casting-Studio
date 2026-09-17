@@ -469,7 +469,7 @@ function RetakeInstructionEditor({ line, patchLine, onClose }) {
       actorStatus: line.actorStatus === "再提出済み" ? "収録済み" : line.actorStatus
     });
     resetDraft();
-    setMessage("リテイク指示を保存しました。声優さんの画面にも同じ内容が表示されます。");
+    setMessage("リテイク指示を追加しました。画面上部が「保存済み」になったら、声優さんにも共有されます。");
   };
 
   return (
